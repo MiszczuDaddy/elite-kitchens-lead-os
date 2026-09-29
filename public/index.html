@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elite Kitchens – WhatsApp Test</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;background:#f4f1ec;color:#222}
+  header{background:#1c1c1c;color:#fff;padding:14px 20px}
+  header b{letter-spacing:.15em}
+  header span{opacity:.7;margin-left:12px}
+  .wrap{display:flex;gap:16px;padding:16px;max-width:1000px;margin:0 auto;flex-wrap:wrap}
+  .side{flex:1 1 260px}.main{flex:2 1 420px}
+  .card{background:#fff;border-radius:8px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px #0002}
+  input,button{font:inherit;padding:9px;border-radius:6px;border:1px solid #bbb}
+  input{width:100%;box-sizing:border-box;margin-bottom:8px}
+  button{background:#1c1c1c;color:#fff;border:0;cursor:pointer}
+  button:disabled{opacity:.5}
+  .conv{padding:8px;border-radius:6px;cursor:pointer}.conv:hover,.conv.sel{background:#eee}
+  .conv small{display:block;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #msgs{height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+  .m{max-width:75%;padding:8px 10px;border-radius:10px;white-space:pre-wrap;word-wrap:break-word}
+  .in{background:#eee;align-self:flex-start}.out{background:#d9f0d0;align-self:flex-end}
+  .meta{font-size:11px;color:#666;margin-top:3px}.err{color:#b00020;font-size:12px;margin-top:3px}
+  .row{display:flex;gap:8px}.row input{margin:0}
+  #banner{display:none;background:#fde7e9;color:#b00020;padding:10px;border-radius:6px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header><b>ELITE KITCHENS</b><span>WhatsApp Test</span></header>
+<div class="wrap">
+  <div class="side">
+    <div class="card">
+      <b>Start conversation</b>
+      <p style="font-size:13px;color:#555">Sends the approved template. Use a <i>different</i> personal/test WhatsApp number.</p>
+      <input id="sphone" placeholder="Test number, e.g. +353851234567">
+      <input id="sname" placeholder="Customer first name">
+      <button id="sbtn">Send template</button>
+    </div>
+    <div class="card"><b>Conversations</b><div id="list"></div></div>
+  </div>
+  <div class="main">
+    <div id="banner"></div>
+    <div class="card">
+      <div id="who"><i>Select or start a conversation</i></div>
+      <hr>
+      <div id="msgs"></div>
+      <div class="row" style="margin-top:10px">
+        <input id="text" placeholder="Type message..." disabled>
+        <button id="send" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let cur = null;
+const $ = (id) => document.getElementById(id);
+const fmt = (d) => new Date(d).toLocaleString('en-IE');
+function banner(t){ const b=$('banner'); b.textContent=t||''; b.style.display=t?'block':'none'; }
+async function api(path, opts){
+  const r = await fetch(path, opts && {...opts, headers:{'Content-Type':'application/json'}, body: JSON.stringify(opts.body)});
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok){ const e=new Error(j.error||('HTTP '+r.status)); e.data=j; throw e; }
+  return j;
+}
+async function loadList(){
+  const list = await api('/api/conversations');
+  $('list').innerHTML='';
+  if(!list.length) $('list').innerHTML='<small>None yet</small>';
+  for(const c of list){
+    const d=document.createElement('div'); d.className='conv'+(c.id===cur?' sel':'');
+    const t=document.createElement('div'); t.textContent=(c.name?c.name+' – ':'')+'+'+c.phone;
+    const s=document.createElement('small'); s.textContent=c.last_body||'';
+    d.append(t,s); d.onclick=()=>open(c.id,c); $('list').append(d);
+  }
+}
+async function open(id, c){
+  cur=id; $('text').disabled=false; $('send').disabled=false;
+  if(c) $('who').innerHTML=''; if(c) $('who').append('Customer: +'+c.phone+(c.name?' ('+c.name+')':''));
+  await loadMsgs(); loadList();
+}
+async function loadMsgs(){
+  if(!cur) return;
+  const ms = await api('/api/conversations/'+cur+'/messages');
+  const box=$('msgs'); const atBottom = box.scrollTop+box.clientHeight >= box.scrollHeight-40;
+  box.innerHTML='';
+  for(const m of ms){
+    const d=document.createElement('div'); d.className='m '+m.direction;
+    const who=document.createElement('b'); who.textContent=m.direction==='in'?'Customer:':'Elite Kitchens:';
+    const body=document.createElement('div'); body.textContent=m.body||'';
+    const meta=document.createElement('div'); meta.className='meta';
+    meta.textContent=fmt(m.created_at)+(m.direction==='out'&&m.status?' · '+m.status:'');
+    d.append(who,body,meta);
+    if(m.error){ const e=document.createElement('div'); e.className='err'; e.textContent=m.error; d.append(e); }
+    box.append(d);
+  }
+  if(atBottom) box.scrollTop=box.scrollHeight;
+}
+$('sbtn').onclick=async()=>{
+  banner(''); $('sbtn').disabled=true;
+  try{
+    const r=await api('/api/start',{method:'POST',body:{phone:$('sphone').value,name:$('sname').value}});
+    await loadList(); const c=(await api('/api/conversations')).find(x=>x.id===r.conversationId); open(r.conversationId,c);
+  }catch(e){ banner('Send failed: '+e.message); loadList(); if(e.data&&e.data.conversationId) open(e.data.conversationId); }
+  $('sbtn').disabled=false;
+};
+$('send').onclick=async()=>{
+  const body=$('text').value.trim(); if(!body||!cur) return;
+  banner(''); $('send').disabled=true;
+  try{ await api('/api/conversations/'+cur+'/send',{method:'POST',body:{body}}); $('text').value=''; }
+  catch(e){ banner('Send failed: '+e.message); }
+  $('send').disabled=false; loadMsgs();
+};
+$('text').addEventListener('keydown',e=>{ if(e.key==='Enter') $('send').click(); });
+loadList().catch(e=>banner(e.message));
+setInterval(()=>{ loadList().catch(()=>{}); loadMsgs().catch(()=>{}); }, 4000);
+</script>
+</body>
+</html>
