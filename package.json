@@ -1,16 +1,10 @@
 {
   "name": "elite-kitchens-lead-os",
-  "version": "0.1.0",
   "private": true,
-  "description": "Elite Kitchens Lead OS - Phase 1: WhatsApp Cloud API proof of concept",
-  "main": "src/server.js",
+  "description": "Elite Kitchens Lead OS - Phase 1 (Firebase): WhatsApp Cloud API proof of concept",
   "scripts": {
-    "start": "node src/server.js",
-    "test": "node --test test/e2e.test.js"
+    "test": "firebase emulators:exec --only firestore --project demo-leados \"npm --prefix functions test\"",
+    "emulate": "firebase emulators:start --project demo-leados"
   },
-  "engines": { "node": ">=20" },
-  "dependencies": {
-    "express": "^4.21.2",
-    "pg": "^8.13.1"
-  }
+  "devDependencies": { "firebase-tools": "^15.32.0" }
 }

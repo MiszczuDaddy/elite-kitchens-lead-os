@@ -1,36 +1,45 @@
-# Elite Kitchens Lead OS: Phase 1 (WhatsApp proof of concept)
+# Elite Kitchens Lead OS: Phase 1 (Firebase, WhatsApp proof of concept)
 
-Proves one thing: our own web app can **send and receive WhatsApp messages via the
-Meta WhatsApp Cloud API**, with no Chatwoot in the loop.
+Proves one thing: our own web app can **send and receive WhatsApp messages via the Meta
+WhatsApp Cloud API**, with no Chatwoot in the loop.
 
-    Customer WhatsApp <-> Meta Cloud API <-> this app (Express + Postgres)
+    Customer WhatsApp <-> Meta Cloud API <-> Cloud Function (webhook) <-> Firestore <-> web UI
 
 Not in scope yet: Lead Ads, Make.com, quotes, appointments, CRM, AI agents, media downloads.
 
-## What's here
-- `src/server.js`: Express server. `GET/POST /webhook` (public, signature-verified), `/healthz`, and a password-protected UI + JSON API.
-- `src/whatsapp.js`: Cloud API calls (text + template), webhook signature check, payload parsing.
-- `src/db.js`, `src/schema.sql`: `contacts`, `conversations`, `messages` (auto-migrates on boot). `messages` already has `message_type` and a `media` JSONB column for Phase 2.
-- `public/index.html`: minimal test UI.
-- `test/e2e.test.js`: integration tests (real Postgres, mocked Meta API).
+## Stack (all Firebase, one project)
+| Piece | Firebase product |
+|---|---|
+| Web UI (`public/`) | Hosting |
+| Staff login | Authentication (Google sign-in) |
+| Messages / contacts | Firestore |
+| Public Meta webhook + send actions | Cloud Functions (2nd gen, `europe-west1`) |
+| Meta credentials | Secret Manager (via `firebase functions:secrets:set`) |
 
-## Behaviour worth knowing
-- **24-hour rule:** free-text replies only work within 24h of the customer's last message. Otherwise use **Start conversation**, which sends the approved template `elite_kitchens_new_lead` with the first name as `{{1}}`.
-- **Dedup:** `messages.whatsapp_message_id` has a unique index; Meta retries are ignored.
-- **Signature check:** every webhook POST must carry a valid `X-Hub-Signature-256` (needs `WHATSAPP_APP_SECRET`), otherwise 401.
-- **Only our number:** webhook events for any other `phone_number_id` are ignored.
-- **Secrets are server-side only** (environment variables). Nothing is sent to the browser.
+`https://<project>.web.app/webhook` is the public webhook URL (a Hosting rewrite to the function).
 
-## Config
-See `.env.example`. Required: `DATABASE_URL`, `ADMIN_PASSWORD`, `WHATSAPP_PHONE_NUMBER_ID`,
-`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`.
+## How it works
+- **Webhook** (`functions/index.js` -> `lib/handlers.js`): GET answers Meta's verify handshake; POST checks the
+  `X-Hub-Signature-256` signature (needs the app secret), ignores events for other phone numbers, and stores messages.
+- **Dedup:** a message's Firestore document id *is* the WhatsApp message id and it is written in a transaction,
+  so Meta retries (even simultaneous ones) can never create a second copy.
+- **Delivery status** (sent/delivered/read/failed) is applied monotonically and survives arriving before our own write.
+- **24-hour rule:** free-text replies only within 24h of the customer's last message; otherwise start with the approved
+  template `elite_kitchens_new_lead` (first name = `{{1}}`).
+- **Security:** the browser can only *read*, and only with the `staff` claim. It cannot write anything. All writes and
+  all WhatsApp calls happen in Cloud Functions. `claimAccess` grants the claim only to verified Google accounts in `ALLOWED_EMAILS`.
+- `maxInstances: 3` caps runaway function cost.
 
-## Run locally
-    npm install
-    cp .env.example .env   # fill in, then export the variables
-    npm start
-    DATABASE_URL=postgres://... npm test   # tests DROP and recreate the three tables. Use a scratch DB!
+## Data model (Firestore)
+    contacts/{phone}
+    conversations/{phone}                  name, lastMessage, lastInboundAt, updatedAt
+    conversations/{phone}/messages/{wamid} direction, type, body, media, status, error, createdAt
 
-## Meta webhook (do NOT change until approved)
-The live Meta webhook currently points at Chatwoot. It is not modified by this repo.
-Cutover steps and rollback notes will be added here before any change is made.
+`type` and `media` are already in place for images / PDFs / video / voice notes in Phase 2.
+
+## Tests
+    npm install && npm --prefix functions install
+    npm test     # starts the Firestore emulator (needs Java) and runs 15 integration tests, incl. security rules
+
+## Meta webhook: NOT changed by this repo
+The live Meta webhook still points at Chatwoot. Cutover and rollback notes will be added here before anything is changed.

@@ -1,0 +1,16 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/webhook", "function": { "functionId": "webhook", "region": "europe-west1" } }
+    ]
+  },
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  "functions": [{ "source": "functions", "codebase": "default", "ignore": ["node_modules", ".git", "test", "*.local"] }],
+  "emulators": {
+    "auth": { "port": 9099 }, "functions": { "port": 5001 },
+    "firestore": { "port": 8085 }, "hosting": { "port": 5000 },
+    "singleProjectMode": true
+  }
+}
