@@ -51,7 +51,11 @@ async function webhookReceive({ rawBody, body, signature }, { db, cfg }) {
 // Sets the "staff" custom claim for allowlisted, email-verified accounts. Firestore rules key off it.
 async function claimAccess(auth, { adminAuth, cfg }) {
   if (!auth) throw new HttpsError('unauthenticated', 'Sign in first.');
-  if (!isAllowedUser(auth, cfg)) throw new HttpsError('permission-denied', 'This Google account is not authorised for Elite Kitchens.');
+  if (!isAllowedUser(auth, cfg)) {
+    // Removed from the allowlist? Revoke any claim they still carry so Firestore rules stop serving them.
+    if (auth.token && auth.token.staff === true) await adminAuth.setCustomUserClaims(auth.uid, { staff: false });
+    throw new HttpsError('permission-denied', 'This Google account is not authorised for Elite Kitchens.');
+  }
   await adminAuth.setCustomUserClaims(auth.uid, { staff: true });
   return { ok: true };
 }
@@ -97,6 +101,34 @@ async function sendReply(auth, data, { db, wa, cfg }) {
   }
 }
 
+const CONTACT_FIELDS = { name: 100, email: 200, location: 100, projectType: 60, budget: 60, source: 60, notes: 5000 };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Whitelist + trim + length-limit. Empty string clears a field (stored as null). Unknown keys are rejected.
+function cleanContactFields(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpsError('invalid-argument', 'Missing fields.');
+  const out = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!(k in CONTACT_FIELDS)) throw new HttpsError('invalid-argument', `Unknown field: ${k}`);
+    if (v != null && typeof v !== 'string') throw new HttpsError('invalid-argument', `${k} must be text.`);
+    const t = String(v || '').trim();
+    if (t.length > CONTACT_FIELDS[k]) throw new HttpsError('invalid-argument', `${k} is too long (max ${CONTACT_FIELDS[k]} characters).`);
+    if (k === 'email' && t && !EMAIL_RE.test(t)) throw new HttpsError('invalid-argument', 'That email address does not look right.');
+    out[k] = t || null;
+  }
+  if (!Object.keys(out).length) throw new HttpsError('invalid-argument', 'Nothing to save.');
+  return out;
+}
+
+async function updateContact(auth, data, { db, cfg }) {
+  assertStaff(auth, cfg);
+  const phone = normalizePhone(data && data.phone);
+  if (!phone) throw new HttpsError('invalid-argument', 'Missing phone.');
+  const fields = cleanContactFields(data.fields);
+  if (!(await store.updateContact(db, phone, fields))) throw new HttpsError('not-found', 'Conversation not found.');
+  return { ok: true };
+}
+
 async function markRead(auth, data, { db, cfg }) {
   assertStaff(auth, cfg);
   const phone = normalizePhone(data && data.phone);
@@ -105,4 +137,4 @@ async function markRead(auth, data, { db, cfg }) {
   return { ok: true };
 }
 
-module.exports = { markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+module.exports = { updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

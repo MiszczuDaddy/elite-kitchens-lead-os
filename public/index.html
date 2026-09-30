@@ -64,6 +64,7 @@
           <div class="who-name" id="t-name"></div>
           <div class="who-phone" id="t-phone"></div>
         </div>
+        <button id="details-btn" class="btn btn-ghost btn-sm head-details" aria-expanded="false" aria-controls="details">Details</button>
       </header>
       <div id="banner" class="banner" role="alert" hidden></div>
       <div id="msgs" class="msgs" aria-live="polite"></div>
@@ -77,6 +78,34 @@
       </form>
     </section>
   </main>
+
+  <aside id="details" class="details-pane" aria-label="Customer details" hidden>
+    <header class="details-head">
+      <h2>Customer</h2>
+      <button id="details-close" class="icon-btn" aria-label="Close details">✕</button>
+    </header>
+    <form id="details-form" class="details-form" autocomplete="off" novalidate>
+      <div class="d-phone"><span class="d-label">Phone</span><span id="d-phone" class="d-phone-val"></span></div>
+      <label>Name<input id="d-name" name="name" maxlength="100"></label>
+      <label>Email<input id="d-email" name="email" type="email" maxlength="200" inputmode="email"></label>
+      <label>Location<input id="d-location" name="location" maxlength="100" placeholder="e.g. Swords"></label>
+      <label>Project
+        <select id="d-projectType" name="projectType">
+          <option value="">—</option><option>Kitchen</option><option>Wardrobes</option><option>Kitchen &amp; wardrobes</option><option>Other</option>
+        </select>
+      </label>
+      <label>Budget<input id="d-budget" name="budget" maxlength="60" placeholder="e.g. €15–20k"></label>
+      <label>Source
+        <select id="d-source" name="source">
+          <option value="">—</option><option>WhatsApp</option><option>Meta Ads</option><option>Website</option><option>Referral</option><option>Other</option>
+        </select>
+      </label>
+      <label>Notes<textarea id="d-notes" name="notes" rows="6" maxlength="5000"></textarea></label>
+      <div class="d-meta" id="d-meta"></div>
+      <div id="d-msg" class="d-msg" role="status"></div>
+      <div class="d-actions"><button id="d-save" class="btn btn-primary" type="submit" disabled>Save</button></div>
+    </form>
+  </aside>
 </div>
 
 <dialog id="new-dlg" class="dlg">

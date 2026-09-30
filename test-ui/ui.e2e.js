@@ -144,6 +144,27 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await page.waitForFunction(() => /Hi Anna/.test(document.getElementById('msgs').innerText));
   assert(!/wardrobes, Brian/.test(await page.locator('#msgs').innerText())); ok("A's thread does not contain B's reply");
 
+  // --- customer details ---
+  assert(await page.locator('#details').isVisible()); ok('customer details panel is open on wide screens');
+  await page.fill('#d-email', 'not-an-email'); await page.fill('#d-location', 'Swords'); await page.selectOption('#d-projectType', 'Kitchen');
+  await page.fill('#d-budget', '€15–20k'); await page.selectOption('#d-source', 'Meta Ads'); await page.fill('#d-notes', 'Wants island');
+  await page.click('#d-save');
+  await page.waitForFunction(() => /does not look right/.test(document.getElementById('d-msg').innerText));
+  ok('an invalid email is rejected with a clear message (nothing saved)');
+  await page.fill('#d-email', 'anna@example.com'); await page.fill('#d-name', 'Anna M. Murphy'); await page.click('#d-save');
+  await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
+  await page.waitForFunction((p) => /Kitchen · Swords/.test(document.querySelector(`.conv[data-phone="${p}"]`).innerText), A);
+  await page.waitForFunction(() => /Anna M\. Murphy/.test(document.getElementById('t-name').innerText));
+  const saved = (await admin.firestore().doc('contacts/' + A).get()).data();
+  assert.deepEqual([saved.name, saved.email, saved.location, saved.projectType, saved.budget, saved.source, saved.notes],
+    ['Anna M. Murphy', 'anna@example.com', 'Swords', 'Kitchen', '€15–20k', 'Meta Ads', 'Wants island']);
+  ok('details save to the customer record; list shows "Kitchen · Swords"; header shows the edited name');
+  await page.fill('#d-notes', 'Wants island and pantry, typing…');
+  await admin.firestore().doc('contacts/' + A).update({ budget: '€99k' });     // someone else edits while I am typing
+  await sleep(700);
+  assert.equal(await page.inputValue('#d-notes'), 'Wants island and pantry, typing…'); ok("a remote change never overwrites text that is being typed");
+  await page.click('#d-save'); await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
+
   // --- TEST H: search ---
   await page.fill('#search', 'anna');
   assert.equal(await page.locator('.conv').count(), 1); assert.equal(await page.locator('.conv').getAttribute('data-phone'), A);
@@ -151,10 +172,12 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert.equal(await page.locator('.conv').count(), 1); assert.equal(await page.locator('.conv').getAttribute('data-phone'), B);
   await page.fill('#search', '+353 85 111');
   assert.equal(await page.locator('.conv').getAttribute('data-phone'), A);
+  await page.fill('#search', 'swords');
+  assert.equal(await page.locator('.conv').count(), 1); assert.equal(await page.locator('.conv').getAttribute('data-phone'), A);
   await page.fill('#search', 'nobody');
   assert.equal(await page.locator('.conv').count(), 0); assert.match(await page.locator('#list-empty').innerText(), /No conversations match/);
   await page.fill('#search', ''); assert.equal(await page.locator('.conv').count(), 2);
-  ok('TEST H: search finds the right customer by name and by phone (local 08x or +353 format)');
+  ok('TEST H: search finds the right customer by name, phone (08x or +353) and location');
 
   // --- 24-hour window ---
   await admin.firestore().doc('conversations/353870000000').set({ phone: '353870000000', name: 'Old Lead', updatedAt: admin.firestore.Timestamp.now(),
@@ -191,8 +214,13 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await mp.waitForSelector('.m');
   assert(await mp.locator('.thread-pane').isVisible()); assert(!(await mp.locator('.list-pane').isVisible()));
   await mp.screenshot({ path: path.join(SHOTS, 'mobile-thread.png') });
+  assert(!(await mp.locator('#details').isVisible()));
+  await mp.click('#details-btn'); await mp.waitForSelector('#details:not([hidden])');
+  assert.equal(await mp.inputValue('#d-location'), 'Swords');
+  await mp.screenshot({ path: path.join(SHOTS, 'mobile-details.png') });
+  await mp.click('#details-close'); assert(!(await mp.locator('#details').isVisible()));
   await mp.click('#back'); assert(await mp.locator('.list-pane').isVisible());
-  ok('mobile: one pane at a time, tap opens the thread, Back returns to the inbox');
+  ok('mobile: one pane at a time; details open as a full-screen drawer; Back returns to the inbox');
 
   // --- TEST I (data layer): rules ---
   const idOf = async (tok) => (await (await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake',

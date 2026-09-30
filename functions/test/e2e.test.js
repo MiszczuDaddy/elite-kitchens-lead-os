@@ -188,6 +188,40 @@ test('markRead sets lastReadAt without reordering the inbox, and is staff-only',
   await rejects(h.markRead(staff, {}, deps()), 'invalid-argument');
 });
 
+test('updateContact saves the customer record, denormalises onto the conversation, validates input', async () => {
+  await post(inbound('wamid.C1', 'Hello', '353851111111'));
+  const conv = db.collection('conversations').doc('353851111111');
+  const beforeUpdated = (await conv.get()).data().updatedAt.toMillis();
+  await h.updateContact(staff, { phone: '+353 85 111 1111', fields: { name: ' Anna Murphy ', email: 'anna@example.com', location: 'Swords',
+    projectType: 'Kitchen', budget: '€15–20k', source: 'Meta Ads', notes: 'Wants island\nand pantry' } }, deps());
+  const c = (await db.collection('contacts').doc('353851111111').get()).data();
+  assert.deepEqual([c.name, c.email, c.location, c.projectType, c.budget, c.source, c.notes],
+    ['Anna Murphy', 'anna@example.com', 'Swords', 'Kitchen', '€15–20k', 'Meta Ads', 'Wants island\nand pantry']);
+  assert.ok(c.updatedAt); assert.ok(c.createdAt); assert.equal(c.phone, '353851111111');
+  const cv = (await conv.get()).data();
+  assert.deepEqual([cv.name, cv.location, cv.projectType], ['Anna Murphy', 'Swords', 'Kitchen']);
+  assert.equal(cv.updatedAt.toMillis(), beforeUpdated);                       // inbox order untouched
+  await post(inbound('wamid.C2', 'again', '353851111111'));                    // WhatsApp profile name must not overwrite the staff-edited name
+  assert.equal((await conv.get()).data().name, 'Anna Murphy');
+  await h.updateContact(staff, { phone: '353851111111', fields: { location: '  ' } }, deps());   // clearing a field
+  assert.equal((await db.collection('contacts').doc('353851111111').get()).data().location, null);
+  assert.equal((await conv.get()).data().name, 'Anna Murphy');                 // untouched fields survive
+  await rejects(h.updateContact(staff, { phone: '353851111111', fields: { email: 'nope' } }, deps()), 'invalid-argument');
+  await rejects(h.updateContact(staff, { phone: '353851111111', fields: { notes: 'x'.repeat(5001) } }, deps()), 'invalid-argument');
+  await rejects(h.updateContact(staff, { phone: '353851111111', fields: { admin: 'yes' } }, deps()), 'invalid-argument');
+  await rejects(h.updateContact(staff, { phone: '353851111111', fields: { name: 42 } }, deps()), 'invalid-argument');
+  await rejects(h.updateContact(staff, { phone: '353851111111', fields: {} }, deps()), 'invalid-argument');
+  await rejects(h.updateContact(staff, { phone: '353800000000', fields: { name: 'x' } }, deps()), 'not-found');
+  await rejects(h.updateContact(null, { phone: '353851111111', fields: { name: 'x' } }, deps()), 'unauthenticated');
+  await rejects(h.updateContact({ uid: 'x', token: { email: 'stranger@gmail.com', email_verified: true, staff: true } }, { phone: '353851111111', fields: { name: 'x' } }, deps()), 'permission-denied');
+});
+
+test('claimAccess revokes a leftover staff claim from someone removed from the allowlist', async () => {
+  const claims = []; const adminAuth = { setCustomUserClaims: async (uid, c) => claims.push([uid, c]) };
+  await rejects(h.claimAccess({ uid: 'gone', token: { email: 'former@staff.com', email_verified: true, staff: true } }, { adminAuth, cfg }), 'permission-denied');
+  assert.deepEqual(claims, [['gone', { staff: false }]]);
+});
+
 test('Firestore rules: staff can read, nobody can write from a browser', async () => {
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: Number(port), rules: fs.readFileSync('../firestore.rules', 'utf8') } });

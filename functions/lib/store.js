@@ -89,9 +89,26 @@ async function markRead(db, phone) {
   return true;
 }
 
+// Staff-editable customer record. contacts/{phone} is the source of truth; name/location/projectType are
+// denormalised onto the conversation so the inbox list and search need no joins.
+async function updateContact(db, phone, fields) {
+  const convRef = db.collection('conversations').doc(phone);
+  const contactRef = db.collection('contacts').doc(phone);
+  return db.runTransaction(async (tx) => {
+    const conv = await tx.get(convRef);
+    if (!conv.exists) return false;
+    const now = FieldValue.serverTimestamp();
+    tx.set(contactRef, { phone, ...fields, updatedAt: now }, { merge: true });
+    const denorm = {};
+    for (const k of ['name', 'location', 'projectType']) if (k in fields) denorm[k] = fields[k];
+    if (Object.keys(denorm).length) tx.set(convRef, denorm, { merge: true });   // does not touch updatedAt: no inbox reorder
+    return true;
+  });
+}
+
 async function getConversation(db, phone) {
   const s = await db.collection('conversations').doc(phone).get();
   return s.exists ? s.data() : null;
 }
 
-module.exports = { markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

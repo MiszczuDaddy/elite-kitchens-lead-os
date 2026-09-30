@@ -21,6 +21,9 @@ const S = {
   markingRead: new Set(),
   unsubList: null,
   unsubMsgs: null,
+  unsubContact: null,
+  contact: null,        // contacts/{phone} of the selected conversation
+  dirty: false,         // unsaved edits in the details form
   listLoaded: false,
 };
 
@@ -142,6 +145,8 @@ auth.onAuthStateChanged(async (user) => {
 function stopListening() {
   if (S.unsubList) { S.unsubList(); S.unsubList = null; }
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
+  if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
+  S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
 }
 
@@ -161,6 +166,7 @@ function matchesQuery(c, q) {
   if (!q) return true;
   if (displayName(c).toLowerCase().includes(q)) return true;
   if (String(c.location || '').toLowerCase().includes(q)) return true;
+  if (String(c.projectType || '').toLowerCase().includes(q)) return true;
   const d = digits(q);
   if (!d) return false;
   return c.id.includes(d) || (d.startsWith('0') && c.id.includes(d.slice(1)));
@@ -195,7 +201,8 @@ function convItem(c) {
   const top = el('div', 'conv-top');
   top.append(el('div', 'conv-name', displayName(c)), el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
-  if (c.name) body.append(el('div', 'conv-sub', formatPhone(c.id) + (c.location ? ' · ' + c.location : '')));
+  const tag = [c.projectType, c.location].filter(Boolean).join(' · ');
+  if (c.name || tag) body.append(el('div', 'conv-sub', tag || formatPhone(c.id)));
   const prev = el('div', 'conv-prev');
   prev.append(el('span', 't', previewOf(c) || ' '));
   if (unread) { const d = el('span', 'dot'); d.title = 'Unread'; prev.append(d); }
@@ -221,6 +228,7 @@ function setView() { $('app').dataset.view = S.selected ? 'thread' : 'list'; }
 function closeConversation(fromHash) {
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   S.selected = null; S.msgs = []; S.pending = [];
+  watchContact(null);
   $('thread').hidden = true; $('thread-empty').hidden = false;
   if (!fromHash && location.hash) history.replaceState(null, '', location.pathname + location.search);
   setView(); renderList();
@@ -236,6 +244,7 @@ function openConversation(id, fromHash) {
   $('thread').hidden = false; $('thread-empty').hidden = true;
   $('msgs').replaceChildren();
   renderThreadHeader(); updateComposer(); setView(); renderList();
+  watchContact(id);
   S.firstRender = true;
   S.unsubMsgs = db.collection('conversations').doc(id).collection('messages').orderBy('createdAt').limitToLast(500).onSnapshot((snap) => {
     S.msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -389,5 +398,73 @@ $('new-form').addEventListener('submit', async (e) => {
   } catch (err) {
     $('n-err').textContent = errText(err);
     $('n-go').disabled = false;
+  }
+});
+
+// ---------- customer details panel ----------
+const DETAIL_FIELDS = ['name', 'email', 'location', 'projectType', 'budget', 'source', 'notes'];
+const detailsEl = () => $('details');
+function detailsPref() { try { return localStorage.getItem('ek.details'); } catch (e) { return null; } }
+function setDetailsPref(v) { try { localStorage.setItem('ek.details', v); } catch (e) { /* private mode */ } }
+function detailsOpen() { return !detailsEl().hidden; }
+
+function setDetailsOpen(open, remember) {
+  detailsEl().hidden = !open || !S.selected;
+  $('app').classList.toggle('has-details', open && !!S.selected);
+  $('details-btn').setAttribute('aria-expanded', String(open && !!S.selected));
+  if (remember) setDetailsPref(open ? 'open' : 'closed');
+  if (open) renderDetails(true);
+}
+$('details-btn').onclick = () => setDetailsOpen(!detailsOpen(), true);
+$('details-close').onclick = () => setDetailsOpen(false, true);
+
+function watchContact(id) {
+  if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
+  S.contact = null; S.dirty = false;
+  if (!id) { setDetailsOpen(false, false); return; }
+  // Wide screens: default open (remembered choice wins). Narrow screens: closed until asked for.
+  const pref = detailsPref();
+  setDetailsOpen(pref ? pref === 'open' && window.innerWidth >= 900 : window.innerWidth >= 1280, false);
+  S.unsubContact = db.collection('contacts').doc(id).onSnapshot((d) => {
+    S.contact = d.exists ? d.data() : {};
+    renderDetails(false);
+  }, () => {});
+}
+
+function renderDetails(force) {
+  if (!S.selected || !detailsOpen()) return;
+  if (S.dirty && !force) return;              // never overwrite what someone is typing
+  const c = S.contact || {}, conv = selectedConv() || {};
+  $('d-phone').textContent = formatPhone(S.selected);
+  for (const k of DETAIL_FIELDS) {
+    const v = k === 'name' ? (c.name != null ? c.name : conv.name) : c[k];
+    $('d-' + k).value = v || '';
+  }
+  // a stored value that is not in the dropdown (e.g. from a future lead import) must still show
+  for (const k of ['projectType', 'source']) {
+    const sel = $('d-' + k), v = sel.value;
+    if (!v && c[k]) { const o = document.createElement('option'); o.textContent = c[k]; sel.append(o); sel.value = c[k]; }
+  }
+  const made = c.createdAt && c.createdAt.toDate ? c.createdAt.toDate().toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : null;
+  const upd = c.updatedAt && c.updatedAt.toDate ? c.updatedAt.toDate().toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : null;
+  $('d-meta').textContent = [made && 'Added ' + made, upd && 'Updated ' + upd].filter(Boolean).join(' · ');
+  S.dirty = false; $('d-save').disabled = true; setDetailMsg('');
+}
+
+function setDetailMsg(text, kind) { const m = $('d-msg'); m.textContent = text || ''; m.className = 'd-msg' + (kind ? ' ' + kind : ''); }
+
+$('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').disabled = false; setDetailMsg(''); });
+$('details-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const phone = S.selected;
+  if (!phone || !S.dirty) return;
+  const fields = {};
+  for (const k of DETAIL_FIELDS) fields[k] = $('d-' + k).value;
+  $('d-save').disabled = true; setDetailMsg('Saving…');
+  try {
+    await call('updateContact')({ phone, fields });
+    if (S.selected === phone) { S.dirty = false; setDetailMsg('Saved', 'ok'); setTimeout(() => { if ($('d-msg').textContent === 'Saved') setDetailMsg(''); }, 2500); }
+  } catch (err) {
+    $('d-save').disabled = false; setDetailMsg(errText(err), 'err');
   }
 });
