@@ -72,7 +72,16 @@
         <span>It's been more than 24 hours since this customer last messaged, so WhatsApp only allows an approved template message.</span>
         <button id="tpl-btn" class="btn btn-primary btn-sm">Send template</button>
       </div>
+      <div id="attach-bar" class="attach-bar" hidden>
+        <div id="attach-thumb" class="attach-thumb"></div>
+        <div class="attach-info"><div id="attach-name" class="attach-name"></div><div id="attach-sub" class="attach-sub"></div></div>
+        <button id="attach-x" type="button" class="icon-btn" aria-label="Remove attachment">✕</button>
+      </div>
       <form id="composer" class="composer" autocomplete="off">
+        <button id="attach-btn" type="button" class="icon-btn attach-btn" aria-label="Attach a photo or file" title="Attach a photo or file">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
+        </button>
+        <input id="file" type="file" hidden accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
         <textarea id="text" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>
         <button id="send" class="btn btn-primary" type="submit">Send</button>
       </form>
@@ -108,6 +117,11 @@
   </aside>
 </div>
 
+<div id="lightbox" class="lightbox" hidden role="dialog" aria-label="Photo viewer">
+  <div class="lb-bar"><button id="lb-dl" class="btn btn-ghost btn-sm lb-btn">Download</button><button id="lb-close" class="icon-btn lb-x" aria-label="Close">✕</button></div>
+  <img id="lb-img" alt="">
+</div>
+
 <dialog id="new-dlg" class="dlg">
   <form id="new-form" autocomplete="off">
     <h2>New conversation</h2>
@@ -127,6 +141,7 @@
 <script src="/__/firebase/10.14.1/firebase-auth-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-firestore-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-functions-compat.js"></script>
+<script src="/__/firebase/10.14.1/firebase-storage-compat.js"></script>
 <script src="/__/firebase/init.js"></script>
 <script src="/app.js"></script>
 </body>

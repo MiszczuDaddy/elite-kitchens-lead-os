@@ -216,7 +216,7 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
     const finalPath = mediaLib.objectPath(phone, wamid, filename);
     await file.move(finalPath);
     await store.storeOutbound(db, phone, { wamid, type: kind, body: shown || `[${kind}]`,
-      media: { mimeType: mime, filename, size, caption: shown || null, storagePath: finalPath, status: 'stored', waMediaId: mediaId } });
+      media: { mimeType: mime, filename: mediaLib.displayName(data.filename) || filename, size, caption: shown || null, storagePath: finalPath, status: 'stored', waMediaId: mediaId } });
     return { ok: true };
   } catch (e) {
     log('error', 'media send failed', { err: e.message, details: e.details });

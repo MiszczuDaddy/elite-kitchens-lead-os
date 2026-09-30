@@ -13,10 +13,11 @@ async function until(fn, msg, t = 15000) { const s = Date.now(); while (Date.now
 let n = 0; const ok = (m) => console.log(`  PASS ${++n}. ${m}`);
 
 // ---- static server: serves public/, plus the Firebase client SDK and init.js the way Hosting would ----
-const cfgJs = `firebase.initializeApp({apiKey:'fake',projectId:'demo-leados',authDomain:'localhost'});
+const cfgJs = `firebase.initializeApp({apiKey:'fake',projectId:'demo-leados',authDomain:'localhost',storageBucket:'demo-leados.firebasestorage.app'});
 firebase.auth().useEmulator('http://127.0.0.1:9099',{disableWarnings:true});
 firebase.firestore().useEmulator('127.0.0.1',8085);
-firebase.app().functions('europe-west1').useEmulator('127.0.0.1',5001);`;
+firebase.app().functions('europe-west1').useEmulator('127.0.0.1',5001);
+firebase.storage().useEmulator('127.0.0.1',9199);`;
 const web = http.createServer((req, res) => {
   const u = req.url.split('?')[0];
   let f;
@@ -31,12 +32,32 @@ const web = http.createServer((req, res) => {
   });
 }).listen(5055);
 
-// ---- mock Meta Graph API ----
+// ---- mock Meta Graph API: messages, media lookup, media bytes, media upload ----
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+const files = {}, failIds = new Set(), uploadsSeen = [];
 const graph = []; let gid = 0;
 const meta = http.createServer((req, res) => {
-  let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => {
-    graph.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(b || '{}') });
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ messages: [{ id: 'wamid.OUT' + ++gid }] }));
+  const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
+    const buf = Buffer.concat(chunks), u = req.url; let m;
+    const json = (o, st = 200) => { res.statusCode = st; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(o)); };
+    if ((m = /^\/files\/(.+)$/.exec(u))) {
+      const f = files[m[1]]; if (!f || failIds.has(m[1])) { res.statusCode = 404; return res.end('gone'); }
+      res.setHeader('content-type', f.mime); return res.end(f.bytes);
+    }
+    if (req.method === 'POST' && /\/111\/media$/.test(u)) {
+      const fn = /filename="([^"]+)"/.exec(buf.toString('latin1'));
+      uploadsSeen.push({ name: fn && fn[1], size: buf.length, auth: req.headers.authorization }); return json({ id: 'UPMEDIA' + uploadsSeen.length });
+    }
+    if (req.method === 'POST' && /\/111\/messages$/.test(u)) {
+      graph.push({ url: u, auth: req.headers.authorization, body: JSON.parse(buf.toString() || '{}') }); return json({ messages: [{ id: 'wamid.OUT' + ++gid }] });
+    }
+    if (req.method === 'GET' && (m = /^\/v21\.0\/([^/?]+)$/.exec(u))) {
+      const id = decodeURIComponent(m[1]), f = files[id];
+      if (!f || failIds.has(id)) return json({ error: { code: 100, message: 'Media not found' } }, 404);
+      return json({ url: 'http://127.0.0.1:9911/files/' + id, mime_type: f.mime, sha256: 'x', file_size: f.bytes.length });
+    }
+    json({ error: { message: 'unexpected ' + req.method + ' ' + u } }, 404);
   });
 }).listen(9911);
 
@@ -48,9 +69,9 @@ async function hook(payload) {
   assert.equal(r.status, 200, 'webhook status ' + r.status);
 }
 let wm = 0;
-const inbound = (from, name, extra) => hook({ entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '111' },
+const inbound = (from, name, extra, fixedId) => hook({ entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '111' },
   contacts: [{ wa_id: from, profile: { name } }],
-  messages: [{ id: 'wamid.IN' + ++wm, from, timestamp: String(Math.floor(Date.now() / 1000)), ...extra }] } }] }] });
+  messages: [{ id: fixedId || 'wamid.IN' + ++wm, from, timestamp: String(Math.floor(Date.now() / 1000)), ...extra }] } }] }] });
 const text = (from, name, body) => inbound(from, name, { type: 'text', text: { body } });
 const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '111' }, statuses: [{ id: wamid, status: st, recipient_id: to }] } }] }] });
 
@@ -127,14 +148,15 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert(!(await conv(A).evaluate((e) => e.classList.contains('unread')))); ok('a message arriving in the open conversation is marked read automatically');
 
   // image from B shows as a photo
-  await inbound(B, 'Brian Byrne', { type: 'image', image: { id: 'MEDIA9', mime_type: 'image/jpeg', caption: 'my kitchen now' } });
+  files.MEDIA9 = { mime: 'image/png', bytes: PNG };
+  await inbound(B, 'Brian Byrne', { type: 'image', image: { id: 'MEDIA9', mime_type: 'image/png', caption: 'my kitchen now' } });
   await page.waitForFunction((p) => /Photo|my kitchen now/.test(document.querySelector(`.conv[data-phone="${p}"]`).innerText), B);
-  ok('image message shows in the list as a photo/caption');
+  ok('image message shows in the list with a photo icon and its caption');
 
   await conv(B).click();
   await page.waitForFunction(() => /my kitchen now/.test(document.getElementById('msgs').innerText));
-  assert.equal(await page.locator('.media-chip').count(), 1);
-  assert(!/Anna|next week/.test(await page.locator('#msgs').innerText())); ok("opening B shows only B's messages, image as a chip");
+  await page.waitForFunction(() => { const i = document.querySelector('.m.in .media-img'); return i && i.complete && i.naturalWidth > 0; });
+  assert(!/Anna|next week/.test(await page.locator('#msgs').innerText())); ok("opening B shows only B's messages, with the photo actually displayed");
   await page.fill('#text', 'Yes we do wardrobes, Brian.'); await page.press('#text', 'Enter');
   await until(() => graph.length === 2, 'reply to B reaches the Meta API');
   await page.waitForFunction(() => document.querySelectorAll('.m.out').length === 1 && !/Sending/.test(document.getElementById('msgs').innerText));
@@ -165,6 +187,108 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert.equal(await page.inputValue('#d-notes'), 'Wants island and pantry, typing…'); ok("a remote change never overwrites text that is being typed");
   await page.click('#d-save'); await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
 
+  // ================= MEDIA =================
+  const inA = () => page.locator('#msgs');
+  const loaded = (sel, n) => page.waitForFunction(([s, k]) => { const xs = [...document.querySelectorAll(s)]; return xs.length >= k && xs.every((i) => i.complete && i.naturalWidth > 0); }, [sel, n]);
+  files.IMGA = { mime: 'image/png', bytes: PNG };
+  await inbound(A, 'Anna M. Murphy', { type: 'image', image: { id: 'IMGA', mime_type: 'image/png', caption: 'The kitchen today' } }, 'wamid.IMGA');
+  await loaded('.m.in .media-img', 1);
+  assert.match(await inA().innerText(), /The kitchen today/);
+  await page.waitForFunction((p) => /📷 The kitchen today/.test(document.querySelector(`.conv[data-phone="${p}"]`).innerText), A);
+  ok('TEST E: an incoming photo is downloaded, stored, and displayed in the conversation with its caption');
+  await inbound(A, 'Anna M. Murphy', { type: 'image', image: { id: 'IMGA', mime_type: 'image/png', caption: 'The kitchen today' } }, 'wamid.IMGA');   // Meta retries
+  await inbound(A, 'Anna M. Murphy', { type: 'image', image: { id: 'IMGA', mime_type: 'image/png', caption: 'The kitchen today' } }, 'wamid.IMGA');
+  await sleep(500);
+  assert.equal(await page.locator('.m.in .media-img').count(), 1); ok('a duplicate delivery of the same photo shows once');
+  await page.click('.m.in .media-img');
+  await page.waitForSelector('#lightbox:not([hidden])');
+  await page.waitForFunction(() => document.getElementById('lb-img').naturalWidth > 0);
+  await page.keyboard.press('Escape'); assert(!(await page.locator('#lightbox').isVisible())); ok('clicking a photo opens a full-size viewer; Escape closes it');
+
+  files.DOCA = { mime: 'application/pdf', bytes: PDF };
+  await inbound(A, 'Anna M. Murphy', { type: 'document', document: { id: 'DOCA', mime_type: 'application/pdf', filename: 'Plan & measurements.pdf', caption: 'Floor plan' } });
+  await page.waitForSelector('.m.in .doc-card');
+  assert.match(await page.locator('.doc-card .doc-name').innerText(), /^Plan & measurements\.pdf$/);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('.doc-card .doc-actions .linkbtn')]);
+  assert.equal(dl.suggestedFilename(), 'Plan & measurements.pdf');
+  const dlBytes = fs.readFileSync(await dl.path()); assert(dlBytes.equals(PDF));
+  ok('TEST F: an incoming PDF shows its real filename, and downloading gives back exactly the same file');
+
+  files.AUDA = { mime: 'audio/ogg; codecs=opus', bytes: Buffer.from('OggS-not-real-audio') };
+  await inbound(A, 'Anna M. Murphy', { type: 'audio', audio: { id: 'AUDA', mime_type: 'audio/ogg; codecs=opus', voice: true } });
+  await page.waitForSelector('.m.in audio.media-audio');
+  await page.waitForFunction(() => /^data:audio\/ogg/.test(document.querySelector('audio.media-audio').src));
+  assert.match(await inA().innerText(), /Voice message/);
+  await page.waitForFunction((p) => /🎤 Voice message/.test(document.querySelector(`.conv[data-phone="${p}"]`).innerText), A);
+  files.VIDA = { mime: 'video/mp4', bytes: Buffer.from('fake-mp4-bytes') };
+  await inbound(A, 'Anna M. Murphy', { type: 'video', video: { id: 'VIDA', mime_type: 'video/mp4', caption: 'Pantry' } });
+  await page.waitForFunction(() => { const v = document.querySelector('video.media-video'); return v && /^data:video\/mp4/.test(v.src); });
+  ok('voice notes get an audio player and videos a video player (list shows 🎤 Voice message)');
+
+  await page.evaluate(() => { document.querySelector('audio.media-audio').dataset.mark = 'same-node'; });
+  await text(A, 'Anna M. Murphy', 'One more thing about the worktop');
+  await page.waitForFunction(() => /worktop/.test(document.getElementById('msgs').innerText));
+  assert.equal(await page.evaluate(() => document.querySelector('audio.media-audio') && document.querySelector('audio.media-audio').dataset.mark), 'same-node');
+  ok('a new message arriving does not rebuild media players (a playing voice note is not interrupted)');
+
+  failIds.add('FLAKY'); files.FLAKY = { mime: 'image/png', bytes: PNG };
+  await inbound(A, 'Anna M. Murphy', { type: 'image', image: { id: 'FLAKY', mime_type: 'image/png' } });
+  await page.waitForSelector('.media-status:has-text("couldn\'t be downloaded")');
+  assert(await page.locator('.media-status .linkbtn:has-text("Retry")').isVisible());
+  failIds.delete('FLAKY');
+  await page.click('.media-status .linkbtn:has-text("Retry")');
+  await loaded('.m.in .media-img', 2);
+  assert.equal(await page.locator('.media-status').count(), 0); ok('a photo that failed to download shows a Retry button; retrying fetches and displays it');
+
+  // unread badges with counts, on a conversation that is NOT open
+  await conv(B).waitFor();
+  const badge = () => page.locator(`.conv[data-phone="${B}"] .badge`);
+  await text(B, 'Brian Byrne', 'Hello?'); await badge().waitFor();
+  assert.equal((await badge().innerText()).trim(), '1');
+  await text(B, 'Brian Byrne', 'Anyone there?'); await page.waitForFunction((p) => document.querySelector(`.conv[data-phone="${p}"] .badge`)?.innerText.trim() === '2', B);
+  ok('unread count badge per conversation (1, then 2) for a conversation that is not open');
+
+  // ---- sending attachments ----
+  await page.fill('#text', '');
+  await page.setInputFiles('#file', { name: 'kitchen layout.png', mimeType: 'image/png', buffer: PNG });
+  await page.waitForSelector('#attach-bar:not([hidden])');
+  assert.equal(await page.locator('#attach-name').innerText(), 'kitchen layout.png');
+  await page.fill('#text', 'Here is the layout'); await page.press('#text', 'Enter');
+  await until(() => graph.some((g) => g.body.type === 'image' && g.body.to === A), 'photo reaches the Meta API');
+  const gi = graph.find((g) => g.body.type === 'image' && g.body.to === A).body;
+  assert.equal(uploadsSeen.at(-1).name, 'kitchen layout.png'); assert.equal(uploadsSeen.at(-1).auth, 'Bearer tok');
+  assert.deepEqual([gi.image.id, gi.image.caption], ['UPMEDIA1', 'Here is the layout']);
+  await page.waitForFunction(() => document.querySelectorAll('.m.out .media-img').length === 1 && !/Sending|Uploading/.test(document.getElementById('msgs').innerText));
+  await loaded('.m.out .media-img', 1);
+  assert(!(await page.locator('#attach-bar').isVisible()));
+  const store = admin.storage().bucket('demo-leados.firebasestorage.app');
+  assert.equal((await store.getFiles({ prefix: 'uploads/' }))[0].length, 0);
+  assert.equal((await store.getFiles({ prefix: 'media/' + A + '/wamid.OUT' }))[0].length, 1);
+  ok('TEST: sending a photo with a caption - uploaded, sent via WhatsApp to the right customer, shown in the thread, temp file removed');
+
+  await page.setInputFiles('#file', { name: 'Quote v1.pdf', mimeType: 'application/pdf', buffer: PDF });
+  await page.press('#text', 'Enter');
+  await until(() => graph.some((g) => g.body.type === 'document'), 'PDF reaches the Meta API');
+  assert.equal(graph.find((g) => g.body.type === 'document').body.document.filename, 'Quote v1.pdf');
+  await page.waitForSelector('.m.out .doc-card');
+  assert.equal(await page.locator('.m.out .doc-card .doc-name').innerText(), 'Quote v1.pdf'); ok('sending a PDF works and shows as a document card');
+
+  await page.setInputFiles('#file', { name: 'virus.exe', mimeType: 'application/x-msdownload', buffer: Buffer.from('MZ') });
+  await page.waitForFunction(() => /can't send that file type/.test(document.getElementById('banner').innerText));
+  assert(!(await page.locator('#attach-bar').isVisible()));
+  await page.setInputFiles('#file', { name: 'huge.png', mimeType: 'image/png', buffer: Buffer.alloc(6 * 1024 * 1024) });
+  await page.waitForFunction(() => /too large/.test(document.getElementById('banner').innerText));
+  ok('unsupported file types and oversize photos are refused with a clear message before anything is uploaded');
+
+  // ---- storage is private ----
+  const anyMedia = (await store.getFiles({ prefix: 'media/' + A + '/' }))[0][0].name;
+  const rawUrl = 'http://127.0.0.1:9199/v0/b/demo-leados.firebasestorage.app/o/' + encodeURIComponent(anyMedia) + '?alt=media';
+  assert.equal((await fetch(rawUrl)).status, 403);
+  const staffId = await (async () => (await (await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake',
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: staffToken, returnSecureToken: true }) })).json()).idToken)();
+  assert.equal((await fetch(rawUrl, { headers: { authorization: 'Firebase ' + staffId } })).status, 403);
+  ok('TEST I (files): customer photos cannot be read directly from storage, even by signed-in staff (only via short-lived links)');
+
   // --- TEST H: search ---
   await page.fill('#search', 'anna');
   assert.equal(await page.locator('.conv').count(), 1); assert.equal(await page.locator('.conv').getAttribute('data-phone'), A);
@@ -184,14 +308,14 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
     lastMessage: 'ancient', lastInboundAt: admin.firestore.Timestamp.fromMillis(Date.now() - 30 * 3600e3) });
   await conv('353870000000').waitFor(); await conv('353870000000').click();
   await page.waitForSelector('#window-note:not([hidden])');
-  assert(await page.locator('#text').isDisabled()); ok('after 24h of silence the composer is disabled and a "Send template" prompt is shown');
+  assert(await page.locator('#text').isDisabled()); assert(await page.locator('#attach-btn').isDisabled()); ok('after 24h of silence the composer and attach button are disabled and a "Send template" prompt is shown');
 
   // --- new conversation via template ---
   await page.click('#new-btn');
   await page.fill('#n-phone', '089 464 1917'); await page.fill('#n-name', 'Tomasz'); await page.click('#n-go');
   await page.waitForFunction(() => location.hash === '#c/353894641917');
-  await until(() => graph.length === 3, 'template reaches the Meta API');
-  const t = graph.at(-1).body;
+  await until(() => graph.some((g) => g.body.type === 'template'), 'template reaches the Meta API');
+  const t = graph.find((g) => g.body.type === 'template').body;
   assert.equal(t.to, '353894641917'); assert.equal(t.type, 'template'); assert.equal(t.template.components[0].parameters[0].text, 'Tomasz');
   ok('TEST A: new conversation sends the approved template to the normalised Irish number');
 

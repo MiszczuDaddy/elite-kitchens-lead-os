@@ -276,7 +276,7 @@ test('inbound image is downloaded with the official API into private storage and
   const m = await msgDoc('353851111111', 'wamid.I1');
   assert.equal(m.type, 'image'); assert.equal(m.body, 'my kitchen now');
   assert.equal(m.media.status, 'stored'); assert.equal(m.media.mimeType, 'image/png'); assert.equal(m.media.size, PNG.length);
-  assert.equal(m.media.storagePath, 'media/353851111111/wamid.I1/wamid.I1.png'.replace('wamid.I1.png', m.media.filename));
+  assert.ok(m.media.storagePath.startsWith('media/353851111111/wamid.I1/')); assert.match(m.media.filename, /^file-[A-Za-z0-9]+\.png$/);   // no name from WhatsApp: a safe generated one
   assert.ok(m.media.sha256 && m.media.sha256.length === 64);
   const [bytes] = await bucket.file(m.media.storagePath).download();
   assert.ok(bytes.equals(PNG));
@@ -304,7 +304,8 @@ test('document, voice note, video and sticker are all stored; odd names are made
   await mediaHook('wamid.V1', 'video', { id: 'VID1', mime_type: 'video/mp4' });
   await mediaHook('wamid.S1', 'sticker', { id: 'STK1', mime_type: 'image/webp' });
   const d = await msgDoc('353851111111', 'wamid.D1');
-  assert.equal(d.media.status, 'stored'); assert.match(d.media.filename, /^Plan _ measurements \(v2\)\.pdf$/);
+  assert.equal(d.media.status, 'stored'); assert.equal(d.media.filename, 'Plan & measurements (v2).pdf');        // staff see the customer's own name
+  assert.ok(d.media.storagePath.endsWith('/Plan _ measurements (v2).pdf'));                                      // storage uses a safe one
   assert.ok(!d.media.storagePath.includes('..')); assert.ok(d.media.storagePath.startsWith('media/353851111111/wamid.D1/'));
   assert.equal(d.body, 'Floor plan');
   const a = await msgDoc('353851111111', 'wamid.A1');

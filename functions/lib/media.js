@@ -44,6 +44,12 @@ function classifyForSend(mime, size) {
   throw new HttpsError('invalid-argument', "WhatsApp can't send that file type. Use JPG/PNG images, MP4 video, audio, or PDF/Word/Excel/PowerPoint/text documents.");
 }
 
+// The name staff SEE: the customer's own filename (minus any folder parts / control characters). Storage uses safeName() instead.
+function displayName(name) {
+  const n = String(name || '').split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 150);
+  return n || null;
+}
+
 const objectPath = (phone, msgId, filename) => `media/${phone}/${msgId}/${filename}`;
 
 // Download one inbound media item (by WhatsApp media id) into Storage. Never throws: returns {status, ...}.
@@ -58,7 +64,8 @@ async function downloadInbound({ wa, bucket, phone, msgId, media, timeoutMs = 20
     if (!info.url) return { status: 'failed', error: 'WhatsApp returned no download link (the file may have expired)' };
     if (Number(info.file_size) > MAX_INBOUND) return { status: 'failed', error: 'File is too large to store (over 100 MB)' };
     const mime = baseMime(info.mime_type || media.mimeType || media.mime_type) || 'application/octet-stream';
-    const filename = safeName(media.filename, mime, `file-${String(msgId).replace(/[^A-Za-z0-9]/g, '').slice(-10) || 'x'}`);
+    const filename = safeName(media.filename, mime, `file-${String(msgId).replace(/[^A-Za-z0-9]/g, '').slice(-10) || 'x'}`);   // storage name
+    const shownName = displayName(media.filename) || filename;
     const res = await wa.fetchMedia(info.url, ac.signal);
     const path = objectPath(phone, msgId, filename);
     file = bucket.file(path);
@@ -69,7 +76,7 @@ async function downloadInbound({ wa, bucket, phone, msgId, media, timeoutMs = 20
       cb(null, chunk);
     } });
     await pipeline(Readable.fromWeb(res.body), meter, file.createWriteStream({ resumable: false, contentType: mime, metadata: { cacheControl: 'private, max-age=0' } }), { signal: ac.signal });
-    return { status: 'stored', storagePath: path, size, mimeType: mime, sha256: hash.digest('hex'), filename, error: null };
+    return { status: 'stored', storagePath: path, size, mimeType: mime, sha256: hash.digest('hex'), filename: shownName, error: null };
   } catch (e) {
     if (file) await file.delete({ ignoreNotFound: true }).catch(() => {});   // never leave a partial file behind
     return { status: 'failed', error: ac.signal.aborted ? 'Timed out downloading from WhatsApp' : String(e.message || e).slice(0, 300) };
@@ -91,4 +98,4 @@ async function signedUrl(bucket, path, { filename, mime, download = false, ttlMs
   return url;
 }
 
-module.exports = { safeName, classifyForSend, downloadInbound, signedUrl, objectPath, baseMime, SEND_RULES, MAX_INBOUND };
+module.exports = { displayName, safeName, classifyForSend, downloadInbound, signedUrl, objectPath, baseMime, SEND_RULES, MAX_INBOUND };
