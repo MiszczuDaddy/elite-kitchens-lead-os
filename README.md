@@ -37,7 +37,17 @@ Not in scope yet: Lead Ads, Make.com, quotes, appointments, CRM, AI agents, medi
 
 `type` and `media` are already in place for images / PDFs / video / voice notes in Phase 2.
 
+## Phase 2 (branch `phase-2-inbox`)
+Design and milestones: `docs/PHASE2_DESIGN.md`. Inbox UI = `public/index.html`, `app.css`, `app.js` (no build step).
+Milestone 1 adds the multi-customer inbox (search, unread, thread, reply, new conversation) and one new function, `markRead`.
+The proven webhook is unchanged.
+
 ## Tests
+    npm test          # 17 backend tests against the Firestore emulator (incl. two customers, markRead, rules)
+    npm run test:ui   # 23-check full-stack test: real page in Chromium + real functions + Auth/Firestore emulators
+                      # + mocked Meta API (needs Java and Playwright; set NODE_PATH if Playwright is installed globally)
+
+Older notes:
     npm install && npm --prefix functions install
     npm test     # starts the Firestore emulator (needs Java) and runs 15 integration tests, incl. security rules
 

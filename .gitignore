@@ -7,3 +7,4 @@ node_modules/
 .firebase/
 firebase-debug.log*
 ui-debug.log
+test-ui/shots/

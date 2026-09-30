@@ -2,61 +2,96 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Elite Kitchens – WhatsApp Test</title>
-<style>
-  body{font-family:system-ui,sans-serif;margin:0;background:#f4f1ec;color:#222}
-  header{background:#1c1c1c;color:#fff;padding:14px 20px;display:flex;align-items:center;gap:12px}
-  header b{letter-spacing:.15em}header span{opacity:.7}#user{margin-left:auto;font-size:13px}
-  .wrap{display:flex;gap:16px;padding:16px;max-width:1000px;margin:0 auto;flex-wrap:wrap}
-  .side{flex:1 1 260px}.main{flex:2 1 420px}
-  .card{background:#fff;border-radius:8px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px #0002}
-  input,button{font:inherit;padding:9px;border-radius:6px;border:1px solid #bbb}
-  input{width:100%;box-sizing:border-box;margin-bottom:8px}
-  button{background:#1c1c1c;color:#fff;border:0;cursor:pointer}button:disabled{opacity:.5}
-  .conv{padding:8px;border-radius:6px;cursor:pointer}.conv:hover,.conv.sel{background:#eee}
-  .conv small{display:block;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #msgs{height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
-  .m{max-width:75%;padding:8px 10px;border-radius:10px;white-space:pre-wrap;word-wrap:break-word}
-  .in{background:#eee;align-self:flex-start}.out{background:#d9f0d0;align-self:flex-end}
-  .meta{font-size:11px;color:#666;margin-top:3px}.err{color:#b00020;font-size:12px;margin-top:3px}
-  .row{display:flex;gap:8px}.row input{margin:0}
-  #banner{display:none;background:#fde7e9;color:#b00020;padding:10px;border-radius:6px;margin-bottom:12px}
-  #login{max-width:420px;margin:60px auto;text-align:center}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Inbox · Elite Kitchens</title>
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<header><b>ELITE KITCHENS</b><span>WhatsApp Test</span><div id="user"></div></header>
 
-<div id="login" class="card">
-  <p>Sign in with your Elite Kitchens Google account.</p>
-  <button id="signin">Sign in with Google</button>
-  <div id="loginmsg" class="err"></div>
-</div>
-
-<div class="wrap" id="app" style="display:none">
-  <div class="side">
-    <div class="card">
-      <b>Start conversation</b>
-      <p style="font-size:13px;color:#555">Sends the approved template. Use a <i>different</i> personal/test WhatsApp number.</p>
-      <input id="sphone" placeholder="Test number, e.g. +353851234567">
-      <input id="sname" placeholder="Customer first name">
-      <button id="sbtn">Send template</button>
-    </div>
-    <div class="card"><b>Conversations</b><div id="list"></div></div>
+<section id="login" class="login">
+  <div class="login-card">
+    <div class="brand">ELITE KITCHENS</div>
+    <div class="brand-sub">Lead OS</div>
+    <p>Sign in with your Elite Kitchens Google account.</p>
+    <button id="signin" class="btn btn-primary">Sign in with Google</button>
+    <div id="loginmsg" class="login-msg" role="alert"></div>
+    <button id="login-signout" class="btn btn-link" hidden>Sign out</button>
   </div>
-  <div class="main">
-    <div id="banner"></div>
-    <div class="card">
-      <div id="who"><i>Select or start a conversation</i></div><hr>
-      <div id="msgs"></div>
-      <div class="row" style="margin-top:10px">
-        <input id="text" placeholder="Type message..." disabled>
-        <button id="send" disabled>Send</button>
+</section>
+
+<div id="app" class="app" data-view="list" hidden>
+  <nav class="rail" aria-label="Main">
+    <div class="rail-logo" title="Elite Kitchens">EK</div>
+    <a class="rail-item active" href="#" id="nav-inbox" aria-current="page" title="Inbox">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>
+      <span class="rail-badge" id="rail-badge" hidden>0</span>
+    </a>
+    <div class="rail-spacer"></div>
+    <button id="signout" class="rail-item rail-out" title="Sign out" aria-label="Sign out">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+    </button>
+  </nav>
+
+  <aside class="list-pane" aria-label="Conversations">
+    <header class="pane-head">
+      <h1>Inbox <span class="count" id="total-unread" hidden></span></h1>
+      <div class="head-actions">
+        <button id="new-btn" class="btn btn-primary btn-sm">New conversation</button>
+        <button id="signout-m" class="icon-btn only-mobile" aria-label="Sign out" title="Sign out">⎋</button>
+      </div>
+    </header>
+    <div class="search">
+      <input id="search" type="search" placeholder="Search name or number…" autocomplete="off" aria-label="Search conversations">
+    </div>
+    <div id="list" class="list" role="list"></div>
+    <div id="list-empty" class="empty" hidden></div>
+  </aside>
+
+  <main class="thread-pane" aria-label="Conversation">
+    <div id="thread-empty" class="thread-empty">
+      <div>
+        <div class="brand small">ELITE KITCHENS</div>
+        <p>Select a conversation to read and reply.</p>
       </div>
     </div>
-  </div>
+
+    <section id="thread" class="thread" hidden>
+      <header class="thread-head">
+        <button id="back" class="icon-btn only-mobile" aria-label="Back to inbox">←</button>
+        <div class="avatar" id="t-avatar"></div>
+        <div class="who">
+          <div class="who-name" id="t-name"></div>
+          <div class="who-phone" id="t-phone"></div>
+        </div>
+      </header>
+      <div id="banner" class="banner" role="alert" hidden></div>
+      <div id="msgs" class="msgs" aria-live="polite"></div>
+      <div id="window-note" class="window-note" hidden>
+        <span>It's been more than 24 hours since this customer last messaged, so WhatsApp only allows an approved template message.</span>
+        <button id="tpl-btn" class="btn btn-primary btn-sm">Send template</button>
+      </div>
+      <form id="composer" class="composer" autocomplete="off">
+        <textarea id="text" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>
+        <button id="send" class="btn btn-primary" type="submit">Send</button>
+      </form>
+    </section>
+  </main>
 </div>
+
+<dialog id="new-dlg" class="dlg">
+  <form id="new-form" autocomplete="off">
+    <h2>New conversation</h2>
+    <p class="hint">Sends the approved welcome template. Use the customer's WhatsApp number with country code.</p>
+    <label>WhatsApp number<input id="n-phone" inputmode="tel" placeholder="+353 85 123 4567" required></label>
+    <label>First name<input id="n-name" placeholder="Customer first name" required></label>
+    <div id="n-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="n-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="n-go" class="btn btn-primary">Send template</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Firebase config is served automatically by Firebase Hosting (public identifiers, not secrets). -->
 <script src="/__/firebase/10.14.1/firebase-app-compat.js"></script>
@@ -64,86 +99,6 @@
 <script src="/__/firebase/10.14.1/firebase-firestore-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-functions-compat.js"></script>
 <script src="/__/firebase/init.js"></script>
-<script>
-const $ = (id) => document.getElementById(id);
-const auth = firebase.auth(), fs = firebase.firestore(), fn = firebase.app().functions('europe-west1');
-const call = (name) => fn.httpsCallable(name);
-let cur = null, unsubList = null, unsubMsgs = null;
-const fmt = (ts) => ts && ts.toDate ? ts.toDate().toLocaleString('en-IE') : '';
-function banner(t){ const b=$('banner'); b.textContent=t||''; b.style.display=t?'block':'none'; }
-const errText = (e) => (e && e.message) || String(e);
-
-$('signin').onclick = () => { $('loginmsg').textContent=''; auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e => $('loginmsg').textContent = errText(e)); };
-
-auth.onAuthStateChanged(async (user) => {
-  if (unsubList) { unsubList(); unsubList = null; }
-  if (unsubMsgs) { unsubMsgs(); unsubMsgs = null; }
-  cur = null;
-  if (!user) { $('login').style.display='block'; $('app').style.display='none'; $('user').innerHTML=''; return; }
-  try {
-    await call('claimAccess')();              // server checks the allowlist and sets the staff claim
-    await user.getIdToken(true);              // pick up the new claim
-  } catch (e) {
-    $('loginmsg').textContent = errText(e); $('login').style.display='block'; $('app').style.display='none';
-    $('user').textContent = user.email + ' (not authorised) '; const b=document.createElement('button'); b.textContent='Sign out'; b.onclick=()=>auth.signOut(); $('user').append(b);
-    return;
-  }
-  $('login').style.display='none'; $('app').style.display='flex';
-  $('user').textContent = user.email + ' '; const so=document.createElement('button'); so.textContent='Sign out'; so.onclick=()=>auth.signOut(); $('user').append(so);
-  watchList();
-});
-
-function watchList(){
-  unsubList = fs.collection('conversations').orderBy('updatedAt','desc').onSnapshot((snap) => {
-    $('list').innerHTML = '';
-    if (snap.empty) $('list').innerHTML = '<small>None yet</small>';
-    snap.forEach((d) => {
-      const c = d.data(); const el = document.createElement('div'); el.className = 'conv' + (d.id === cur ? ' sel' : '');
-      const t = document.createElement('div'); t.textContent = (c.name ? c.name + ' – ' : '') + '+' + d.id;
-      const s = document.createElement('small'); s.textContent = c.lastMessage || '';
-      el.append(t, s); el.onclick = () => openConv(d.id, c); $('list').append(el);
-    });
-  }, (e) => banner('Cannot read conversations: ' + errText(e)));
-}
-
-function openConv(phone, c){
-  cur = phone; $('text').disabled = false; $('send').disabled = false;
-  $('who').textContent = 'Customer: +' + phone + (c && c.name ? ' (' + c.name + ')' : '');
-  if (unsubMsgs) unsubMsgs();
-  unsubMsgs = fs.collection('conversations').doc(phone).collection('messages').orderBy('createdAt').onSnapshot((snap) => {
-    const box = $('msgs'); const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
-    box.innerHTML = '';
-    snap.forEach((d) => {
-      const m = d.data(); const el = document.createElement('div'); el.className = 'm ' + m.direction;
-      const who = document.createElement('b'); who.textContent = m.direction === 'in' ? 'Customer:' : 'Elite Kitchens:';
-      const body = document.createElement('div'); body.textContent = m.body || '';
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = fmt(m.createdAt) + (m.direction === 'out' && m.status ? ' · ' + m.status : '');
-      el.append(who, body, meta);
-      if (m.error) { const e = document.createElement('div'); e.className = 'err'; e.textContent = m.error; el.append(e); }
-      box.append(el);
-    });
-    if (atBottom) box.scrollTop = box.scrollHeight;
-  }, (e) => banner('Cannot read messages: ' + errText(e)));
-  document.querySelectorAll('.conv').forEach((n) => n.classList.remove('sel'));
-}
-
-$('sbtn').onclick = async () => {
-  banner(''); $('sbtn').disabled = true;
-  try {
-    const r = await call('startConversation')({ phone: $('sphone').value, name: $('sname').value });
-    openConv(r.data.phone, { name: $('sname').value });
-  } catch (e) { banner('Send failed: ' + errText(e)); }
-  $('sbtn').disabled = false;
-};
-$('send').onclick = async () => {
-  const body = $('text').value.trim(); if (!body || !cur) return;
-  banner(''); $('send').disabled = true;
-  try { await call('sendReply')({ phone: cur, body }); $('text').value = ''; }
-  catch (e) { banner('Send failed: ' + errText(e)); }
-  $('send').disabled = false;
-};
-$('text').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('send').click(); });
-</script>
+<script src="/app.js"></script>
 </body>
 </html>
