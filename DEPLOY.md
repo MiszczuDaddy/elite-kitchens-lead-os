@@ -45,3 +45,12 @@ Deployed from Google Cloud Shell: upload repo ZIP, `npm --prefix functions insta
 - Destroy the placeholder secret versions (version 1 of WHATSAPP_ACCESS_TOKEN / WHATSAPP_APP_SECRET).
 - Deploys currently run from an uploaded ZIP in Cloud Shell. Move to a git clone or CI so the repo is the source of truth.
 - Check any Make.com / Lead Ads flow that relied on Chatwoot.
+
+## Phase 2 deploys (branch `phase-2-inbox`)
+Deploy from Cloud Shell: `cd ~/elite-kitchens-lead-os && git pull && ./scripts/deploy-preview.sh`
+- Stage A (default): storage rules + all functions except the live webhook + preview page. Safe to repeat.
+- Stage B: `./scripts/deploy-preview.sh --with-webhook` ONLY after the owner has approved a webhook change.
+  Saves the live revision to `~/.webhook-previous-revision`; `./scripts/rollback-webhook.sh` restores it in seconds.
+- Cloud Storage bucket: `gs://elite-kitchens-lead-os.firebasestorage.app` (europe-west1). Functions' service account
+  needs `roles/storage.objectAdmin` on the bucket and `roles/iam.serviceAccountTokenCreator` on itself (to sign download
+  links); the script applies both.
