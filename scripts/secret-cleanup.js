@@ -25,6 +25,7 @@ function scan(node, svc) {
     const ver = String(rawVersion || 'latest').split('/').pop();
     (used[name][ver] = used[name][ver] || []).push(svc); references++;
   };
+  if (typeof node.secret === 'string' && node.version != null && (node.key != null || node.projectId != null)) note(node.secret, node.version);   // Cloud Functions shape
   if (node.secretKeyRef && typeof node.secretKeyRef === 'object') note(node.secretKeyRef.name || node.secretKeyRef.secret, node.secretKeyRef.key || node.secretKeyRef.version);
   if (node.secret && typeof node.secret === 'object' && (node.secret.secretName || node.secret.secret)) {          // mounted as a file
     const items = node.secret.items || node.secret.versions || [];
@@ -33,9 +34,14 @@ function scan(node, svc) {
   Object.values(node).forEach((v) => scan(v, svc));
 }
 for (const svc of services) scan(JSON.parse(g('run', 'services', 'describe', svc, '--region', REGION, '--format=json')), svc);
+let fnCount = 0;
+try {   // the authoritative place where Firebase/Cloud Functions records which secret VERSION each function is pinned to
+  const fns = g('functions', 'list', '--v2', '--regions', REGION, '--format=value(name)').split(/\s+/).filter(Boolean).map((n) => n.split('/').pop());
+  for (const fn of fns) { scan(JSON.parse(g('functions', 'describe', fn, '--region', REGION, '--gen2', '--format=json')), 'fn:' + fn); fnCount++; }
+} catch (e) { console.log('(could not read Cloud Functions records: ' + String(e.message).split('\n')[0] + ')'); }
 
-console.log(`Looked at ${services.length} Cloud Run service(s); found ${references} secret reference(s).`);
-if (!services.length || !references) {
+console.log(`Looked at ${services.length} Cloud Run service(s) and ${fnCount} Cloud Function record(s); found ${references} secret reference(s).`);
+if ((!services.length && !fnCount) || !references) {
   console.error('\nREFUSING TO CONTINUE: I could not see which secret versions your functions use, so I cannot prove deleting is safe.');
   console.error('Nothing was changed. (Send this message to whoever is helping you.)');
   process.exit(3);
