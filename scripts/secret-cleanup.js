@@ -12,13 +12,33 @@ const g = (...a) => execFileSync('gcloud', [...a, '--project', PROJECT], { encod
 
 const services = g('run', 'services', 'list', '--region', REGION, '--format=value(name)').split(/\s+/).filter(Boolean);
 const used = Object.fromEntries(SECRETS.map((s) => [s, {}]));           // secret -> { version -> [services] }
-for (const svc of services) {
-  const j = JSON.parse(g('run', 'services', 'describe', svc, '--region', REGION, '--format=json'));
-  const containers = (((j.spec || {}).template || {}).spec || {}).containers || [];
-  for (const e of containers.flatMap((c) => c.env || [])) {
-    const r = e.valueFrom && e.valueFrom.secretKeyRef;
-    if (r && used[r.name]) (used[r.name][String(r.key)] = used[r.name][String(r.key)] || []).push(svc);
+let references = 0;
+
+// Google returns secret references in different shapes depending on API/gcloud version (Knative v1: valueFrom.secretKeyRef{name,key};
+// Cloud Run v2: valueSource.secretKeyRef{secret,version}; or secret volumes). Scan the whole document instead of trusting one path.
+function scan(node, svc) {
+  if (Array.isArray(node)) return node.forEach((n) => scan(n, svc));
+  if (!node || typeof node !== 'object') return;
+  const note = (rawName, rawVersion) => {
+    const name = String(rawName || '').split('/').pop();
+    if (!used[name]) return;
+    const ver = String(rawVersion || 'latest').split('/').pop();
+    (used[name][ver] = used[name][ver] || []).push(svc); references++;
+  };
+  if (node.secretKeyRef && typeof node.secretKeyRef === 'object') note(node.secretKeyRef.name || node.secretKeyRef.secret, node.secretKeyRef.key || node.secretKeyRef.version);
+  if (node.secret && typeof node.secret === 'object' && (node.secret.secretName || node.secret.secret)) {          // mounted as a file
+    const items = node.secret.items || node.secret.versions || [];
+    if (items.length) items.forEach((i) => note(node.secret.secretName || node.secret.secret, i.key || i.version)); else note(node.secret.secretName || node.secret.secret, 'latest');
   }
+  Object.values(node).forEach((v) => scan(v, svc));
+}
+for (const svc of services) scan(JSON.parse(g('run', 'services', 'describe', svc, '--region', REGION, '--format=json')), svc);
+
+console.log(`Looked at ${services.length} Cloud Run service(s); found ${references} secret reference(s).`);
+if (!services.length || !references) {
+  console.error('\nREFUSING TO CONTINUE: I could not see which secret versions your functions use, so I cannot prove deleting is safe.');
+  console.error('Nothing was changed. (Send this message to whoever is helping you.)');
+  process.exit(3);
 }
 
 let stale = false; const toDestroy = [];
