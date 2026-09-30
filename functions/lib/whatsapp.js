@@ -23,7 +23,29 @@ function createClient(cfg, fetchImpl = fetch) {
     if (!id) throw new WhatsAppError('Meta API returned no message id', data);
     return id;
   }
+  const base = () => `${cfg.apiBase || 'https://graph.facebook.com'}/${cfg.version || 'v21.0'}`;
+  const auth = () => ({ Authorization: `Bearer ${cfg.token}` });
+  async function ok(res, what) {
+    if (res.ok) return res;
+    const data = await res.json().catch(() => ({}));
+    const e = data.error || {};
+    throw new WhatsAppError(`${what}: Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data);
+  }
   return {
+    // --- media (official Cloud API): look up a media id, then fetch the bytes with the same bearer token ---
+    getMediaInfo: async (id, signal) => (await ok(await fetchImpl(`${base()}/${encodeURIComponent(id)}`, { headers: auth(), signal }), 'Media lookup')).json(),
+    fetchMedia: async (url, signal) => ok(await fetchImpl(url, { headers: auth(), signal }), 'Media download'),
+    uploadMedia: async (buffer, mime, filename) => {
+      if (!cfg.phoneId || !cfg.token) throw new WhatsAppError('WhatsApp is not configured (phone number id / access token missing).');
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp'); form.append('type', mime);
+      form.append('file', new Blob([buffer], { type: mime }), filename);
+      const data = await (await ok(await fetchImpl(`${base()}/${cfg.phoneId}/media`, { method: 'POST', headers: auth(), body: form }), 'Media upload')).json();
+      if (!data.id) throw new WhatsAppError('Meta returned no media id', data);
+      return data.id;
+    },
+    sendMedia: (to, kind, mediaId, { caption, filename } = {}) => post({ to, type: kind, [kind]: {
+      id: mediaId, ...(caption && kind !== 'audio' ? { caption } : {}), ...(kind === 'document' && filename ? { filename } : {}) } }),
     sendText: (to, body) => post({ to, type: 'text', text: { body, preview_url: false } }),
     sendTemplate: (to, firstName) => post({
       to, type: 'template',
@@ -41,6 +63,31 @@ function verifySignature(rawBody, header, secret) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+const MEDIA_TYPES = ['image', 'document', 'video', 'audio', 'sticker'];
+// Turn any inbound message into { body, media }. Unknown/odd shapes degrade to a "[type]" placeholder, never an exception.
+function describeMessage(m, type) {
+  try {
+    if (type === 'text') return { body: (m.text && m.text.body) || '', media: null };
+    if (MEDIA_TYPES.includes(type) && m[type] && typeof m[type] === 'object') {
+      const o = m[type];
+      return { body: o.caption || `[${type}]`, media: { waMediaId: o.id || null, mimeType: o.mime_type || null, sha256: o.sha256 || null,
+        filename: o.filename || null, caption: o.caption || null, voice: !!o.voice, status: 'pending' } };
+    }
+    if (type === 'location' && m.location) {
+      const l = m.location;
+      return { body: `📍 ${[l.name, l.address].filter(Boolean).join(', ') || 'Location'} https://maps.google.com/?q=${l.latitude},${l.longitude}`, media: null };
+    }
+    if (type === 'contacts' && Array.isArray(m.contacts)) return { body: '👤 Contact: ' + m.contacts.map((c) => (c.name && c.name.formatted_name) || 'unnamed').join(', '), media: null };
+    if (type === 'reaction' && m.reaction) return { body: m.reaction.emoji ? `Reacted ${m.reaction.emoji}` : 'Removed a reaction', media: null };
+    if (type === 'button' && m.button) return { body: m.button.text || '[button]', media: null };
+    if (type === 'interactive' && m.interactive) {
+      const i = m.interactive; const r = i.button_reply || i.list_reply || {};
+      return { body: r.title || '[reply]', media: null };
+    }
+  } catch (e) { /* fall through to placeholder */ }
+  return { body: `[${type}]`, media: null };
+}
+
 // Flatten a webhook payload into { messages, statuses }. Only events for OUR phone number id.
 function parseWebhook(payload, ourPhoneId) {
   const out = { messages: [], statuses: [] };
@@ -53,12 +100,7 @@ function parseWebhook(payload, ourPhoneId) {
       for (const c of v.contacts || []) names[c.wa_id] = c.profile && c.profile.name;
       for (const m of v.messages || []) {
         const type = m.type || 'unknown';
-        let body = null, media = null;
-        if (type === 'text') body = m.text && m.text.body;
-        else if (m[type] && typeof m[type] === 'object') {
-          media = m[type];                         // image/document/video/audio/sticker: keep metadata for Phase 2
-          body = m[type].caption || `[${type}]`;
-        } else body = `[${type}]`;
+        const { body, media } = describeMessage(m, type);
         out.messages.push({ wamid: m.id, from: m.from, name: names[m.from] || null, type, body, media,
           createdAt: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() });
       }

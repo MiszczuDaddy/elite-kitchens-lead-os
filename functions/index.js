@@ -24,10 +24,11 @@ const cfg = () => ({
   phoneId: PHONE_ID.value(), allowedEmails: ALLOWED_EMAILS.value(), template: TEMPLATE.value(), lang: LANG.value(),
   version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), appSecret: APP_SECRET.value().trim(), verifyToken: VERIFY_TOKEN.value().trim(),
 });
-const deps = () => { const c = cfg(); return { db: admin.firestore(), adminAuth: admin.auth(), cfg: c, wa: createClient(c) }; };
+const bucketName = () => process.env.STORAGE_BUCKET || `${process.env.GCLOUD_PROJECT}.firebasestorage.app`;
+const deps = () => { const c = cfg(); return { db: admin.firestore(), adminAuth: admin.auth(), cfg: c, wa: createClient(c), bucket: admin.storage().bucket(bucketName()) }; };
 
 // Public: Meta calls this. Reachable at https://<project>.web.app/webhook via a Hosting rewrite.
-exports.webhook = onRequest({ secrets: SECRETS }, async (req, res) => {
+exports.webhook = onRequest({ secrets: SECRETS, timeoutSeconds: 90, memory: '512MiB' }, async (req, res) => {
   const d = deps();
   if (req.method === 'GET') { const r = h.webhookVerify(req.query, d.cfg); return res.status(r.status).send(r.body); }
   if (req.method !== 'POST') return res.sendStatus(405);
@@ -38,4 +39,7 @@ exports.claimAccess = onCall({ secrets: SECRETS }, (req) => h.claimAccess(req.au
 exports.startConversation = onCall({ secrets: SECRETS }, (req) => h.startConversation(req.auth, req.data, deps()));
 exports.markRead = onCall({ secrets: SECRETS }, (req) => h.markRead(req.auth, req.data, deps()));
 exports.updateContact = onCall({ secrets: SECRETS }, (req) => h.updateContact(req.auth, req.data, deps()));
+exports.mediaUrl = onCall({ secrets: SECRETS }, (req) => h.mediaUrl(req.auth, req.data, deps()));
+exports.retryMedia = onCall({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' }, (req) => h.retryMedia(req.auth, req.data, deps()));
+exports.sendMedia = onCall({ secrets: SECRETS, timeoutSeconds: 120, memory: '1GiB' }, (req) => h.sendMedia(req.auth, req.data, deps()));
 exports.sendReply = onCall({ secrets: SECRETS }, (req) => h.sendReply(req.auth, req.data, deps()));

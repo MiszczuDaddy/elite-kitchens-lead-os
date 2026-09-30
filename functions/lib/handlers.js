@@ -1,6 +1,7 @@
 // Request logic, independent of the Cloud Functions wrappers so it can be tested directly.
 const { HttpsError } = require('firebase-functions/v2/https');
 const store = require('./store');
+const mediaLib = require('./media');
 const { verifySignature, parseWebhook, normalizePhone } = require('./whatsapp');
 
 const WINDOW_MS = 24 * 3600 * 1000;
@@ -26,15 +27,23 @@ function webhookVerify(query, cfg) {
   log('warn', 'webhook verification rejected'); return { status: 403, body: 'Forbidden' };
 }
 
-async function webhookReceive({ rawBody, body, signature }, { db, cfg }) {
+async function webhookReceive({ rawBody, body, signature }, deps) {
+  const { db, cfg } = deps;
   if (!verifySignature(rawBody, signature, cfg.appSecret)) {
     log('warn', 'webhook signature invalid or app secret missing'); return 401;
   }
   try {
     const { messages, statuses } = parseWebhook(body, cfg.phoneId);
     for (const m of messages) {
-      const stored = await store.storeInbound(db, { ...m, from: normalizePhone(m.from) });
+      const phone = normalizePhone(m.from);
+      const stored = await store.storeInbound(db, { ...m, from: phone });
       log('info', stored ? 'inbound stored' : 'inbound duplicate ignored', { wamid: m.wamid, type: m.type });
+      // Media: download now (a Meta retry of a still-missing file tries again). A media failure is recorded on the
+      // message for staff to retry; it must never turn the webhook into a 500 (that would make Meta retry and risk disabling it).
+      if (m.media && deps.bucket) {
+        try { await processMedia(deps, phone, m.wamid, cfg.mediaTimeoutMs || 20000); }
+        catch (e) { log('error', 'media processing failed', { wamid: m.wamid, err: e.message }); }
+      }
     }
     for (const s of statuses) {
       await store.applyStatus(db, { ...s, phone: normalizePhone(s.phone) });
@@ -45,6 +54,17 @@ async function webhookReceive({ rawBody, body, signature }, { db, cfg }) {
     log('error', 'webhook processing failed', { err: e.message });
     return 500;   // Meta retries; dedup makes the retry safe
   }
+}
+
+// Download (or retry) the media of one stored message into Storage and record the result on it.
+async function processMedia({ db, wa, bucket }, phone, msgId, timeoutMs) {
+  const msg = await store.getMessage(db, phone, msgId);
+  if (!msg || !msg.media) return { status: 'none' };
+  if (msg.media.status === 'stored' && msg.media.storagePath) return { status: 'stored' };
+  const r = await mediaLib.downloadInbound({ wa, bucket, phone, msgId, media: msg.media, timeoutMs });
+  await store.setMediaState(db, phone, msgId, r);
+  log(r.status === 'stored' ? 'info' : 'warn', 'media ' + r.status, { wamid: msgId, size: r.size, err: r.error });
+  return r;
 }
 
 // ---- Staff actions (callable) -------------------------------------------------------------
@@ -137,4 +157,73 @@ async function markRead(auth, data, { db, cfg }) {
   return { ok: true };
 }
 
-module.exports = { updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+const ASK = (data) => ({ phone: normalizePhone(data && data.phone), id: String((data && data.id) || '') });
+
+// Short-lived signed link so staff can view/download a stored file. The bucket itself is closed to browsers.
+async function mediaUrl(auth, data, { db, cfg, bucket }) {
+  assertStaff(auth, cfg);
+  const { phone, id } = ASK(data);
+  if (!phone || !id) throw new HttpsError('invalid-argument', 'Missing phone or message id.');
+  const msg = await store.getMessage(db, phone, id);
+  const m = msg && msg.media;
+  if (!m || m.status !== 'stored' || !m.storagePath) throw new HttpsError('not-found', 'That file is not available yet.');
+  const path = m.storagePath;
+  if (!path.startsWith(`media/${phone}/`)) throw new HttpsError('permission-denied', 'Bad file path.');     // defence in depth
+  const url = await mediaLib.signedUrl(bucket, path, { filename: m.filename, mime: m.mimeType, download: !!(data && data.download) });
+  return { url, mimeType: m.mimeType || null, filename: m.filename || null, size: m.size || null };
+}
+
+async function retryMedia(auth, data, deps) {
+  assertStaff(auth, deps.cfg);
+  const { phone, id } = ASK(data);
+  if (!phone || !id) throw new HttpsError('invalid-argument', 'Missing phone or message id.');
+  const msg = await store.getMessage(deps.db, phone, id);
+  if (!msg || !msg.media) throw new HttpsError('not-found', 'Message not found.');
+  const r = await processMedia(deps, phone, id, 90000);
+  return { status: r.status, error: r.error || null };
+}
+
+// Send a file the browser already uploaded to uploads/{uid}/... : validate it, hand it to WhatsApp, keep our own copy.
+async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
+  assertStaff(auth, cfg);
+  const phone = normalizePhone(data && data.phone);
+  const uploadPath = String((data && data.uploadPath) || '');
+  const caption = String((data && data.caption) || '').trim();
+  if (!phone || !uploadPath) throw new HttpsError('invalid-argument', 'Missing phone or file.');
+  if (caption.length > 1024) throw new HttpsError('invalid-argument', 'Caption is too long (max 1024 characters).');
+  if (!uploadPath.startsWith(`uploads/${auth.uid}/`) || uploadPath.includes('..')) throw new HttpsError('permission-denied', 'Bad upload path.');
+  const conv = await store.getConversation(db, phone);
+  if (!conv) throw new HttpsError('not-found', 'Conversation not found.');
+  const file = bucket.file(uploadPath);
+  const cleanup = () => file.delete({ ignoreNotFound: true }).catch(() => {});
+  const lastIn = conv.lastInboundAt && conv.lastInboundAt.toMillis();
+  if (!lastIn || Date.now() - lastIn > WINDOW_MS) {
+    await cleanup();
+    throw new HttpsError('failed-precondition', "Outside WhatsApp's 24-hour window: the customer must message first, or start a new conversation with the template.");
+  }
+  let meta;
+  try { [meta] = await file.getMetadata(); } catch (e) { throw new HttpsError('not-found', 'The uploaded file was not found. Please try again.'); }
+  const mime = mediaLib.baseMime(meta.contentType);
+  const size = Number(meta.size);
+  let kind;
+  try { kind = mediaLib.classifyForSend(mime, size); } catch (e) { await cleanup(); throw e; }
+  const filename = mediaLib.safeName(data.filename || uploadPath.split('/').pop().replace(/^\d+-\w+-/, ''), mime, 'file');
+  const shown = kind === 'audio' ? '' : caption;
+  try {
+    const [buf] = await file.download();
+    const mediaId = await wa.uploadMedia(buf, mime, filename);
+    const wamid = await wa.sendMedia(phone, kind, mediaId, { caption: shown, filename });
+    const finalPath = mediaLib.objectPath(phone, wamid, filename);
+    await file.move(finalPath);
+    await store.storeOutbound(db, phone, { wamid, type: kind, body: shown || `[${kind}]`,
+      media: { mimeType: mime, filename, size, caption: shown || null, storagePath: finalPath, status: 'stored', waMediaId: mediaId } });
+    return { ok: true };
+  } catch (e) {
+    log('error', 'media send failed', { err: e.message, details: e.details });
+    await cleanup();
+    await store.storeFailedOutbound(db, phone, { type: kind, body: shown || `[${kind}]`, error: e.message });
+    throw new HttpsError('unavailable', e.message);
+  }
+}
+
+module.exports = { mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

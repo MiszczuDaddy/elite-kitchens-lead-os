@@ -3,7 +3,7 @@
   "private": true,
   "description": "Elite Kitchens Lead OS - Phase 1 (Firebase): WhatsApp Cloud API proof of concept",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore --project demo-leados \"npm --prefix functions test\"",
+    "test": "firebase emulators:exec --only firestore,storage --project demo-leados \"npm --prefix functions test\"",
     "emulate": "firebase emulators:start --project demo-leados",
     "test:ui": "bash test-ui/run.sh"
   },

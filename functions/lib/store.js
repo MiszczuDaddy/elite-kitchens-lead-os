@@ -25,7 +25,8 @@ async function storeInbound(db, m) {
     tx.set(msgRef, { wamid: m.wamid, direction: 'in', type: m.type, body: m.body, media: m.media || null,
       status: 'received', error: null, createdAt: at });
     const prevIn = conv.exists && conv.data().lastInboundAt;
-    tx.set(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(m.body),
+    tx.set(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(m.body), lastMessageType: m.type, lastMessageDirection: 'in',
+      unreadCount: FieldValue.increment(1),       // a duplicate delivery returned earlier, so retries never double-count
       lastInboundAt: prevIn && prevIn.toMillis() > at.toMillis() ? prevIn : at }, { merge: true });
     return true;
   });
@@ -33,15 +34,15 @@ async function storeInbound(db, m) {
 
 // Record an outbound message that Meta accepted. Handles the race where the delivery status webhook
 // arrives before we get to write the message: keep the (higher) status the webhook already stored.
-async function storeOutbound(db, phone, { wamid, type, body }) {
+async function storeOutbound(db, phone, { wamid, type, body, media }) {
   const convRef = db.collection('conversations').doc(phone);
   const msgRef = convRef.collection('messages').doc(wamid);
   await db.runTransaction(async (tx) => {
     const existing = await tx.get(msgRef);
-    const base = { wamid, direction: 'out', type, body, media: null, error: null };
+    const base = { wamid, direction: 'out', type, body, media: media || null, error: null };
     if (existing.exists) tx.set(msgRef, { ...base, createdAt: Timestamp.now() }, { merge: true });   // status untouched
     else tx.set(msgRef, { ...base, status: 'sent', createdAt: Timestamp.now() });
-    tx.set(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(body) }, { merge: true });
+    tx.set(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(body), lastMessageType: type, lastMessageDirection: 'out' }, { merge: true });
   });
 }
 
@@ -49,7 +50,7 @@ async function storeFailedOutbound(db, phone, { type, body, error }) {
   const convRef = db.collection('conversations').doc(phone);
   await convRef.collection('messages').add({ wamid: null, direction: 'out', type, body, media: null,
     status: 'failed', error, createdAt: Timestamp.now() });
-  await convRef.set({ updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(body) }, { merge: true });
+  await convRef.set({ updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(body), lastMessageType: type, lastMessageDirection: 'out' }, { merge: true });
 }
 
 async function ensureConversation(db, phone, name) {
@@ -85,7 +86,7 @@ async function markRead(db, phone) {
   const convRef = db.collection('conversations').doc(phone);
   const snap = await convRef.get();
   if (!snap.exists) return false;
-  await convRef.update({ lastReadAt: FieldValue.serverTimestamp() });
+  await convRef.update({ lastReadAt: FieldValue.serverTimestamp(), unreadCount: 0 });
   return true;
 }
 
@@ -106,9 +107,21 @@ async function updateContact(db, phone, fields) {
   });
 }
 
+// Record the outcome of a media download on the message. Dotted paths so sibling fields (caption, filename, ...) survive.
+async function setMediaState(db, phone, msgId, r) {
+  const ref = db.collection('conversations').doc(phone).collection('messages').doc(msgId);
+  const patch = { 'media.status': r.status, 'media.error': r.error || null };
+  if (r.status === 'stored') Object.assign(patch, { 'media.storagePath': r.storagePath, 'media.size': r.size, 'media.mimeType': r.mimeType, 'media.sha256': r.sha256, 'media.filename': r.filename });
+  await ref.update(patch);
+}
+async function getMessage(db, phone, msgId) {
+  const s = await db.collection('conversations').doc(phone).collection('messages').doc(msgId).get();
+  return s.exists ? s.data() : null;
+}
+
 async function getConversation(db, phone) {
   const s = await db.collection('conversations').doc(phone).get();
   return s.exists ? s.data() : null;
 }
 
-module.exports = { updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

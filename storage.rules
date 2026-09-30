@@ -1,0 +1,15 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Staff may drop a file to be sent into their OWN uploads folder (create only: no reading, listing, overwriting or deleting).
+    // A Cloud Function validates it, sends it through WhatsApp, and moves it to media/.
+    match /uploads/{uid}/{file} {
+      allow create: if request.auth != null && request.auth.token.staff == true && request.auth.uid == uid
+                    && request.resource.size <= 100 * 1024 * 1024;
+    }
+    // Everything else (customer media under media/) is closed to browsers: staff see files only via short-lived signed links.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
