@@ -25,3 +25,23 @@ Deployed from Google Cloud Shell: upload repo ZIP, `npm --prefix functions insta
   WHATSAPP_VERIFY_TOKEN (random). Update a secret: `firebase functions:secrets:set NAME`, then redeploy functions.
 - `functions/.env.elite-kitchens-lead-os` (gitignored): ALLOWED_EMAILS, WHATSAPP_PHONE_NUMBER_ID (placeholder 0 until set).
 - Container image cleanup policy: 1 day (keeps Artifact Registry cost ~0).
+
+## Webhook cutover (2026-09-30): DONE, Chatwoot no longer receives WhatsApp
+- App-level webhook (Meta app "Nowy Whats", 1496707152106004): `https://elite-kitchens-lead-os.web.app/webhook`, field `messages` subscribed.
+- The phone number (id 1132141579981595) ALSO had its own override pointing at
+  `https://app.chatwoot.com/webhooks/whatsapp/+353899661073`, which beats the app-level webhook. Replaced with ours via
+  `POST /{phone_number_id}` `webhook_configuration.override_callback_uri` + verify_token.
+  Check any time: `GET /{phone_number_id}?fields=webhook_configuration`.
+- WABA 1262905402273450 has the app subscribed and no WABA-level override.
+- Secrets read from Secret Manager are `.trim()`med (a token saved via `openssl ... | secrets:set --data-file -` keeps a newline).
+
+## Phase 1 result
+- Test 1 (phone -> Meta -> Cloud Function -> Firestore -> web UI): PASSED
+- Test 2 (web UI -> Cloud Function -> Meta -> phone): PASSED
+
+## Follow-ups
+- Remove temporary org role: see item 3 above.
+- Rotate the Meta app secret and the webhook verify token (both were shown in the setup chat), then redeploy functions.
+- Destroy the placeholder secret versions (version 1 of WHATSAPP_ACCESS_TOKEN / WHATSAPP_APP_SECRET).
+- Deploys currently run from an uploaded ZIP in Cloud Shell. Move to a git clone or CI so the repo is the source of truth.
+- Check any Make.com / Lead Ads flow that relied on Chatwoot.
