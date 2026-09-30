@@ -54,3 +54,9 @@ Deploy from Cloud Shell: `cd ~/elite-kitchens-lead-os && git pull && ./scripts/d
 - Cloud Storage bucket: `gs://elite-kitchens-lead-os.firebasestorage.app` (europe-west1). Functions' service account
   needs `roles/storage.objectAdmin` on the bucket and `roles/iam.serviceAccountTokenCreator` on itself (to sign download
   links); the script applies both.
+
+## Safety nets added in Phase 2 hardening
+- Every `deploy-preview.sh` run first saves each function's current live revision (`~/.previous-revisions`); `./scripts/rollback-functions.sh [name]` restores them in seconds.
+- Secret versions: `node scripts/secret-cleanup.js` (plan) / `--apply`; it reads the Cloud Functions records and refuses to run if it cannot see what is in use.
+- Retention: `./scripts/apply-retention.sh` (24 months for media, 1 day for abandoned uploads).
+- Firebase Admin 14 is modular-only: use `getFirestore()/getAuth()/getStorage()`, not `admin.firestore()`.

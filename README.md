@@ -41,11 +41,11 @@ Not in scope yet: Lead Ads, Make.com, quotes, appointments, CRM, AI agents, medi
 Design and milestones: `docs/PHASE2_DESIGN.md`. Inbox UI = `public/index.html`, `app.css`, `app.js` (no build step).
 Delivered on the branch: multi-customer inbox (search, unread counts, thread, reply, new conversation), editable customer details,
 automatic download + display of incoming photos/documents/voice notes/video, sending attachments, delivery ticks, phone layout.
-See `docs/PHASE2_PROGRESS.md`, `docs/SECURITY.md`, `DEPLOY.md`.
+See `docs/PHASE2_PROGRESS.md`, `docs/SECURITY.md`, `docs/DATA_CONTROLS.md`, `docs/SECRET_ROTATION.md`, `docs/RESTORE.md`, `DEPLOY.md`.
 
 ## Tests
-    npm test          # 32 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules)
-    npm run test:ui   # 42-check full-stack test: real page in Chromium + real functions + Auth/Firestore emulators
+    npm test          # 37 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules)
+    npm run test:ui   # 45-check full-stack test: real page in Chromium + real functions + Auth/Firestore emulators
                       # + mocked Meta API (needs Java and Playwright; set NODE_PATH if Playwright is installed globally)
 
 Older notes:

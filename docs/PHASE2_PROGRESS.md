@@ -29,7 +29,19 @@ Panel with name/email/location/project/budget/source/notes, email optional, loca
 - Tests: 32 backend + 42-check full-stack browser test, all passing.
 - Security review: see docs/SECURITY.md.
 
-## Remaining
-- Owner check of the phone layout on a real phone; final polish from owner feedback.
-- Clean-ups: rotate Meta app secret + verify token; destroy placeholder secret versions; tested Firebase SDK upgrade.
-- When approved: merge `phase-2-inbox` to `main` and point production Hosting at the new inbox (NOT done; owner decision).
+
+## Checkpoint 3 (PASSED real-world test): foundation/security hardening - PHASE 2 COMPLETE
+All verified on the real system with real WhatsApp traffic before moving on:
+1. **Secrets rotated** (Meta app secret, webhook verify token); Meta re-verified the webhook with the new token; all functions moved to the
+   newest versions; placeholder/old versions destroyed with a script that refuses to delete anything still in use. See docs/SECRET_ROTATION.md.
+2. **Customer data controls**: "Delete customer" (conversation, messages, files, record; audit entry without personal data; late Meta
+   statuses can't resurrect data) and **24-month media retention** (storage lifecycle rule in force). See docs/DATA_CONTROLS.md.
+3. **Dependency upgrade**: firebase-admin 13->14.5.0, firebase-functions 6->7.4.0; audit 9 -> 2 moderate (accepted residual, see docs/SECURITY.md).
+   Staged: all functions except the webhook first (photo links, sending, editing verified), then the webhook last (text, photo, voice note, PDF arrive automatically).
+4. Live: webhook = Phase 2 code on upgraded libraries; live page = inbox with delete; retention rule active.
+
+Tests at this checkpoint: 37 backend + 45-check full-stack browser test, all passing.
+Deliberately NOT built (later phases): Meta Lead Ads, pipeline stages, appointments, quotes, AI agents. UI is functional only: a redesign is planned.
+
+Known/accepted: 2 moderate npm findings inside Google's storage library (unreachable); Firebase App Check not enabled; no data-export (subject access) action yet;
+single allowlisted staff account; Content-Security-Policy not set.
