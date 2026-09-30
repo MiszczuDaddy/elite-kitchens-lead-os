@@ -216,6 +216,19 @@ test('updateContact saves the customer record, denormalises onto the conversatio
   await rejects(h.updateContact({ uid: 'x', token: { email: 'stranger@gmail.com', email_verified: true, staff: true } }, { phone: '353851111111', fields: { name: 'x' } }, deps()), 'permission-denied');
 });
 
+test('email is optional: blank saves fine, junk is rejected, a real address is accepted', async () => {
+  await post(inbound('wamid.E1', 'Hello', '353851111111'));
+  const ref = db.collection('contacts').doc('353851111111');
+  await h.updateContact(staff, { phone: '353851111111', fields: { name: 'Magdalena', email: '', location: 'Balbriggan', projectType: 'Kitchen', budget: '15', source: 'WhatsApp', notes: '' } }, deps());
+  let c = (await ref.get()).data();
+  assert.equal(c.email, null); assert.equal(c.location, 'Balbriggan'); assert.equal(c.budget, '15');      // saved without an email
+  await rejects(h.updateContact(staff, { phone: '353851111111', fields: { email: 'lol' } }, deps()), 'invalid-argument');
+  await h.updateContact(staff, { phone: '353851111111', fields: { email: 'mag@example.ie' } }, deps());
+  assert.equal((await ref.get()).data().email, 'mag@example.ie');
+  await h.updateContact(staff, { phone: '353851111111', fields: { email: '' } }, deps());               // and it can be cleared again
+  assert.equal((await ref.get()).data().email, null);
+});
+
 test('claimAccess revokes a leftover staff claim from someone removed from the allowlist', async () => {
   const claims = []; const adminAuth = { setCustomUserClaims: async (uid, c) => claims.push([uid, c]) };
   await rejects(h.claimAccess({ uid: 'gone', token: { email: 'former@staff.com', email_verified: true, staff: true } }, { adminAuth, cfg }), 'permission-denied');

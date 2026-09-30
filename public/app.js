@@ -453,7 +453,7 @@ function renderDetails(force) {
 
 function setDetailMsg(text, kind) { const m = $('d-msg'); m.textContent = text || ''; m.className = 'd-msg' + (kind ? ' ' + kind : ''); }
 
-$('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').disabled = false; setDetailMsg(''); });
+$('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').disabled = false; setDetailMsg(''); $('d-email').removeAttribute('aria-invalid'); });
 $('details-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const phone = S.selected;
@@ -466,5 +466,6 @@ $('details-form').addEventListener('submit', async (e) => {
     if (S.selected === phone) { S.dirty = false; setDetailMsg('Saved', 'ok'); setTimeout(() => { if ($('d-msg').textContent === 'Saved') setDetailMsg(''); }, 2500); }
   } catch (err) {
     $('d-save').disabled = false; setDetailMsg(errText(err), 'err');
+    $('d-email').setAttribute('aria-invalid', /email/i.test(errText(err)) ? 'true' : 'false');
   }
 });
