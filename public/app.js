@@ -147,6 +147,7 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 function stopListening() {
+  resetAssets(); closeLightbox(); urlCache.clear();
   if (S.unsubList) { S.unsubList(); S.unsubList = null; }
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
@@ -233,6 +234,7 @@ window.addEventListener('hashchange', routeFromHash);
 function setView() { $('app').dataset.view = S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
+  resetAssets(); closeLightbox();
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
   S.selected = null; S.msgs = []; S.pending = [];
@@ -253,6 +255,8 @@ function openConversation(id, fromHash) {
   $('thread').hidden = false; $('thread-empty').hidden = true;
   $('msgs').replaceChildren();
   renderThreadHeader(); updateComposer(); setView(); renderList();
+  resetAssets();
+  setProfileTab("details");
   watchContact(id);
   S.firstRender = true;
   S.unsubMsgs = db.collection('conversations').doc(id).collection('messages').orderBy('createdAt').limitToLast(500).onSnapshot((snap) => {
@@ -260,6 +264,7 @@ function openConversation(id, fromHash) {
     S.snapSeq++;
     S.pending = S.pending.filter((p) => !p.done);
     renderMessages();
+    renderAssets();
     maybeMarkRead();
   }, (e) => banner('Cannot load messages: ' + errText(e)));
   maybeMarkRead();
@@ -271,6 +276,8 @@ function renderThreadHeader() {
   if (!S.selected) return;
   const c = selectedConv() || { id: S.selected };
   $('t-avatar').textContent = initials(c);
+  $('profile-avatar').textContent = initials(c);
+  $('profile-name').textContent = displayName(c);
   $('t-name').textContent = displayName(c);
   $('t-phone').textContent = c.name ? formatPhone(c.id) + (c.location ? ' · ' + c.location : '') : '';
 }
@@ -312,7 +319,7 @@ function loadUrl(phone, id, dl) {
 // Fetch a media link only when its element scrolls into view.
 const io = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
   for (const e of entries) if (e.isIntersecting) { io.unobserve(e.target); const f = e.target._load; if (f) f(); }
-}, { root: $('msgs'), rootMargin: '400px' }) : null;
+}, { root: $('msgs'), rootMargin: '1000px' }) : null;
 function whenVisible(host, fn) { host._load = fn; if (io) io.observe(host); else fn(); }
 
 function chip(icon, text) { const c = el('div', 'media-status'); c.append(el('span', null, icon), el('span', null, text)); return c; }
@@ -360,7 +367,7 @@ function mediaBlock(m, type) {
   }
   if (type === 'image' || type === 'sticker') {
     const img = el('img', 'media-img' + (type === 'sticker' ? ' sticker' : '')); img.alt = label; img.loading = 'lazy';
-    if (type === 'image') { img.onclick = () => openLightbox(phone, m); }
+    if (type === 'image') { img.onclick = () => openLightbox(phone, m); img.tabIndex = 0; img.setAttribute('role', 'button'); img.setAttribute('aria-label', 'Open photo'); img.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox(phone, m); } }; }
     const set = (u) => { img.src = u; };
     const hit = cachedUrl(phone, id, false);
     if (hit) set(hit); else whenVisible(img, () => loadUrl(phone, id, false).then(set).catch(() => { img.replaceWith(chip(icon, `${label} · couldn't load`)); }));
@@ -397,15 +404,9 @@ function mediaBlock(m, type) {
   return box;
 }
 
-function openLightbox(phone, m) {
-  const u = cachedUrl(phone, m.id, false); if (!u) return;
-  $('lb-img').src = u; $('lightbox').hidden = false;
-  $('lb-dl').onclick = () => downloadMedia(phone, m);
-}
-function closeLightbox() { $('lightbox').hidden = true; $('lb-img').removeAttribute('src'); }
 $('lb-close').onclick = closeLightbox;
 $('lightbox').addEventListener('click', (e) => { if (e.target === $('lightbox')) closeLightbox(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('lightbox').hidden) closeLightbox(); });
+
 
 // ---------- message bubbles ----------
 const timeOf = (m) => { const t = m.createdAt && m.createdAt.toDate ? m.createdAt.toDate() : (m.at ? new Date(m.at) : null); return t ? hhmm(t) : ''; };
@@ -649,15 +650,20 @@ function setDetailsOpen(open, remember) {
   detailsEl().hidden = !open || !S.selected;
   $('app').classList.toggle('has-details', open && !!S.selected);
   $('details-btn').setAttribute('aria-expanded', String(open && !!S.selected));
+  $('profile-trigger').setAttribute('aria-expanded', String(open && !!S.selected));
+  if (open && window.innerWidth < 1280) $('details-close').focus();
+  if (!open && S.selected) $('profile-trigger').focus({preventScroll:true});
   if (remember) setDetailsPref(open ? 'open' : 'closed');
-  if (open) renderDetails(true);
+  if (open) { renderDetails(false); renderAssets(); }
 }
 $('details-btn').onclick = () => setDetailsOpen(!detailsOpen(), true);
+$('profile-trigger').onclick = () => setDetailsOpen(true, true);
 $('details-close').onclick = () => setDetailsOpen(false, true);
 
 function watchContact(id) {
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
   S.contact = null; S.dirty = false;
+  detailsEl().scrollTop = 0;
   if (!id) { setDetailsOpen(false, false); return; }
   // Wide screens: default open (remembered choice wins). Narrow screens: closed until asked for.
   const pref = detailsPref();
@@ -731,4 +737,111 @@ $('del-form').addEventListener('submit', async (e) => {
     closeConversation(false);
     toast(`Customer deleted (${r.data.messages} message(s), ${r.data.files} file(s)).`);
   } catch (err) { $('del-err').textContent = errText(err); $('del-go').disabled = false; }
+});
+
+// Customer asset views use the existing message collection and mediaUrl contract.
+let profileTab = 'details', olderMessages = [], historyDone = false, historyLoading = false;
+const assetNodes = new Map();
+function resetAssets() {
+  profileTab = 'details'; olderMessages = []; historyDone = false; historyLoading = false;
+  assetNodes.clear(); assetObserver.disconnect();
+  $('gallery').replaceChildren(); $('documents').replaceChildren();
+}
+function assetMessages() {
+  const map = new Map(olderMessages.map(m => [m.id, m]));
+  S.msgs.forEach(m => map.set(m.id, m));
+  return [...map.values()].sort((a,b) => (ms(a.createdAt)||0) - (ms(b.createdAt)||0));
+}
+function setProfileTab(tab) {
+  profileTab = tab;
+  detailsEl().scrollTop = 0;
+  ['details','media','documents'].forEach(k => {
+    $('tab-'+k).setAttribute('aria-selected', String(k === tab));
+    $('tab-'+k).tabIndex = k === tab ? 0 : -1;
+    $('panel-'+k).hidden = k !== tab;
+  });
+  renderAssets();
+}
+['details','media','documents'].forEach((k,i,keys) => {
+  $('tab-'+k).onclick = () => setProfileTab(k);
+  $('tab-'+k).onkeydown = e => {
+    if (!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+    e.preventDefault();
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? 2 : (i + (e.key === 'ArrowRight' ? 1 : 2)) % 3;
+    setProfileTab(keys[next]); $('tab-'+keys[next]).focus();
+  };
+});
+const assetObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) { assetObserver.unobserve(e.target); e.target._loadAsset(); } });
+}, {root: $('details'), rootMargin: '150px'});
+function assetDate(m) { return ms(m.createdAt) ? new Date(ms(m.createdAt)).toLocaleDateString('en-IE',{day:'numeric',month:'short',year:'numeric',timeZone:TZ}) : ''; }
+function renderAssets() {
+  if (!S.selected || !detailsOpen() || profileTab === 'details') return;
+  const phone = S.selected, media = profileTab === 'media';
+  const box = $(media ? 'gallery' : 'documents');
+  const msgs = assetMessages().filter(m => media ? ['image','video'].includes(m.type) : m.type === 'document').reverse();
+  const nodes = msgs.map(m => {
+    const key = phone+'/'+m.id+'/'+sigOf(m); if (assetNodes.has(key)) return assetNodes.get(key);
+    let item;
+    if (media && m.media && m.media.status === 'stored' && m.media.storagePath) {
+      item = el('button','gallery-item'); item.type = 'button'; item.setAttribute('aria-label', 'Open '+m.type+' from '+assetDate(m));
+      const thumb = el(m.type === 'video' ? 'video' : 'img');
+      if (m.type === 'video') { thumb.muted = true; thumb.preload = 'metadata'; thumb.playsInline = true; } else thumb.alt = m.body && !/^\[/.test(m.body) ? m.body : 'Customer photo';
+      item.append(thumb,el('span',null,(m.type === 'video' ? 'Video · ' : '')+assetDate(m)));
+      item._loadAsset = () => loadUrl(phone,m.id,false).then(u => thumb.src = u).catch(() => { item.textContent = "Couldn't load · click to retry"; });
+      item.onclick = () => openLightbox(phone,m);
+      assetObserver.observe(item);
+    } else {
+      item = el('div','asset-document'); item.append(mediaBlock(m,m.type),el('div','asset-date',(m.direction === 'out' ? 'Sent · ' : 'Received · ')+assetDate(m)));
+    }
+    assetNodes.set(key,item); return item;
+  });
+  box.replaceChildren(...(nodes.length ? nodes : [el('p','asset-empty',media ? 'No photos or videos in the loaded messages.' : 'No documents in the loaded messages.')]));
+  ['older-media','older-documents'].forEach(id => { $(id).hidden = historyDone || S.msgs.length < 500; $(id).disabled = historyLoading; $(id).textContent = historyLoading ? 'Loading…' : 'Load earlier messages'; });
+}
+async function loadEarlierAssets() {
+  if (historyLoading || !S.selected) return;
+  const phone = S.selected, all = assetMessages(), first = all[0]; if (!first || !first.createdAt) return;
+  historyLoading = true; renderAssets();
+  try {
+    const snap = await db.collection('conversations').doc(phone).collection('messages').orderBy('createdAt').endBefore(first.createdAt).limitToLast(500).get();
+    if (S.selected !== phone) return;
+    olderMessages.push(...snap.docs.map(d => ({id:d.id,...d.data()}))); historyDone = snap.size < 500;
+  } catch(e) { toast('Could not load earlier messages: '+errText(e)); }
+  finally { historyLoading = false; renderAssets(); }
+}
+$('older-media').onclick = loadEarlierAssets; $('older-documents').onclick = loadEarlierAssets;
+let viewer = null, viewerFocus = null, viewerSeq = 0;
+async function openLightbox(phone,m) {
+  if ($('lightbox').hidden) viewerFocus = document.activeElement;
+  const seq = ++viewerSeq;
+  $('details').inert = true; $('app').inert = true;
+  const items = assetMessages().filter(x => ['image','video'].includes(x.type) && x.media && x.media.status === 'stored');
+  viewer = {phone,m,items};
+  $('lightbox').hidden = false; $('lightbox').focus();
+  $('lb-img').hidden = true; $('lb-video').hidden = true; $('lb-video').pause();
+  $('lb-caption').textContent = 'Loading…';
+  const index = items.findIndex(x => x.id === m.id);
+  $('lb-prev').disabled = index <= 0; $('lb-next').disabled = index < 0 || index >= items.length-1;
+  $('lb-dl').onclick = () => downloadMedia(phone,m);
+  try {
+    const u = await loadUrl(phone,m.id,false); if (seq !== viewerSeq) return;
+    const target = $(m.type === 'video' ? 'lb-video' : 'lb-img'); target.src = u; target.hidden = false;
+    $('lb-caption').textContent = [assetDate(m),m.direction === 'out' ? 'Sent' : 'Received', (index+1)+' of '+items.length].join(' · ');
+  } catch(e) { if (seq === viewerSeq) $('lb-caption').textContent = 'Could not open media: '+errText(e); }
+}
+function closeLightbox() {
+  viewerSeq++; viewer = null; $('lightbox').hidden = true;
+  $('details').inert = false; $('app').inert = false;
+  $('lb-video').pause(); $('lb-video').removeAttribute('src'); $('lb-img').removeAttribute('src');
+  if (viewerFocus && viewerFocus.isConnected) viewerFocus.focus();
+}
+function moveViewer(delta) { if (!viewer) return; const i = viewer.items.findIndex(m => m.id === viewer.m.id), m = viewer.items[i+delta]; if(m) openLightbox(viewer.phone,m); }
+$('lb-prev').onclick = () => moveViewer(-1); $('lb-next').onclick = () => moveViewer(1);
+document.addEventListener('keydown',e => {
+  if (!$('lightbox').hidden) {
+    if (e.key === 'Escape') { closeLightbox(); return; }
+    if(e.key === 'ArrowLeft') moveViewer(-1); if(e.key === 'ArrowRight') moveViewer(1);
+    if(e.key === 'Tab') { const controls = [...$('lightbox').querySelectorAll('button:not(:disabled),video:not([hidden])')]; const i = controls.indexOf(document.activeElement); e.preventDefault(); controls[(i+(e.shiftKey ? controls.length-1 : 1))%controls.length].focus(); }
+  } else if(e.key === 'Escape' && detailsOpen()) setDetailsOpen(false,true);
 });

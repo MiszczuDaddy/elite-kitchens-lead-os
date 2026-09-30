@@ -382,7 +382,42 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await signIn(staffToken);
   await page.waitForFunction(() => /Hi Anna/.test(document.getElementById('msgs').innerText)); ok('deep link (#c/phone) reopens the right conversation after a reload');
 
+  await page.evaluate(() => document.getElementById('details').scrollTop = 0);
   await page.screenshot({ path: path.join(SHOTS, 'desktop.png') });
+
+  // Redesign regressions, in addition to all 45 foundation checks.
+  await page.click('#profile-trigger'); await page.click('#tab-media');
+  await page.waitForSelector('.gallery-item img');
+  await page.waitForFunction(() => [...document.querySelectorAll('.gallery-item img')].some(i => i.complete && i.naturalWidth > 0));
+  assert(await page.locator('.gallery-item video').count() > 0);
+  await page.screenshot({path:path.join(SHOTS,'desktop-media.png')});
+  ok('redesign: customer gallery derives both photos and videos from existing messages');
+  await page.locator('.gallery-item').first().click();
+  await page.waitForFunction(() => /of/.test(document.getElementById('lb-caption').textContent));
+  const firstCaption = await page.locator('#lb-caption').innerText();
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForFunction(old => document.getElementById('lb-caption').textContent !== old && /of/.test(document.getElementById('lb-caption').textContent), firstCaption);
+  await page.keyboard.press('Escape');
+  assert(await page.locator('#panel-media').isVisible());
+  ok('redesign: gallery viewer supports keyboard navigation and returns to the gallery');
+  await page.click('#tab-documents');
+  assert((await page.locator('#documents .doc-name').allTextContents()).includes('Plan & measurements.pdf'));
+  const [galleryDownload] = await Promise.all([page.waitForEvent('download'), page.locator('#documents .doc-card').filter({hasText:'Plan & measurements.pdf'}).locator('.linkbtn').click()]);
+  assert(fs.readFileSync(await galleryDownload.path()).equals(PDF));
+  ok('redesign: Documents shows real filenames and downloads the original private file');
+  await page.click('#tab-details'); await page.fill('#d-notes','Unsaved profile note');
+  await page.click('#details-close'); await page.click('#profile-trigger');
+  assert.equal(await page.inputValue('#d-notes'),'Unsaved profile note');
+  await page.click('#d-save'); await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
+  ok('redesign: closing and reopening the customer profile preserves unsaved edits');
+  for(const width of [1024,1280,1440]) {
+    await page.setViewportSize({width,height:820});
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({path:path.join(SHOTS,'desktop-'+width+'.png')});
+  }
+  await page.setViewportSize({width:1360,height:820});
+  ok('redesign: tablet, laptop and wide desktop layouts avoid horizontal overflow');
+
 
   // --- mobile ---
   const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, isMobile: true });
@@ -395,6 +430,7 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await mp.locator(`.conv[data-phone="${A}"]`).click();
   await mp.waitForSelector('.m');
   assert(await mp.locator('.thread-pane').isVisible()); assert(!(await mp.locator('.list-pane').isVisible()));
+  await mp.waitForFunction(() => [...document.querySelectorAll('#msgs img')].every(i => i.complete && i.naturalWidth > 0));
   await mp.screenshot({ path: path.join(SHOTS, 'mobile-thread.png') });
   assert(!(await mp.locator('#details').isVisible()));
   await mp.click('#details-btn'); await mp.waitForSelector('#details:not([hidden])');
@@ -403,6 +439,19 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await mp.click('#details-close'); assert(!(await mp.locator('#details').isVisible()));
   await mp.click('#back'); assert(await mp.locator('.list-pane').isVisible());
   ok('mobile: one pane at a time; details open as a full-screen drawer; Back returns to the inbox');
+  await mp.locator(`.conv[data-phone="${A}"]`).click();
+  await mp.click('#profile-trigger'); await mp.click('#tab-media');
+  await mp.waitForSelector('.gallery-item');
+  await mp.waitForFunction(() => [...document.querySelectorAll('.gallery-item img')].every(i => i.complete && i.naturalWidth > 0));
+  await mp.screenshot({path:path.join(SHOTS,'mobile-media.png')});
+  await mp.locator('.gallery-item').first().click();
+  await mp.waitForFunction(() => /of/.test(document.getElementById('lb-caption').textContent));
+  await mp.click('#lb-close'); assert(await mp.locator('#panel-media').isVisible());
+  await mp.click('#details-close'); assert(await mp.locator('#composer').isVisible());
+  assert(await mp.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await mp.click('#back');
+  ok('redesign: phone profile, gallery, viewer and back navigation preserve the conversation');
+
 
   // --- TEST I (data layer): rules ---
   const idOf = async (tok) => (await (await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake',
