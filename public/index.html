@@ -44,6 +44,7 @@
     <div class="search">
       <input id="search" type="search" placeholder="Search name or number…" autocomplete="off" aria-label="Search conversations">
     </div>
+    <div id="toast" class="toast" role="status" hidden></div>
     <div id="list" class="list" role="list"></div>
     <div id="list-empty" class="empty" hidden></div>
   </aside>
@@ -114,6 +115,11 @@
       <div id="d-msg" class="d-msg" role="status"></div>
       <div class="d-actions"><button id="d-save" class="btn btn-primary" type="submit" disabled>Save</button></div>
     </form>
+    <div class="danger">
+      <div class="d-label">Data controls</div>
+      <p class="hint">Permanently remove this customer, their messages and every file they sent or received.</p>
+      <button id="del-btn" type="button" class="btn btn-danger btn-sm">Delete customer…</button>
+    </div>
   </aside>
 </div>
 
@@ -121,6 +127,21 @@
   <div class="lb-bar"><button id="lb-dl" class="btn btn-ghost btn-sm lb-btn">Download</button><button id="lb-close" class="icon-btn lb-x" aria-label="Close">✕</button></div>
   <img id="lb-img" alt="">
 </div>
+
+<dialog id="del-dlg" class="dlg">
+  <form id="del-form" autocomplete="off">
+    <h2>Delete customer</h2>
+    <p id="del-text" class="hint"></p>
+    <label>To confirm, type the last 4 digits of the number (<b id="del-digits"></b>)
+      <input id="del-confirm" inputmode="numeric" maxlength="4" required>
+    </label>
+    <div id="del-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="del-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="del-go" class="btn btn-danger">Delete permanently</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="new-dlg" class="dlg">
   <form id="new-form" autocomplete="off">

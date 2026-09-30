@@ -446,6 +446,83 @@ test('unread counts: every new customer message adds one; opening the conversati
   assert.equal((await conv('353851111111')).unreadCount, 1);
 });
 
+// ---------------- customer data controls ----------------
+const seedCustomer = async (phone, name) => {
+  files['I' + phone] = { mime: 'image/png', bytes: PNG };
+  await mediaHook('wamid.IN' + phone, 'image', { id: 'I' + phone, mime_type: 'image/png', caption: 'kitchen' }, phone);
+  await post(inbound('wamid.TX' + phone, 'hello from ' + name, phone));
+  await h.updateContact(staff, { phone, fields: { name, email: name.toLowerCase() + '@example.com', location: 'Swords', notes: 'private note ' + name } }, deps());
+  await h.sendReply(staff, { phone, body: 'reply to ' + name }, deps());
+};
+const exists = async (ref) => (await ref.get()).exists;
+
+test('deleteCustomer erases the conversation, every message, all files and the record - and nothing of anyone else', async () => {
+  const A = '353851111111', B = '353862222222';
+  await seedCustomer(A, 'Anna'); await seedCustomer(B, 'Brian');
+  assert.equal((await msgs(A)).length, 3); assert.equal((await bucket.getFiles({ prefix: `media/${A}/` }))[0].length, 1);
+  const r = await h.deleteCustomer(staff, { phone: '+353 85 111 1111', confirm: '1111' }, deps());
+  assert.deepEqual(r, { messages: 3, files: 1 });
+  assert.equal(await exists(db.collection('conversations').doc(A)), false);
+  assert.equal(await exists(db.collection('contacts').doc(A)), false);
+  assert.equal((await msgs(A)).length, 0);
+  assert.equal((await bucket.getFiles({ prefix: `media/${A}/` }))[0].length, 0);
+  // Brian is completely untouched
+  assert.equal(await exists(db.collection('conversations').doc(B)), true); assert.equal(await exists(db.collection('contacts').doc(B)), true);
+  assert.equal((await msgs(B)).length, 3); assert.equal((await bucket.getFiles({ prefix: `media/${B}/` }))[0].length, 1);
+  assert.equal((await db.collection('contacts').doc(B).get()).data().notes, 'private note Brian');
+  // audit trail: who/when/how many, and NO personal content
+  const audit = (await db.collection('auditLog').get()).docs.map((d) => d.data());
+  assert.equal(audit.length, 1); const a = audit[0];
+  assert.deepEqual([a.action, a.phoneLast3, a.messages, a.files, a.by], ['deleteCustomer', '111', 3, 1, 'thomas@example.com']);
+  assert.match(a.phoneHash, /^[0-9a-f]{64}$/);
+  const dump = JSON.stringify(a); for (const secret of [A, 'Anna', 'anna@example.com', 'Swords', 'private note']) assert.ok(!dump.includes(secret), 'audit log leaks ' + secret);
+});
+
+test('deleteCustomer refuses wrong confirmation, strangers, unknown customers - and deletes nothing in those cases', async () => {
+  const A = '353851111111'; await seedCustomer(A, 'Anna');
+  await rejects(h.deleteCustomer(staff, { phone: A }, deps()), 'invalid-argument');
+  await rejects(h.deleteCustomer(staff, { phone: A, confirm: '1112' }, deps()), 'invalid-argument');
+  await rejects(h.deleteCustomer(staff, { phone: A, confirm: A }, deps()), 'invalid-argument');                      // must be exactly the last 4 digits
+  await rejects(h.deleteCustomer(null, { phone: A, confirm: '1111' }, deps()), 'unauthenticated');
+  await rejects(h.deleteCustomer({ uid: 'x', token: { email: 'stranger@gmail.com', email_verified: true, staff: true } }, { phone: A, confirm: '1111' }, deps()), 'permission-denied');
+  await rejects(h.deleteCustomer({ uid: 'x', token: { email: 'thomas@example.com', email_verified: true } }, { phone: A, confirm: '1111' }, deps()), 'permission-denied');   // no claim
+  await rejects(h.deleteCustomer(staff, { phone: '123', confirm: '123' }, deps()), 'invalid-argument');
+  await rejects(h.deleteCustomer(staff, { phone: '353800000000', confirm: '0000' }, deps()), 'not-found');
+  assert.equal((await msgs(A)).length, 3); assert.equal((await bucket.getFiles({ prefix: `media/${A}/` }))[0].length, 1);
+  assert.equal((await db.collection('auditLog').get()).size, 0);                                                        // nothing deleted, nothing logged
+});
+
+test('after deletion a late Meta status never recreates data, and a returning customer starts completely fresh', async () => {
+  const A = '353851111111'; await seedCustomer(A, 'Anna');
+  const outId = (await msgs(A)).find((m) => m.direction === 'out').id;
+  await h.deleteCustomer(staff, { phone: A, confirm: '1111' }, deps());
+  assert.equal(await post(statusHook(outId, 'delivered', A)), 200); assert.equal(await post(statusHook(outId, 'read', A)), 200);
+  assert.equal(await exists(db.collection('conversations').doc(A)), false);
+  assert.equal((await db.collection('conversations').doc(A).collection('messages').get()).size, 0);                   // no ghost/stub documents
+  await post(inbound('wamid.BACK', 'Hi again', A));
+  const c = await conv(A); assert.equal(c.unreadCount, 1); assert.equal(c.name, 'Tom');                                 // WhatsApp profile name only: nothing kept from before
+  assert.equal((await msgs(A)).length, 1);
+  assert.equal((await db.collection('contacts').doc(A).get()).data().notes, undefined);
+});
+
+test('retention: a file removed by the lifecycle rule is marked expired (no endless errors), and expired is final', async () => {
+  const A = '353851111111'; files.RT = { mime: 'image/png', bytes: PNG };
+  await mediaHook('wamid.RT', 'image', { id: 'RT', mime_type: 'image/png' }, A);
+  const path = (await msgDoc(A, 'wamid.RT')).media.storagePath;
+  await bucket.file(path).delete();                                                     // what the 24-month rule does
+  await rejects(h.mediaUrl(staff, { phone: A, id: 'wamid.RT' }, deps()), 'not-found');
+  const m = await msgDoc(A, 'wamid.RT');
+  assert.equal(m.media.status, 'expired'); assert.match(m.media.error, /retention/i);
+  await rejects(h.mediaUrl(staff, { phone: A, id: 'wamid.RT' }, deps()), 'not-found');
+  assert.equal((await post(inbound('wamid.OK', 'still works', A))), 200);                 // the conversation itself is unaffected
+  assert.equal((await msgs(A)).length, 2);
+});
+
+test('the retention rule file is valid: media after 24 months, abandoned uploads after 1 day, nothing else', async () => {
+  const r = JSON.parse(fs.readFileSync('../storage-lifecycle.json', 'utf8')).rule;
+  assert.deepEqual(r.map((x) => [x.action.type, x.condition.age, x.condition.matchesPrefix.join()]), [['Delete', 730, 'media/'], ['Delete', 1, 'uploads/']]);
+});
+
 test('storage rules: staff can only CREATE in their own uploads folder; nobody can read or touch media from a browser', async () => {
   const su = new URL(/:\/\//.test(process.env.STORAGE_EMULATOR_HOST) ? process.env.STORAGE_EMULATOR_HOST : 'http://' + process.env.STORAGE_EMULATOR_HOST);
   const env = await initializeTestEnvironment({ projectId: PROJECT, storage: { host: su.hostname, port: Number(su.port), rules: fs.readFileSync('../storage.rules', 'utf8') } });

@@ -67,9 +67,11 @@ async function ensureConversation(db, phone, name) {
 // Apply a delivery status. Never moves backwards (webhooks can arrive out of order).
 async function applyStatus(db, s) {
   if (!s.phone) return false;
-  const msgRef = db.collection('conversations').doc(s.phone).collection('messages').doc(s.wamid);
+  const convRef = db.collection('conversations').doc(s.phone);
+  const msgRef = convRef.collection('messages').doc(s.wamid);
   return db.runTransaction(async (tx) => {
-    const snap = await tx.get(msgRef);
+    const [snap, conv] = await Promise.all([tx.get(msgRef), tx.get(convRef)]);
+    if (!conv.exists) return false;       // unknown/deleted customer: a late status must not recreate anything
     if (!snap.exists) {   // status beat our own write: leave a stub that storeOutbound completes
       tx.set(msgRef, { wamid: s.wamid, direction: 'out', status: s.status, error: s.error || null });
       return true;
@@ -119,9 +121,27 @@ async function getMessage(db, phone, msgId) {
   return s.exists ? s.data() : null;
 }
 
+// Permanently erase one customer: conversation + every message + stored files + the customer record.
+// Files go first and are swept again at the end so a media download that was in flight cannot leave anything behind.
+async function deleteCustomerData(db, bucket, phone) {
+  const convRef = db.collection('conversations').doc(phone);
+  const contactRef = db.collection('contacts').doc(phone);
+  const [conv, contact] = await Promise.all([convRef.get(), contactRef.get()]);
+  if (!conv.exists && !contact.exists) return null;
+  const messages = (await convRef.collection('messages').count().get()).data().count;
+  const prefix = `media/${phone}/`;
+  let files = (await bucket.getFiles({ prefix }))[0].length;
+  await bucket.deleteFiles({ prefix, force: true });
+  await db.recursiveDelete(convRef);                 // the conversation document and all its subcollections
+  await contactRef.delete();
+  const late = (await bucket.getFiles({ prefix }))[0].length;
+  if (late) { files += late; await bucket.deleteFiles({ prefix, force: true }); }
+  return { messages, files };
+}
+
 async function getConversation(db, phone) {
   const s = await db.collection('conversations').doc(phone).get();
   return s.exists ? s.data() : null;
 }
 
-module.exports = { setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

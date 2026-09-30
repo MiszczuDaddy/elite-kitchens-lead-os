@@ -17,6 +17,8 @@ button,input,textarea{font:inherit;color:inherit}
 .btn-primary{background:var(--ink);color:#fff}
 .btn-primary:hover:not(:disabled){background:#000}
 .btn-ghost{background:transparent;border:1px solid var(--line)}
+.btn-danger{background:#b3261e;color:#fff}
+.btn-danger:hover:not(:disabled){background:#8f1d17}
 .btn-link{background:none;color:var(--muted);text-decoration:underline;padding:6px}
 .btn-sm{padding:7px 12px;font-size:13px}
 .icon-btn{background:none;border:0;font-size:20px;line-height:1;padding:8px;cursor:pointer;border-radius:8px}
@@ -151,6 +153,10 @@ button,input,textarea{font:inherit;color:inherit}
 .d-msg{min-height:1.3em;font-size:13px;color:var(--muted)}
 .d-msg.err{color:var(--err)}.d-msg.ok{color:#2f6b3a}
 .d-actions{display:flex;justify-content:flex-end}
+
+/* data controls */
+.danger{margin:6px 18px 24px;padding-top:14px;border-top:1px solid var(--line)}
+.toast{margin:0 16px 10px;padding:9px 12px;border-radius:9px;background:#e6f2e6;color:#2f6b3a;font-size:13.5px}
 
 /* dialog */
 .dlg{border:0;border-radius:14px;padding:26px;max-width:420px;width:calc(100% - 32px);box-shadow:0 20px 60px #0004}

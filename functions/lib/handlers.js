@@ -157,6 +157,21 @@ async function markRead(auth, data, { db, cfg }) {
   return { ok: true };
 }
 
+// Permanently delete a customer and everything stored about them. Staff must type the last 4 digits of the number to confirm.
+async function deleteCustomer(auth, data, { db, cfg, bucket }) {
+  assertStaff(auth, cfg);
+  const phone = normalizePhone(data && data.phone);
+  if (phone.length < 9) throw new HttpsError('invalid-argument', 'Missing phone.');
+  if (String((data && data.confirm) || '').trim() !== phone.slice(-4)) throw new HttpsError('invalid-argument', `To confirm, type the last 4 digits of the number (${phone.slice(-4)}).`);
+  const r = await store.deleteCustomerData(db, bucket, phone);
+  if (!r) throw new HttpsError('not-found', 'Customer not found (already deleted?).');
+  // Audit entry with NO personal content: a one-way hash (not reversible to the number), last 3 digits, counts, who, when.
+  await db.collection('auditLog').add({ action: 'deleteCustomer', phoneHash: require('crypto').createHash('sha256').update(phone).digest('hex'),
+    phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, by: (auth.token && auth.token.email) || auth.uid, at: require('firebase-admin/firestore').Timestamp.now() });
+  log('info', 'customer deleted', { last3: phone.slice(-3), messages: r.messages, files: r.files });
+  return r;
+}
+
 const ASK = (data) => ({ phone: normalizePhone(data && data.phone), id: String((data && data.id) || '') });
 
 // Short-lived signed link so staff can view/download a stored file. The bucket itself is closed to browsers.
@@ -169,6 +184,10 @@ async function mediaUrl(auth, data, { db, cfg, bucket }) {
   if (!m || m.status !== 'stored' || !m.storagePath) throw new HttpsError('not-found', 'That file is not available yet.');
   const path = m.storagePath;
   if (!path.startsWith(`media/${phone}/`)) throw new HttpsError('permission-denied', 'Bad file path.');     // defence in depth
+  if (!(await bucket.file(path).exists())[0]) {       // removed by the retention policy (or manually)
+    await store.setMediaState(db, phone, id, { status: 'expired', error: 'File removed after the retention period' });
+    throw new HttpsError('not-found', 'That file has been removed.');
+  }
   const url = await mediaLib.signedUrl(bucket, path, { filename: m.filename, mime: m.mimeType, download: !!(data && data.download) });
   return { url, mimeType: m.mimeType || null, filename: m.filename || null, size: m.size || null };
 }
@@ -226,4 +245,4 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
   }
 }
 
-module.exports = { mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+module.exports = { deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

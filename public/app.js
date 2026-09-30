@@ -343,6 +343,7 @@ function mediaBlock(m, type) {
   const md = m.media || {};
   const phone = S.selected, id = m.id;
   if (m.attach) { box.append(chip(icon, `${m.attach.name} · ${m.progress != null ? 'Uploading ' + m.progress + '%' : 'Sending…'}`)); return box; }
+  if (md.status === 'expired') { box.append(chip(icon, `${md.filename || label} · removed after the retention period`)); return box; }
   if (md.status !== 'stored' && autoRetryWanted(m)) whenVisible(box, () => autoRetry(phone, id));
   if (md.status === 'pending') { box.append(chip(icon, `${label} · downloading…`)); return box; }
   if (md.status !== 'stored' || !md.storagePath) {
@@ -704,4 +705,30 @@ $('details-form').addEventListener('submit', async (e) => {
     $('d-save').disabled = false; setDetailMsg(errText(err), 'err');
     $('d-email').setAttribute('aria-invalid', /email/i.test(errText(err)) ? 'true' : 'false');
   }
+});
+
+// ---------- data controls: permanently delete a customer ----------
+const delDlg = $('del-dlg');
+function toast(text) { const t = $('toast'); t.textContent = text; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 8000); }
+$('del-btn').onclick = () => {
+  if (!S.selected) return;
+  const c = selectedConv() || { id: S.selected };
+  $('del-text').textContent = `This permanently deletes ${displayName(c)} (${formatPhone(S.selected)}): their details, ${S.msgs.length} message(s), and every photo, video, voice note and document they sent or received. This cannot be undone.`;
+  $('del-digits').textContent = S.selected.slice(-4);
+  $('del-confirm').value = ''; $('del-err').textContent = ''; $('del-go').disabled = false;
+  if (typeof delDlg.showModal === 'function') delDlg.showModal(); else delDlg.setAttribute('open', '');
+  $('del-confirm').focus();
+};
+$('del-cancel').onclick = () => delDlg.close();
+$('del-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const phone = S.selected;
+  if (!phone) return;
+  $('del-err').textContent = ''; $('del-go').disabled = true;
+  try {
+    const r = await call('deleteCustomer')({ phone, confirm: $('del-confirm').value });
+    delDlg.close();
+    closeConversation(false);
+    toast(`Customer deleted (${r.data.messages} message(s), ${r.data.files} file(s)).`);
+  } catch (err) { $('del-err').textContent = errText(err); $('del-go').disabled = false; }
 });

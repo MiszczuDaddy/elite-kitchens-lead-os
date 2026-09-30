@@ -19,3 +19,10 @@ Steps
 6. Test a real message round trip.
 7. `./scripts/deploy-preview.sh --with-webhook` (moves every function to the newest versions), then
    `node scripts/secret-cleanup.js` (plan) and `node scripts/secret-cleanup.js --apply`.
+
+## Record: rotation completed 2026-09-30
+New verify token (v2) and new app secret (v3) live; webhook verified by Meta with the new token (phone-number override
+and dashboard); all 9 functions redeployed onto the newest versions; placeholder/old versions destroyed with
+`scripts/secret-cleanup.js --apply` (access token v1, app secret v1+v2, verify token v1). Real round trip
+(text in, reply out, photo) verified before and after the clean-up. The safety check initially read Cloud Run (no secret
+references visible) and correctly refused; it now reads the Cloud Functions records where secret pins are stored.

@@ -337,6 +337,41 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert.equal(t.to, '353894641917'); assert.equal(t.type, 'template'); assert.equal(t.template.components[0].parameters[0].text, 'Tomasz');
   ok('TEST A: new conversation sends the approved template to the normalised Irish number');
 
+  // --- data controls: delete a customer ---
+  const C = '353879999999';
+  files.CIMG = { mime: 'image/png', bytes: PNG };
+  await inbound(C, 'Carol Doyle', { type: 'image', image: { id: 'CIMG', mime_type: 'image/png', caption: 'my kitchen' } });
+  await text(C, 'Carol Doyle', 'Please call me');
+  await conv(C).waitFor(); await conv(C).click();
+  await loaded('.m.in .media-img', 1);
+  const cStore = admin.storage().bucket('demo-leados.firebasestorage.app');
+  assert.equal((await cStore.getFiles({ prefix: 'media/' + C + '/' }))[0].length, 1);
+  await page.click('#del-btn'); await page.waitForSelector('#del-dlg[open]');
+  assert.match(await page.locator('#del-text').innerText(), /Carol Doyle.*2 message/s);
+  await page.fill('#del-confirm', '0000'); await page.click('#del-go');
+  await page.waitForFunction(() => /last 4 digits of the number \(9999\)/.test(document.getElementById('del-err').innerText));
+  assert.equal(await conv(C).count(), 1); assert.equal((await cStore.getFiles({ prefix: 'media/' + C + '/' }))[0].length, 1);
+  ok('delete: a wrong confirmation is refused with a clear message and deletes nothing');
+  await page.fill('#del-confirm', '9999'); await page.click('#del-go');
+  await page.waitForFunction(() => !document.getElementById('del-dlg').open);
+  await page.waitForFunction((p) => !document.querySelector(`.conv[data-phone="${p}"]`), C);
+  assert.match(await page.locator('#toast').innerText(), /Customer deleted \(2 message\(s\), 1 file\(s\)\)/);
+  assert(!(await page.locator('#thread').isVisible())); assert.equal(await page.evaluate(() => location.hash), '');
+  assert.equal((await admin.firestore().collection('conversations').doc(C).collection('messages').get()).size, 0);
+  assert.equal((await admin.firestore().collection('contacts').doc(C).get()).exists, false);
+  assert.equal((await cStore.getFiles({ prefix: 'media/' + C + '/' }))[0].length, 0);
+  assert.equal(await conv(A).count(), 1); assert.equal(await conv(B).count(), 1);
+  const aud = (await admin.firestore().collection('auditLog').get()).docs.map((d) => d.data());
+  assert.equal(aud.length, 1); assert.equal(aud[0].phoneLast3, '999'); assert(!JSON.stringify(aud[0]).includes(C));
+  ok('delete: confirmed deletion removes the customer, messages, files and record; others untouched; audit entry holds no personal data');
+
+  await admin.firestore().collection('conversations').doc(A).collection('messages').doc('wamid.EXPIRED').set({ wamid: 'wamid.EXPIRED', direction: 'in', type: 'image', body: '[image]',
+    media: { waMediaId: 'GONE', mimeType: 'image/png', status: 'expired', error: 'File removed after the retention period', filename: 'old-photo.jpg' }, status: 'received', createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 800 * 86400e3) });
+  await conv(A).click();
+  await page.waitForSelector('.media-status:has-text("removed after the retention period")');
+  assert.equal(await page.locator('.media-status .linkbtn').count(), 0);
+  ok('a photo removed by the retention policy says so, with no pointless Retry button');
+
   // --- deep link survives reload ---
   await page.goto('http://127.0.0.1:5055/#c/' + A);
   await signIn(staffToken);
