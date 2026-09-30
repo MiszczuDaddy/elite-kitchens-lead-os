@@ -156,6 +156,38 @@ test('input validation', async () => {
   await rejects(h.sendReply(staff, { phone: '353800000000', body: 'x' }, deps()), 'not-found');
 });
 
+test('two customers get two separate conversations; replies go to the right number', async () => {
+  await post(inbound('wamid.A1', 'Hi from A', '353851111111'));
+  await post(inbound('wamid.B1', 'Hi from B', '353862222222'));
+  await post(inbound('wamid.A2', 'A again', '353851111111'));
+  assert.equal((await db.collection('conversations').get()).size, 2);
+  assert.deepEqual((await msgs('353851111111')).map((m) => m.body).sort(), ['A again', 'Hi from A']);
+  assert.deepEqual((await msgs('353862222222')).map((m) => m.body), ['Hi from B']);
+  await h.sendReply(staff, { phone: '353851111111', body: 'reply to A' }, deps());
+  await h.sendReply(staff, { phone: '353862222222', body: 'reply to B' }, deps());
+  assert.deepEqual(graphCalls.map((c) => [c.body.to, c.body.text.body]), [['353851111111', 'reply to A'], ['353862222222', 'reply to B']]);
+  assert.equal((await msgs('353851111111')).filter((m) => m.direction === 'out').length, 1);
+  assert.equal((await msgs('353862222222')).filter((m) => m.direction === 'out').length, 1);
+});
+
+test('markRead sets lastReadAt without reordering the inbox, and is staff-only', async () => {
+  await post(inbound('wamid.M1', 'hello', '353851111111'));
+  const ref = db.collection('conversations').doc('353851111111');
+  const before = (await ref.get()).data();
+  assert.equal(before.lastReadAt, undefined);
+  await h.markRead(staff, { phone: '+353 85 111 1111' }, deps());
+  const after = (await ref.get()).data();
+  assert.ok(after.lastReadAt);
+  assert.equal(after.updatedAt.toMillis(), before.updatedAt.toMillis());     // inbox order untouched
+  await post(inbound('wamid.M2', 'again', '353851111111'));                   // new inbound is newer than lastReadAt
+  const c = (await ref.get()).data();
+  assert.ok(c.lastInboundAt.toMillis() >= c.lastReadAt.toMillis() - 5000);
+  await rejects(h.markRead(null, { phone: '353851111111' }, deps()), 'unauthenticated');
+  await rejects(h.markRead({ uid: 'x', token: { email: 'stranger@gmail.com', email_verified: true, staff: true } }, { phone: '353851111111' }, deps()), 'permission-denied');
+  await rejects(h.markRead(staff, { phone: '353800000000' }, deps()), 'not-found');
+  await rejects(h.markRead(staff, {}, deps()), 'invalid-argument');
+});
+
 test('Firestore rules: staff can read, nobody can write from a browser', async () => {
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: Number(port), rules: fs.readFileSync('../firestore.rules', 'utf8') } });

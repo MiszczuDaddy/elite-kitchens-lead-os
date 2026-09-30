@@ -80,9 +80,18 @@ async function applyStatus(db, s) {
   });
 }
 
+// Mark a conversation read by staff. Deliberately does NOT touch updatedAt (that would reorder the inbox).
+async function markRead(db, phone) {
+  const convRef = db.collection('conversations').doc(phone);
+  const snap = await convRef.get();
+  if (!snap.exists) return false;
+  await convRef.update({ lastReadAt: FieldValue.serverTimestamp() });
+  return true;
+}
+
 async function getConversation(db, phone) {
   const s = await db.collection('conversations').doc(phone).get();
   return s.exists ? s.data() : null;
 }
 
-module.exports = { storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

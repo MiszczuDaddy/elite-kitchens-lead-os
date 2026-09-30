@@ -22,7 +22,7 @@ const API_VERSION = defineString('WHATSAPP_API_VERSION', { default: 'v21.0' });
 const SECRETS = [ACCESS_TOKEN, APP_SECRET, VERIFY_TOKEN];   // bound on every function so .value() is always safe
 const cfg = () => ({
   phoneId: PHONE_ID.value(), allowedEmails: ALLOWED_EMAILS.value(), template: TEMPLATE.value(), lang: LANG.value(),
-  version: API_VERSION.value(), token: ACCESS_TOKEN.value().trim(), appSecret: APP_SECRET.value().trim(), verifyToken: VERIFY_TOKEN.value().trim(),
+  version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), appSecret: APP_SECRET.value().trim(), verifyToken: VERIFY_TOKEN.value().trim(),
 });
 const deps = () => { const c = cfg(); return { db: admin.firestore(), adminAuth: admin.auth(), cfg: c, wa: createClient(c) }; };
 
@@ -36,4 +36,5 @@ exports.webhook = onRequest({ secrets: SECRETS }, async (req, res) => {
 
 exports.claimAccess = onCall({ secrets: SECRETS }, (req) => h.claimAccess(req.auth, deps()));
 exports.startConversation = onCall({ secrets: SECRETS }, (req) => h.startConversation(req.auth, req.data, deps()));
+exports.markRead = onCall({ secrets: SECRETS }, (req) => h.markRead(req.auth, req.data, deps()));
 exports.sendReply = onCall({ secrets: SECRETS }, (req) => h.sendReply(req.auth, req.data, deps()));

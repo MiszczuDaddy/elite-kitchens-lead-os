@@ -9,7 +9,7 @@ class WhatsAppError extends Error {
 function createClient(cfg, fetchImpl = fetch) {
   async function post(payload) {
     if (!cfg.phoneId || !cfg.token) throw new WhatsAppError('WhatsApp is not configured (phone number id / access token missing).');
-    const res = await fetchImpl(`https://graph.facebook.com/${cfg.version || 'v21.0'}/${cfg.phoneId}/messages`, {
+    const res = await fetchImpl(`${cfg.apiBase || 'https://graph.facebook.com'}/${cfg.version || 'v21.0'}/${cfg.phoneId}/messages`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),

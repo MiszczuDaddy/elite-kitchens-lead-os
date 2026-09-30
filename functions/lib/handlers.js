@@ -97,4 +97,12 @@ async function sendReply(auth, data, { db, wa, cfg }) {
   }
 }
 
-module.exports = { webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+async function markRead(auth, data, { db, cfg }) {
+  assertStaff(auth, cfg);
+  const phone = normalizePhone(data && data.phone);
+  if (!phone) throw new HttpsError('invalid-argument', 'Missing phone.');
+  if (!(await store.markRead(db, phone))) throw new HttpsError('not-found', 'Conversation not found.');
+  return { ok: true };
+}
+
+module.exports = { markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
