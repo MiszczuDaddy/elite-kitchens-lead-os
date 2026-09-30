@@ -22,7 +22,7 @@ const API_VERSION = defineString('WHATSAPP_API_VERSION', { default: 'v21.0' });
 const SECRETS = [ACCESS_TOKEN, APP_SECRET, VERIFY_TOKEN];   // bound on every function so .value() is always safe
 const cfg = () => ({
   phoneId: PHONE_ID.value(), allowedEmails: ALLOWED_EMAILS.value(), template: TEMPLATE.value(), lang: LANG.value(),
-  version: API_VERSION.value(), token: ACCESS_TOKEN.value(), appSecret: APP_SECRET.value(), verifyToken: VERIFY_TOKEN.value(),
+  version: API_VERSION.value(), token: ACCESS_TOKEN.value().trim(), appSecret: APP_SECRET.value().trim(), verifyToken: VERIFY_TOKEN.value().trim(),
 });
 const deps = () => { const c = cfg(); return { db: admin.firestore(), adminAuth: admin.auth(), cfg: c, wa: createClient(c) }; };
 
