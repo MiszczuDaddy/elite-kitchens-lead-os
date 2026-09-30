@@ -322,12 +322,28 @@ async function downloadMedia(phone, m) {
   try { saveAs(await loadUrl(phone, m.id, true), (m.media && m.media.filename) || 'file'); } catch (e) { banner('Could not download: ' + errText(e)); }
 }
 
+// Safety net: if the automatic download at arrival failed or never finished, fetch it in the background (once per page load,
+// only when it scrolls into view) instead of waiting for a click. WhatsApp keeps media for about 30 days.
+const autoTried = new Set();
+function autoRetryWanted(m) {
+  const md = m.media || {}, age = Date.now() - (ms(m.createdAt) || Date.now());
+  if (!(md.waMediaId || md.id) || age > 29 * 86400000) return false;
+  return (md.status === 'failed' && age > 20000) || (md.status === 'pending' && age > 90000) || !md.status;   // !status = a message stored before automatic downloads existed
+}
+function autoRetry(phone, id) {
+  const k = phone + '/' + id;
+  if (autoTried.has(k)) return;
+  autoTried.add(k);
+  limited(() => call('retryMedia')({ phone, id })).catch(() => {});
+}
+
 function mediaBlock(m, type) {
   const [icon, label] = MEDIA_LABEL[type];
   const box = el('div', 'media-box');
   const md = m.media || {};
   const phone = S.selected, id = m.id;
   if (m.attach) { box.append(chip(icon, `${m.attach.name} · ${m.progress != null ? 'Uploading ' + m.progress + '%' : 'Sending…'}`)); return box; }
+  if (md.status !== 'stored' && autoRetryWanted(m)) whenVisible(box, () => autoRetry(phone, id));
   if (md.status === 'pending') { box.append(chip(icon, `${label} · downloading…`)); return box; }
   if (md.status !== 'stored' || !md.storagePath) {
     const c = chip(icon, `${md.filename || label} · ${md.status === 'failed' ? "couldn't be downloaded" : 'not downloaded yet'}`);

@@ -35,7 +35,7 @@ const web = http.createServer((req, res) => {
 // ---- mock Meta Graph API: messages, media lookup, media bytes, media upload ----
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
-const files = {}, failIds = new Set(), uploadsSeen = [];
+const files = {}, failIds = new Set(), failOnce = new Set(), uploadsSeen = [];
 const graph = []; let gid = 0;
 const meta = http.createServer((req, res) => {
   const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
@@ -54,6 +54,7 @@ const meta = http.createServer((req, res) => {
     }
     if (req.method === 'GET' && (m = /^\/v21\.0\/([^/?]+)$/.exec(u))) {
       const id = decodeURIComponent(m[1]), f = files[id];
+      if (failOnce.delete(id)) return json({ error: { code: 131052, message: 'Temporary media error' } }, 500);
       if (!f || failIds.has(id)) return json({ error: { code: 100, message: 'Media not found' } }, 404);
       return json({ url: 'http://127.0.0.1:9911/files/' + id, mime_type: f.mime, sha256: 'x', file_size: f.bytes.length });
     }
@@ -239,6 +240,23 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await page.click('.media-status .linkbtn:has-text("Retry")');
   await loaded('.m.in .media-img', 2);
   assert.equal(await page.locator('.media-status').count(), 0); ok('a photo that failed to download shows a Retry button; retrying fetches and displays it');
+
+  // automatic safety net: nobody should have to click to get a photo
+  const old = (await admin.firestore().collection('conversations').doc(A).collection('messages').doc('wamid.LEGACY').set({ wamid: 'wamid.LEGACY', direction: 'in', type: 'image', body: '[image]',
+    media: { id: 'LEGACY1', mime_type: 'image/png' }, status: 'received', createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 3600e3) }, { merge: true }));
+  files.LEGACY1 = { mime: 'image/png', bytes: PNG };
+  await loaded('.m.in .media-img', 3);
+  ok('an image stored by the old Phase 1 code (never downloaded) is fetched automatically when it comes into view');
+  await admin.firestore().collection('conversations').doc(A).collection('messages').doc('wamid.STUCK').set({ wamid: 'wamid.STUCK', direction: 'in', type: 'image', body: '[image]',
+    media: { waMediaId: 'STUCK1', mimeType: 'image/png', status: 'pending' }, status: 'received', createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 600e3) });
+  files.STUCK1 = { mime: 'image/png', bytes: PNG };
+  await loaded('.m.in .media-img', 4);
+  ok('a download stuck as "pending" for minutes is completed automatically');
+  files.ONCE1 = { mime: 'image/png', bytes: PNG }; failOnce.add('ONCE1');
+  await inbound(A, 'Anna M. Murphy', { type: 'image', timestamp: String(Math.floor(Date.now() / 1000) - 120), image: { id: 'ONCE1', mime_type: 'image/png' } });
+  await loaded('.m.in .media-img', 5);
+  assert.equal(await page.locator('.media-status').count(), 0);
+  ok('a download that failed at arrival (Meta hiccup) is retried by the page on its own and shows up without any click');
 
   // unread badges with counts, on a conversation that is NOT open
   await conv(B).waitFor();
