@@ -16,9 +16,11 @@
 - No secrets in the repo or its git history (Meta token, app secret, private keys, API keys scanned). The "EAA..." pattern
   matches only the 1x1 test PNG embedded in the tests.
 - Customer media is never public: verified by tests that the storage emulator refuses unauthenticated AND staff direct reads.
-- `npm audit --omit=dev`: 0 high/critical, 9 moderate, all transitive in firebase-admin/firebase-functions
-  (fix = major upgrade to firebase-admin 14 / firebase-functions 7). Not reachable in how we use them; schedule a
-  tested upgrade as a separate change (it touches the live webhook, so it needs owner approval).
+- `npm audit --omit=dev`: 0 high/critical, 9 moderate (transitive in firebase-admin 13 / firebase-functions 6).
+  UPGRADED (chore/firebase-sdk-upgrade): firebase-admin 14.5.0 + firebase-functions 7.4.0 -> 2 moderate remain, both the same
+  issue: uuid 9.0.1 pinned inside Google's @google-cloud/storage 8.2.0 (flaw needs a caller-supplied buffer to uuid v3/v5/v6;
+  gaxios/we only use v4). Accepted residual; clears when Google updates that dependency. Not forced with an override because
+  that would put untested code paths (signed URLs, resumable writes) into production.
 - Hosting: no-cache + nosniff + frame-deny + referrer policy on our own pages (auth helper paths deliberately untouched).
 
 ## Known gaps / recommended next hardening

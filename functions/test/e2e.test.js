@@ -4,19 +4,21 @@ const { test, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const fs = require('fs');
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { getStorage } = require('firebase-admin/storage');
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const h = require('../lib/handlers');
 const { createClient } = require('../lib/whatsapp');
 
 const PROJECT = 'demo-leados';
-admin.initializeApp({ projectId: PROJECT, storageBucket: 'demo-leados.firebasestorage.app' });
-const db = admin.firestore();
+initializeApp({ projectId: PROJECT, storageBucket: 'demo-leados.firebasestorage.app' });
+const db = getFirestore();
 
 const cfg = { mediaTimeoutMs: 5000, phoneId: '111', token: 'tok', appSecret: 'secret', verifyToken: 'vt', template: 'elite_kitchens_new_lead',
   lang: 'en', version: 'v21.0', allowedEmails: 'Thomas@example.com, other@example.com' };
 const BUCKET = 'demo-leados.firebasestorage.app';
-const bucket = admin.storage().bucket(BUCKET);
+const bucket = getStorage().bucket(BUCKET);
 const MB = 1024 * 1024;
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
@@ -119,7 +121,7 @@ test('free text is refused outside the 24h window (no Meta call)', async () => {
   await rejects(h.sendReply(staff, { phone: '353871112222', body: 'hi' }, deps()), 'failed-precondition');
   assert.equal(graphCalls.length, before);
   // and an inbound message older than 24h does not count
-  await db.collection('conversations').doc('353871112222').set({ lastInboundAt: admin.firestore.Timestamp.fromMillis(Date.now() - 25 * 3600e3) }, { merge: true });
+  await db.collection('conversations').doc('353871112222').set({ lastInboundAt: Timestamp.fromMillis(Date.now() - 25 * 3600e3) }, { merge: true });
   await rejects(h.sendReply(staff, { phone: '353871112222', body: 'hi' }, deps()), 'failed-precondition');
 });
 

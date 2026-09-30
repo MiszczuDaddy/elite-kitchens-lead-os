@@ -27,12 +27,14 @@ gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member="serviceAc
 gcloud iam service-accounts add-iam-policy-binding "$SA" --member="serviceAccount:$SA" --role=roles/iam.serviceAccountTokenCreator --project "$PROJECT" --quiet >/dev/null
 echo "   ok"
 
-if [ "${1:-}" = "--with-webhook" ]; then
-  echo "==> saving the CURRENT webhook revision so it can be restored in one command"
-  PREV=$(gcloud run services describe webhook --region "$REGION" --project "$PROJECT" --format='value(status.latestReadyRevisionName)')
-  echo "$PREV" > "$HOME/.webhook-previous-revision"
-  echo "   previous revision: $PREV  (rollback: ./scripts/rollback-webhook.sh)"
-fi
+echo "==> saving the CURRENT live revision of every function so ALL of it can be restored in one command"
+: > "$HOME/.previous-revisions"
+for svc in $(gcloud run services list --region "$REGION" --project "$PROJECT" --format='value(name)'); do
+  rev=$(gcloud run services describe "$svc" --region "$REGION" --project "$PROJECT" --format='value(status.latestReadyRevisionName)')
+  echo "$svc=$rev" >> "$HOME/.previous-revisions"
+  [ "$svc" = "webhook" ] && echo "$rev" > "$HOME/.webhook-previous-revision"
+done
+echo "   saved $(wc -l < "$HOME/.previous-revisions") revisions (rollback: ./scripts/rollback-functions.sh, or just the webhook: ./scripts/rollback-webhook.sh)"
 
 echo "==> deploying storage rules"
 firebase deploy --project "$PROJECT" --only storage

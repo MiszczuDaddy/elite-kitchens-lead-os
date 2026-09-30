@@ -2,11 +2,14 @@
 const { onRequest, onCall } = require('firebase-functions/v2/https');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret, defineString } = require('firebase-functions/params');
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+const { getAuth } = require('firebase-admin/auth');
+const { getStorage } = require('firebase-admin/storage');
 const { createClient } = require('./lib/whatsapp');
 const h = require('./lib/handlers');
 
-admin.initializeApp();
+initializeApp();
 // europe-west1 (Belgium) is the closest supported region to Ireland. maxInstances caps runaway cost.
 setGlobalOptions({ region: 'europe-west1', maxInstances: 3 });
 
@@ -25,7 +28,7 @@ const cfg = () => ({
   version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), appSecret: APP_SECRET.value().trim(), verifyToken: VERIFY_TOKEN.value().trim(),
 });
 const bucketName = () => process.env.STORAGE_BUCKET || `${process.env.GCLOUD_PROJECT}.firebasestorage.app`;
-const deps = () => { const c = cfg(); return { db: admin.firestore(), adminAuth: admin.auth(), cfg: c, wa: createClient(c), bucket: admin.storage().bucket(bucketName()) }; };
+const deps = () => { const c = cfg(); return { db: getFirestore(), adminAuth: getAuth(), cfg: c, wa: createClient(c), bucket: getStorage().bucket(bucketName()) }; };
 
 // Public: Meta calls this. Reachable at https://<project>.web.app/webhook via a Hosting rewrite.
 exports.webhook = onRequest({ secrets: SECRETS, timeoutSeconds: 90, memory: '512MiB' }, async (req, res) => {

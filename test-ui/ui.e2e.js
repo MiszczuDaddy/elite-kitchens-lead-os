@@ -1,7 +1,12 @@
 'use strict';
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto'), assert = require('assert');
 const { chromium } = require('playwright');
-const admin = require('../functions/node_modules/firebase-admin');
+// Resolve the Admin SDK from functions/ the way Node's package "exports" intend (works for any SDK version).
+const fnRequire = require('module').createRequire(path.join(__dirname, '..', 'functions', 'package.json'));
+const { initializeApp } = fnRequire('firebase-admin/app');
+const { getFirestore, Timestamp } = fnRequire('firebase-admin/firestore');
+const { getAuth } = fnRequire('firebase-admin/auth');
+const { getStorage } = fnRequire('firebase-admin/storage');
 
 const ROOT = path.join(__dirname, '..');
 const SHOTS = process.env.SHOTS_DIR || path.join(__dirname, 'shots');
@@ -77,8 +82,8 @@ const text = (from, name, body) => inbound(from, name, { type: 'text', text: { b
 const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '111' }, statuses: [{ id: wamid, status: st, recipient_id: to }] } }] }] });
 
 (async () => {
-  admin.initializeApp({ projectId: 'demo-leados' });
-  const mk = async (email) => { const u = await admin.auth().createUser({ email, emailVerified: true }); return admin.auth().createCustomToken(u.uid); };
+  initializeApp({ projectId: 'demo-leados' });
+  const mk = async (email) => { const u = await getAuth().createUser({ email, emailVerified: true }); return getAuth().createCustomToken(u.uid); };
   const staffToken = await mk('staff@test.dev'), strangerToken = await mk('stranger@test.dev');
 
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/pw-browsers/chromium' });
@@ -178,12 +183,12 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
   await page.waitForFunction((p) => /Kitchen · Swords/.test(document.querySelector(`.conv[data-phone="${p}"]`).innerText), A);
   await page.waitForFunction(() => /Anna M\. Murphy/.test(document.getElementById('t-name').innerText));
-  const saved = (await admin.firestore().doc('contacts/' + A).get()).data();
+  const saved = (await getFirestore().doc('contacts/' + A).get()).data();
   assert.deepEqual([saved.name, saved.email, saved.location, saved.projectType, saved.budget, saved.source, saved.notes],
     ['Anna M. Murphy', 'anna@example.com', 'Swords', 'Kitchen', '€15–20k', 'Meta Ads', 'Wants island']);
   ok('details save to the customer record; list shows "Kitchen · Swords"; header shows the edited name');
   await page.fill('#d-notes', 'Wants island and pantry, typing…');
-  await admin.firestore().doc('contacts/' + A).update({ budget: '€99k' });     // someone else edits while I am typing
+  await getFirestore().doc('contacts/' + A).update({ budget: '€99k' });     // someone else edits while I am typing
   await sleep(700);
   assert.equal(await page.inputValue('#d-notes'), 'Wants island and pantry, typing…'); ok("a remote change never overwrites text that is being typed");
   await page.click('#d-save'); await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
@@ -242,13 +247,13 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert.equal(await page.locator('.media-status').count(), 0); ok('a photo that failed to download shows a Retry button; retrying fetches and displays it');
 
   // automatic safety net: nobody should have to click to get a photo
-  const old = (await admin.firestore().collection('conversations').doc(A).collection('messages').doc('wamid.LEGACY').set({ wamid: 'wamid.LEGACY', direction: 'in', type: 'image', body: '[image]',
-    media: { id: 'LEGACY1', mime_type: 'image/png' }, status: 'received', createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 3600e3) }, { merge: true }));
+  const old = (await getFirestore().collection('conversations').doc(A).collection('messages').doc('wamid.LEGACY').set({ wamid: 'wamid.LEGACY', direction: 'in', type: 'image', body: '[image]',
+    media: { id: 'LEGACY1', mime_type: 'image/png' }, status: 'received', createdAt: Timestamp.fromMillis(Date.now() - 3600e3) }, { merge: true }));
   files.LEGACY1 = { mime: 'image/png', bytes: PNG };
   await loaded('.m.in .media-img', 3);
   ok('an image stored by the old Phase 1 code (never downloaded) is fetched automatically when it comes into view');
-  await admin.firestore().collection('conversations').doc(A).collection('messages').doc('wamid.STUCK').set({ wamid: 'wamid.STUCK', direction: 'in', type: 'image', body: '[image]',
-    media: { waMediaId: 'STUCK1', mimeType: 'image/png', status: 'pending' }, status: 'received', createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 600e3) });
+  await getFirestore().collection('conversations').doc(A).collection('messages').doc('wamid.STUCK').set({ wamid: 'wamid.STUCK', direction: 'in', type: 'image', body: '[image]',
+    media: { waMediaId: 'STUCK1', mimeType: 'image/png', status: 'pending' }, status: 'received', createdAt: Timestamp.fromMillis(Date.now() - 600e3) });
   files.STUCK1 = { mime: 'image/png', bytes: PNG };
   await loaded('.m.in .media-img', 4);
   ok('a download stuck as "pending" for minutes is completed automatically');
@@ -279,7 +284,7 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await page.waitForFunction(() => document.querySelectorAll('.m.out .media-img').length === 1 && !/Sending|Uploading/.test(document.getElementById('msgs').innerText));
   await loaded('.m.out .media-img', 1);
   assert(!(await page.locator('#attach-bar').isVisible()));
-  const store = admin.storage().bucket('demo-leados.firebasestorage.app');
+  const store = getStorage().bucket('demo-leados.firebasestorage.app');
   assert.equal((await store.getFiles({ prefix: 'uploads/' }))[0].length, 0);
   assert.equal((await store.getFiles({ prefix: 'media/' + A + '/wamid.OUT' }))[0].length, 1);
   ok('TEST: sending a photo with a caption - uploaded, sent via WhatsApp to the right customer, shown in the thread, temp file removed');
@@ -322,8 +327,8 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   ok('TEST H: search finds the right customer by name, phone (08x or +353) and location');
 
   // --- 24-hour window ---
-  await admin.firestore().doc('conversations/353870000000').set({ phone: '353870000000', name: 'Old Lead', updatedAt: admin.firestore.Timestamp.now(),
-    lastMessage: 'ancient', lastInboundAt: admin.firestore.Timestamp.fromMillis(Date.now() - 30 * 3600e3) });
+  await getFirestore().doc('conversations/353870000000').set({ phone: '353870000000', name: 'Old Lead', updatedAt: Timestamp.now(),
+    lastMessage: 'ancient', lastInboundAt: Timestamp.fromMillis(Date.now() - 30 * 3600e3) });
   await conv('353870000000').waitFor(); await conv('353870000000').click();
   await page.waitForSelector('#window-note:not([hidden])');
   assert(await page.locator('#text').isDisabled()); assert(await page.locator('#attach-btn').isDisabled()); ok('after 24h of silence the composer and attach button are disabled and a "Send template" prompt is shown');
@@ -344,7 +349,7 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await text(C, 'Carol Doyle', 'Please call me');
   await conv(C).waitFor(); await conv(C).click();
   await loaded('.m.in .media-img', 1);
-  const cStore = admin.storage().bucket('demo-leados.firebasestorage.app');
+  const cStore = getStorage().bucket('demo-leados.firebasestorage.app');
   assert.equal((await cStore.getFiles({ prefix: 'media/' + C + '/' }))[0].length, 1);
   await page.click('#del-btn'); await page.waitForSelector('#del-dlg[open]');
   assert.match(await page.locator('#del-text').innerText(), /Carol Doyle.*2 message/s);
@@ -357,16 +362,16 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await page.waitForFunction((p) => !document.querySelector(`.conv[data-phone="${p}"]`), C);
   assert.match(await page.locator('#toast').innerText(), /Customer deleted \(2 message\(s\), 1 file\(s\)\)/);
   assert(!(await page.locator('#thread').isVisible())); assert.equal(await page.evaluate(() => location.hash), '');
-  assert.equal((await admin.firestore().collection('conversations').doc(C).collection('messages').get()).size, 0);
-  assert.equal((await admin.firestore().collection('contacts').doc(C).get()).exists, false);
+  assert.equal((await getFirestore().collection('conversations').doc(C).collection('messages').get()).size, 0);
+  assert.equal((await getFirestore().collection('contacts').doc(C).get()).exists, false);
   assert.equal((await cStore.getFiles({ prefix: 'media/' + C + '/' }))[0].length, 0);
   assert.equal(await conv(A).count(), 1); assert.equal(await conv(B).count(), 1);
-  const aud = (await admin.firestore().collection('auditLog').get()).docs.map((d) => d.data());
+  const aud = (await getFirestore().collection('auditLog').get()).docs.map((d) => d.data());
   assert.equal(aud.length, 1); assert.equal(aud[0].phoneLast3, '999'); assert(!JSON.stringify(aud[0]).includes(C));
   ok('delete: confirmed deletion removes the customer, messages, files and record; others untouched; audit entry holds no personal data');
 
-  await admin.firestore().collection('conversations').doc(A).collection('messages').doc('wamid.EXPIRED').set({ wamid: 'wamid.EXPIRED', direction: 'in', type: 'image', body: '[image]',
-    media: { waMediaId: 'GONE', mimeType: 'image/png', status: 'expired', error: 'File removed after the retention period', filename: 'old-photo.jpg' }, status: 'received', createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 800 * 86400e3) });
+  await getFirestore().collection('conversations').doc(A).collection('messages').doc('wamid.EXPIRED').set({ wamid: 'wamid.EXPIRED', direction: 'in', type: 'image', body: '[image]',
+    media: { waMediaId: 'GONE', mimeType: 'image/png', status: 'expired', error: 'File removed after the retention period', filename: 'old-photo.jpg' }, status: 'received', createdAt: Timestamp.fromMillis(Date.now() - 800 * 86400e3) });
   await conv(A).click();
   await page.waitForSelector('.media-status:has-text("removed after the retention period")');
   assert.equal(await page.locator('.media-status .linkbtn').count(), 0);
