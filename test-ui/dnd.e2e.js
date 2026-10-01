@@ -84,11 +84,24 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   const dot = (s) => lane(s).locator('.lane-title').evaluate((e) => getComputedStyle(e, '::before').backgroundColor);
   const dots = await Promise.all(['inbox', 'booked', 'quoted', 'won', 'closed'].map(dot));
   assert.equal(new Set(dots).size, 5, 'five different dot colours: ' + dots);
-  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.lane')].map((l) => getComputedStyle(l, '::before').backgroundColor)), Array(5).fill('rgba(0, 0, 0, 0)'));
+  const alpha = (c) => { const m = /rgba?\(([^)]+)\)/.exec(c); const p = m[1].split(',').map((x) => parseFloat(x)); return p.length > 3 ? p[3] : 1; };
+  const laneTints = () => page.evaluate(() => [...document.querySelectorAll('.lane')].map((l) => getComputedStyle(l, '::before').backgroundColor));
+  const rest = await laneTints();
+  assert.equal(new Set(rest).size, 5, 'five different column tints: ' + rest);
+  for (const c of rest) assert.ok(alpha(c) >= 0.03 && alpha(c) <= 0.07, 'tint strength ' + alpha(c));          // very pale, 3-7%
+  const box = await lane('quoted').boundingBox(); assert.ok(box.height >= 300, 'column tint covers a useful area: ' + box.height);
   assert.equal(await row(ph.quoted).evaluate((e) => getComputedStyle(e).backgroundColor), 'rgba(0, 0, 0, 0)');
   assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('pipe-board')).backgroundColor), 'rgba(0, 0, 0, 0)');
   await page.screenshot({ path: path.join(SHOTS, 'pipeline-colours.png') });
-  ok('each stage has a small coloured dot beside its heading; columns, cards and the board have no colour fill');
+  ok('each stage has a coloured dot and a very pale permanent column tint (3-7%); cards and the board itself stay uncoloured');
+  await page.fill('#pipe-search', 'zzzz-no-match');                                                               // every column empty: still identifiable by tint
+  assert.equal(await page.locator('.prow').count(), 0);
+  assert.deepEqual(await laneTints(), rest);
+  for (const sg of ['inbox', 'booked', 'quoted', 'won', 'closed']) assert.ok((await lane(sg).boundingBox()).height >= 300);
+  await page.screenshot({ path: path.join(SHOTS, 'pipeline-empty-columns.png') });
+  await page.fill('#pipe-search', '');
+  await page.waitForSelector('.prow');
+  ok('empty columns keep their tint and size, so the five stages are still obvious');
   assert.equal(await page.locator('.prow[draggable=true]').count(), 7);
   assert.ok(await page.locator('.prow-menu').count() >= 7);
   ok('every card is draggable on desktop and keeps its three-dot menu');
@@ -98,13 +111,14 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await drag(ph.quoted, 'won', { hold: async () => {
     assert.ok(await row(ph.quoted).evaluate((e) => e.classList.contains('dragging')));
     await lane('won').evaluate((e) => e.classList.contains('drop-target')) || await page.waitForSelector('.lane[data-stage="won"].drop-target');
-    assert.notEqual(await tint('won'), 'rgba(0, 0, 0, 0)');
-    assert.equal(await tint('quoted'), 'rgba(0, 0, 0, 0)');                       // its own column is not a destination
+    await page.waitForTimeout(300);                                                  // let the 120ms tint fade finish
+    assert.ok(alpha(await tint('won')) > alpha(rest[3]) * 1.7 && alpha(await tint('won')) < 0.2);              // the hovered column's own tint gets clearly stronger, still pale
+    assert.equal(await tint('quoted'), rest[2]);                                    // its own column is not a destination: unchanged
     assert.equal(await page.locator('.lane.drop-target').count(), 1);
     await page.screenshot({ path: path.join(SHOTS, 'pipeline-drag.png') });
   } });
   await inLane('won', ph.quoted).waitFor();
-  ok('while dragging, the card fades and only the destination column gets a faint tint of its stage colour');
+  ok('while dragging, the card fades and only the destination column\'s own tint becomes stronger');
   assert.equal(await page.locator('.dragging, .drop-target, .is-dragging').count(), 0);
   ok('the highlight and drag styling are fully cleared after the drop');
 
@@ -165,6 +179,20 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   ok('while a card is saving it is dimmed and cannot be moved again: one request, one card, consistent final state');
   await page.unroute('**/setConversationStatus');
 
+  // ---- tablet width: columns scroll inside the board, the page itself never scrolls sideways ----
+  const tctx = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  const tp = await tctx.newPage(); tp.on('pageerror', (e) => errors.push('tablet: ' + e.message));
+  await tp.goto('http://127.0.0.1:5055/');
+  await tp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
+  await tp.waitForSelector('#app:not([hidden])');
+  await tp.click('#nav-pipeline');
+  await tp.waitForSelector('.lane .prow');
+  assert.equal(await tp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  assert.equal(await tp.locator('.lane').count(), 5);
+  await tp.screenshot({ path: path.join(SHOTS, 'pipeline-tablet.png') });
+  ok('tablet width: five tinted columns, no page-level sideways scroll');
+  await tctx.close();
+
   // ---- phone: no drag-and-drop dependency, tap + menu is the way ----
   const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push('mobile: ' + e.message));
@@ -177,7 +205,8 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   assert.equal(await mp.locator('#pipe-stages button').count(), 5);
   const chipDots = await mp.locator('#pipe-stages button').evaluateAll((bs) => bs.map((b) => getComputedStyle(b, '::before').backgroundColor));
   assert.equal(new Set(chipDots).size, 5);
-  assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.querySelector('.pipe-scroll').scrollWidth <= document.querySelector('.pipe-scroll').clientWidth), true);
+  assert.ok(alpha(await mp.locator('.lane.lane-on').evaluate((e) => getComputedStyle(e, '::before').backgroundColor)) >= 0.03);
   await mp.screenshot({ path: path.join(SHOTS, 'pipeline-phone-colours.png') });
   await mp.tap('#pipe-stages button[data-stage="quoted"]');
   await mp.locator(`.prow[data-phone="${ph.noval}"] .prow-menu`).tap();
