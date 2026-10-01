@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="only light">
+<title>Theme test A</title>
+<style>body{margin:0;background:#f7f7f4;color:#252724;font:15px/1.5 system-ui,sans-serif}.card{background:#fdfdfc;border:1px solid #e6e7e1;border-radius:6px;padding:12px 14px;margin:8px}h1{font-size:16px;margin:0 0 4px}p{margin:4px 0}small{color:#686b64}:root{color-scheme:only light}</style>
+</head><body><div class="card"><h1>Variant A: current setup</h1>
+<p>This box should be <b>cream/light with dark text</b>. If it looks dark or grey-black, your browser darkened it.</p>
+<small id="i"></small></div>
+<script>document.getElementById('i').textContent='Phone says prefers-dark: '+matchMedia('(prefers-color-scheme: dark)').matches+' | '+navigator.userAgent.replace(/\).*/,')');</script>
+</body></html>

@@ -27,6 +27,7 @@ case "${1:-}" in
     firebase hosting:channel:deploy phase4 --expires 30d --project "$PROJECT"
     ;;
   live)
+    [ -d public/theme-lab ] && { echo "Refusing to publish to production: the temporary test folder public/theme-lab is still there. Remove it first."; exit 1; }
     read -r -p "Publish the Phase 4 screen to PRODUCTION Hosting? Type yes: " a; [ "$a" = "yes" ] || { echo "Cancelled."; exit 1; }
     firebase deploy --project "$PROJECT" --only hosting
     ;;
