@@ -202,7 +202,8 @@ window.PIPE = (() => {
     const name = (row && row.name) || formatPhone(phone);
     P.moving.add(phone); P.opt.set(phone, { to: status }); note(''); render();
     try {
-      await call('setConversationStatus')({ phone, status });
+      const res = await call('setConversationStatus')({ phone, status });
+      if (res && res.data && res.data.corrected) note('Corrected: the move to ' + CRM.LABELS[res.data.undone] + ' was undone and will not be counted.');
       const o = P.opt.get(phone);                        // the live data normally catches up within a moment; do not wait forever
       if (o) setTimeout(() => { if (P.opt.get(phone) === o) { P.opt.delete(phone); render(); } }, 4000);
     } catch (e) {

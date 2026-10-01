@@ -30,7 +30,7 @@ const meta = http.createServer((req, res) => { const c = []; req.on('data', (x) 
   res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ messages: [{ id: 'wamid.OUT' + graph.length }] })); }); }).listen(9911);
 
 const DAY = 86400000, ago = (d) => Timestamp.fromMillis(Date.now() - d * DAY);
-const ph = { newLead: '353850000011', quoted1: '353850000012', quoted2: '353850000013', legacyWon: '353850000014', legacyQuoted: '353850000015' };
+const ph = { flip: '353850000016', newLead: '353850000011', quoted1: '353850000012', quoted2: '353850000013', legacyWon: '353850000014', legacyQuoted: '353850000015' };
 
 (async () => {
   initializeApp({ projectId: 'demo-leados' });
@@ -45,6 +45,7 @@ const ph = { newLead: '353850000011', quoted1: '353850000012', quoted2: '3538500
   await seed(ph.quoted2, { inboxStatus: 'quoted', stageDates: { quoted: ago(25) } }, { name: 'Quincy Quoted', quoteValue: 9000 });
   await seed(ph.legacyWon, { inboxStatus: 'won' }, { name: 'Legacy Won', quoteValue: 20000 });          // moved long before stage dates existed: no history
   await seed(ph.legacyQuoted, { inboxStatus: 'quoted' }, { name: 'Legacy Quoted' });
+  await seed(ph.flip, {}, { name: 'Flip Flop' });                                                        // used for the accidental-move tests
 
   const u = await getAuth().createUser({ email: 'staff@test.dev', emailVerified: true });
   const token = await getAuth().createCustomToken(u.uid);
@@ -114,8 +115,38 @@ const ph = { newLead: '353850000011', quoted1: '353850000012', quoted2: '3538500
   await page.click('#ov-period button[data-period="month"]');
   await row(ph.quoted1).hover(); await row(ph.quoted1).locator('.prow-menu').click(); await page.click('.move-menu button:has-text("Quoted")');
   await settled(ph.quoted1, 'quoted');
-  await tileIs('Quote → Won', '0%', '0 of 2 · small sample');
-  ok('moving a customer back out of Won removes the win from the rate');
+  await page.waitForSelector('#pipe-toast:not([hidden])');
+  assert.match(await page.textContent('#pipe-toast'), /Corrected: the move to Won was undone and will not be counted/);
+  await tileIs('Quote → Won', '0%', '0 of 1 · small sample');                                                    // straight back inside 5 minutes: the Won move leaves no trace
+  assert.equal((await conv(ph.quoted1)).stageDates.won, undefined);
+  ok('moving a customer straight back out of Won (within 5 minutes) is a correction: the Won date is gone and the rate forgets it');
+
+  // ---- accidental New lead -> Booked, straight back: the percentage returns to what it was ----
+  await tileIs('Lead → Booked', '100%', '2 of 2 · small sample');
+  await row(ph.flip).hover(); await row(ph.flip).locator('.prow-menu').click(); await page.click('.move-menu button:has-text("Booked")');
+  await settled(ph.flip, 'booked');
+  await tileIs('Lead → Booked', '100%', '3 of 3 · small sample');
+  await row(ph.flip).hover(); await row(ph.flip).locator('.prow-menu').click(); await page.click('.move-menu button:has-text("New lead")');
+  await settled(ph.flip, 'inbox');
+  await tileIs('Lead → Booked', '100%', '2 of 2 · small sample');
+  await tileIs('Booked', '1', ' ');                                                                              // only the genuine booking (Nina) is counted
+  assert.match(await page.textContent('#pipe-toast'), /Corrected: the move to Booked was undone/);
+  const fc = await conv(ph.flip); assert.equal(fc.stageDates.booked, undefined); assert.equal(fc.lastMove, undefined); assert.equal(fc.inboxStatus, 'inbox');
+  await page.screenshot({ path: path.join(SHOTS, 'conversion-3-corrected.png') });
+  ok('accidental New lead -> Booked, moved straight back: Lead -> Booked and Booked return to their earlier values, and a message says so');
+
+  // ---- the same move after the 5-minute window is a genuine history: the Booked date stays ----
+  await row(ph.flip).hover(); await row(ph.flip).locator('.prow-menu').click(); await page.click('.move-menu button:has-text("Booked")');
+  await settled(ph.flip, 'booked');
+  const lm = (await conv(ph.flip)).lastMove;
+  await db.doc('conversations/' + ph.flip).update({ 'lastMove.at': Timestamp.fromMillis(lm.at.toMillis() - 6 * 60 * 1000) });   // pretend it happened 6 minutes ago
+  await page.evaluate(() => { document.getElementById('pipe-toast').hidden = true; });
+  await row(ph.flip).hover(); await row(ph.flip).locator('.prow-menu').click(); await page.click('.move-menu button:has-text("New lead")');
+  await settled(ph.flip, 'inbox');
+  const fc2 = await conv(ph.flip); assert.ok(fc2.stageDates.booked); assert.equal(fc2.lastMove.to, 'inbox');
+  await tileIs('Lead → Booked', '100%', '3 of 3 · small sample');                                                // a genuine booking stays in the history
+  assert.equal(await page.locator('#pipe-toast:not([hidden])').count(), 0);
+  ok('the same move after more than 5 minutes keeps the Booked date and the rate (no correction, no message)');
 
   // the explanation is on the screen
   const help = await page.locator('.ov-item dt.has-help').evaluateAll((es) => es.map((e) => [e.textContent, e.title]));

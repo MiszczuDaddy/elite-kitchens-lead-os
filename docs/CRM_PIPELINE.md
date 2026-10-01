@@ -25,7 +25,7 @@ New lead → Booked → Quoted → Won → Closed.
 | `contacts/{phone}` | `quoteValue` | Whole euros (1 – 1,000,000), entered manually. Cleared with an empty value. |
 
 * "Lead created" is the existing `createdAt` (form submission time for Meta leads, first message time for WhatsApp customers). There is no date for New lead because of that.
-* `setConversationStatus` writes the stage date in the same transaction as the status. Choosing the stage a customer is already in writes nothing, so a double click cannot move a date. Moving a customer backwards keeps their earlier dates (history) and only the current stage drives the counts.
+* `setConversationStatus` writes the stage date in the same transaction as the status. Choosing the stage a customer is already in writes nothing, so a double click cannot move a date. Moving a customer on or back later keeps their dates (history) and only the current stage drives the counts. The one exception is a quick correction, below.
 * `updateContact` accepts an optional `quoteValue` (a whole number or empty). All existing fields behave exactly as before. Staff cannot write dates or status through it; the browser still cannot write to Firestore at all.
 * `quoteValue` is deliberately separate from `budget`: budget is what the customer said (free text from the Meta form), quote value is what we quoted. Nothing is ever calculated from budget.
 
@@ -41,6 +41,25 @@ Customers created before Phase 4 have no `stageDates` and no `quoteValue`. They 
 * Filters: search (name, location, project, source, Irish or international phone), lead source, date added (this month / last 30 days / custom range). The source filter also narrows the overview.
 * The pipeline reads up to 1,000 customers while the screen is open (the Inbox list keeps its own 300). If that limit is ever reached the screen says so.
 * Quote value is edited in the customer's Details panel under Project. Typing `€14,500`, `14500` or `14.5k` all work.
+
+## Corrections (undo window)
+
+An accidental move that is immediately reversed must not stay in the history or the conversion numbers, but a genuine progression must.
+
+* Every real move writes a small note on the customer, `lastMove { from, to, at, prev }` (`prev` = the date the destination stage had before the move).
+* If the **next** move goes straight **back to `from`**, and the last move was **5 minutes ago or less** (`CORRECTION_WINDOW_MS`, inclusive), it is a **correction**: the customer returns to `from`, the destination's date is restored to `prev` (or removed if it had none), nothing is re-stamped (so a genuine earlier date is never overwritten) and the note is cleared. The callable returns `corrected: true` and the screen says "Corrected: the move to Booked was undone and will not be counted."
+* Everything else is a genuine move and keeps its dates: moving on to another stage (New lead → Booked → Quoted keeps both dates, however quickly), moving back after more than 5 minutes, or a second step back (only the *last* move can be corrected).
+* Works identically for Booked, Quoted, Won and Closed. A move back by another staff member counts too. A customer with no note (moved before this existed) cannot be auto-corrected.
+* The note is internal: it never appears in the metrics or the UI.
+
+**Cleaning up test customers** (accidental moves made before corrections existed): in Cloud Shell, from the repo folder,
+
+    node scripts/clear-stage-history.js --list                       # read-only: who has stage dates
+    node scripts/clear-stage-history.js 353851234567                 # shows what it would remove, then asks you to type the last 4 digits
+    node scripts/clear-stage-history.js 353851234567 --status inbox # also puts them back in New lead
+    node scripts/clear-stage-history.js 353851234567 --stages booked  # only remove the Booked date
+
+It only deletes stage dates (and the note) and optionally resets the stage. It never invents or edits a date, never touches messages, details or quote value, and any answer other than the right 4 digits cancels without changing anything.
 
 ## Drag and drop, and stage colours
 
@@ -83,7 +102,7 @@ A quote that is still open, or that ended in **Closed** (lost), counts as not wo
 
 ## Tests
 
-* Backend (`npm test`): stage dates, quote value validation, existing fields unchanged, Phase 3 leads still start as New lead, security rules (`functions/test/crm.test.js`); the pipeline maths incl. old-shape customers, Closed = lost, Dublin months across the clock change (`functions/test/crm-metrics.test.js`).
+* Backend (`npm test`): corrections (inside/after the window, exactly 5:00, every stage, forward moves kept, re-entry restores the older date, second user, stale note, nothing else changed), the clean-up script (read-only list, confirmation, partial clear, refusals); stage dates, quote value validation, existing fields unchanged, Phase 3 leads still start as New lead, security rules (`functions/test/crm.test.js`); the pipeline maths incl. old-shape customers, Closed = lost, Dublin months across the clock change (`functions/test/crm-metrics.test.js`).
 * Browser (`bash test-ui/run.sh conversion.e2e.js`): customers created 60 days ago are moved New lead → Booked (menu), Quoted → Won (drag), Quoted → Closed and back, and the percentages are checked after every step, including that history-less customers stay out.
 * Browser (`bash test-ui/run.sh dnd.e2e.js`): real mouse drags, destination highlighting and clean-up, one request identical to the menu's, stage date and overview update, same-column drop, failed save rolls back with a message, second drag while saving is blocked, phone has no drag and shows the colour dots.
 * Browser (`bash test-ui/run.sh crm.e2e.js`): the pipeline screen, moves, quote value, filters, overview, phone layout, and a Meta lead arriving through `leadIntake` landing in New lead. `bash test-ui/run.sh` (Phase 2) and `lead.e2e.js` (Phase 3) must still pass.

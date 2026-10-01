@@ -95,17 +95,32 @@ async function markRead(db, phone) {
 // Pipeline stage. Never creates a document or touches activity/unread fields. Entering booked/quoted/won/closed stamps
 // stageDates.<stage> (the latest time it was entered); "inbox" (New lead) needs no date because createdAt is the lead date.
 // Choosing the stage a customer is already in writes nothing, so a double click cannot move a date.
+//
+// Corrections: every real move leaves a small note, lastMove { from, to, at, prev } (prev = the date the destination stage
+// had before). If the very next move goes straight back to `from` within CORRECTION_WINDOW_MS, it is treated as fixing an
+// accident: the customer returns to `from`, the destination's date is restored (or removed if it had none), and nothing is
+// re-stamped, so the accidental move leaves no trace in the history or the conversion numbers. Anything else (moving on to
+// another stage, or moving back later) is a genuine move and its dates stay.
 const DATED_STAGES = new Set(['booked', 'quoted', 'won', 'closed']);
-async function setConversationStatus(db, phone, status) {
+const CORRECTION_WINDOW_MS = 5 * 60 * 1000;
+async function setConversationStatus(db, phone, status, nowMs = Date.now()) {
   const ref = db.collection('conversations').doc(phone);
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return false;
-    if ((snap.data().inboxStatus || 'inbox') === status) return true;
-    const patch = { inboxStatus: status };
+    const c = snap.data(), cur = c.inboxStatus || 'inbox';
+    if (cur === status) return { corrected: false };
+    const lm = c.lastMove;
+    if (lm && lm.to === cur && lm.from === status && lm.at && typeof lm.at.toMillis === 'function' && nowMs - lm.at.toMillis() <= CORRECTION_WINDOW_MS) {
+      const patch = { inboxStatus: status, lastMove: FieldValue.delete() };
+      if (DATED_STAGES.has(lm.to)) patch[`stageDates.${lm.to}`] = lm.prev || FieldValue.delete();
+      tx.update(ref, patch);
+      return { corrected: true, undone: lm.to };
+    }
+    const patch = { inboxStatus: status, lastMove: { from: cur, to: status, at: Timestamp.fromMillis(nowMs), prev: (DATED_STAGES.has(status) && c.stageDates && c.stageDates[status]) || null } };
     if (DATED_STAGES.has(status)) patch[`stageDates.${status}`] = FieldValue.serverTimestamp();
     tx.update(ref, patch);
-    return true;
+    return { corrected: false };
   });
 }
 
@@ -161,4 +176,4 @@ async function getConversation(db, phone) {
   return s.exists ? s.data() : null;
 }
 
-module.exports = { setConversationStatus, deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { CORRECTION_WINDOW_MS, setConversationStatus, deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

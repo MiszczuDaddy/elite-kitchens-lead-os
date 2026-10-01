@@ -229,7 +229,7 @@ test('conversation status changes only inboxStatus and leaves all customer, mess
   for (const status of ['booked', 'quoted', 'won', 'closed', 'inbox']) {
     await h.setConversationStatus(staff, { phone: '+353 85 111 1111', status, name: 'Ignored' }, deps());
     // Only the status and (Phase 4) its stage date change; activity, unread, preview and every other field stay identical.
-    const { stageDates, ...rest } = (await ref.get()).data();
+    const { stageDates, lastMove, ...rest } = (await ref.get()).data();      // lastMove: the small correction note
     assert.deepEqual(rest, { ...before, inboxStatus: status });
     assert.deepEqual(Object.keys(stageDates || {}).includes(status), status !== 'inbox');
   }

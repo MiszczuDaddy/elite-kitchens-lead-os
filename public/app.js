@@ -265,8 +265,9 @@ $('conversation-status').addEventListener('change', async e => {
   const request = { status };
   statusRequests.set(phone, request); statusErrors.delete(phone); renderConversationStatus();
   try {
-    await call('setConversationStatus')({ phone, status });
+    const res = await call('setConversationStatus')({ phone, status });
     if (statusRequests.get(phone) !== request) return; // signed out while saving
+    if (res && res.data && res.data.corrected) toast('Corrected: the move to ' + CRM.LABELS[res.data.undone] + ' was undone and will not be counted.');
     const conversation = S.convs.find(c => c.id === phone);
     if (conversation) conversation.inboxStatus = status; // server-confirmed; no optimistic filter move
   } catch (err) {

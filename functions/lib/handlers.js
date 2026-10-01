@@ -171,8 +171,9 @@ async function setConversationStatus(auth, data, { db, cfg }) {
   if (!['inbox', 'booked', 'quoted', 'won', 'closed'].includes(status)) {
     throw new HttpsError('invalid-argument', 'Choose Inbox, Booked, Quoted, Won or Closed.');
   }
-  if (!(await store.setConversationStatus(db, phone, status))) throw new HttpsError('not-found', 'Conversation not found.');
-  return { ok: true };
+  const r = await store.setConversationStatus(db, phone, status);
+  if (!r) throw new HttpsError('not-found', 'Conversation not found.');
+  return r.corrected ? { ok: true, corrected: true, undone: r.undone } : { ok: true };     // corrected: this move reversed the previous one inside the correction window
 }
 
 // Permanently delete a customer and everything stored about them. Staff must type the last 4 digits of the number to confirm.
