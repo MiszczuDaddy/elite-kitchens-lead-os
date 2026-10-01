@@ -1,5 +1,7 @@
 # Lightweight conversation status
 
+> Phase 4 update: the first status is now *displayed* as **New lead** (stored value still `inbox`), entering Booked/Quoted/Won/Closed records a stage date, and a Pipeline screen was added. See `docs/CRM_PIPELINE.md`. The description below is the original Phase 2 design.
+
 Approved scope: Inbox, Booked, Quoted, Won and Closed, displayed as small filters beneath the inbox caption and changed through the conversation header selector. This is inbox organisation, not a CRM or Kanban system.
 
 ## Data and behaviour

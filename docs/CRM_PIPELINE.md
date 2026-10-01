@@ -1,0 +1,75 @@
+# Phase 4 — Lightweight CRM / sales pipeline
+
+A simple pipeline on top of the existing customers and conversations. No new collections, no new indexes, no rule changes, no migration.
+
+## The pipeline
+
+New lead → Booked → Quoted → Won → Closed.
+
+| Shown as | Stored as `conversations/{phone}.inboxStatus` |
+|---|---|
+| New lead | `inbox` (or missing) |
+| Booked / Quoted / Won | `booked` / `quoted` / `won` |
+| Closed | `closed` |
+
+* **Closed means a lead that is no longer active and did NOT become a customer** (declined, stopped responding, chose someone else, not suitable, we decided not to proceed). It is never used for a finished job.
+* **Won stays Won**, also after the kitchen is built. Completed-job tracking belongs to a future projects phase, outside the sales pipeline.
+* The stored value `inbox` is unchanged so nothing needed migrating; only the label changed (Inbox status chips and the status selector say "New lead"). The Inbox screen itself keeps its name.
+* New Meta leads (Phase 3) still arrive with no status, i.e. New lead. `leadIntake` was not touched.
+
+## Data
+
+| Where | Field | Meaning |
+|---|---|---|
+| `conversations/{phone}` | `stageDates.booked / quoted / won / closed` | Timestamp of the **latest** time the customer entered that stage. Set by the server. |
+| `contacts/{phone}` | `quoteValue` | Whole euros (1 – 1,000,000), entered manually. Cleared with an empty value. |
+
+* "Lead created" is the existing `createdAt` (form submission time for Meta leads, first message time for WhatsApp customers). There is no date for New lead because of that.
+* `setConversationStatus` writes the stage date in the same transaction as the status. Choosing the stage a customer is already in writes nothing, so a double click cannot move a date. Moving a customer backwards keeps their earlier dates (history) and only the current stage drives the counts.
+* `updateContact` accepts an optional `quoteValue` (a whole number or empty). All existing fields behave exactly as before. Staff cannot write dates or status through it; the browser still cannot write to Firestore at all.
+* `quoteValue` is deliberately separate from `budget`: budget is what the customer said (free text from the Meta form), quote value is what we quoted. Nothing is ever calculated from budget.
+
+## Existing customers
+
+Customers created before Phase 4 have no `stageDates` and no `quoteValue`. They show a dash / no age and keep working everywhere. Nothing is backfilled or guessed. Their **current stage** is always counted; **date-based** numbers (e.g. "won this month") only include customers who have a date, so the all-time view includes undated customers by their current stage and a specific month does not.
+
+## The Pipeline screen
+
+* Left rail **Pipeline** (on a phone: the pipeline icon in the Inbox header). URL `#pipeline`.
+* Five columns on desktop, one stage at a time (chips) on a phone. Rows show name, location · project type, quote value ("No value yet" nudge when Quoted without one), lead source, and days in the current stage.
+* Click a row → the existing conversation and Details panel (Back returns to the pipeline on a phone). The `⋯` menu on a row moves it to another stage in one click (uses the existing status callable).
+* Filters: search (name, location, project, source, Irish or international phone), lead source, date added (this month / last 30 days / custom range). The source filter also narrows the overview.
+* The pipeline reads up to 1,000 customers while the screen is open (the Inbox list keeps its own 300). If that limit is ever reached the screen says so.
+* Quote value is edited in the customer's Details panel under Project. Typing `€14,500`, `14500` or `14.5k` all work.
+
+## Overview numbers
+
+Chosen period: this month (default), last 30 days, all time (Irish calendar days, Europe/Dublin).
+
+* **New leads** — customers created in the period.
+* **Booked / Quoted / Won** — customers who entered that stage in the period (a Won customer later moved back out of Won is not counted as a win). Quoted and Won also show the total quote value.
+* **Open quotes** — what is in Quoted *right now* (total value, count, and how many have no value yet). Not period-based.
+* **Average job** — total Won value ÷ Won jobs that have a value.
+* **Lead → Booked** and **Quote → Won** — measured on the leads created in the period, so they can never exceed 100%. With fewer than 5 customers the screen shows "3 of 4" instead of a percentage.
+
+## Tests
+
+* Backend (`npm test`): stage dates, quote value validation, existing fields unchanged, Phase 3 leads still start as New lead, security rules (`functions/test/crm.test.js`); the pipeline maths incl. old-shape customers, Closed = lost, Dublin months across the clock change (`functions/test/crm-metrics.test.js`).
+* Browser (`bash test-ui/run.sh crm.e2e.js`): the pipeline screen, moves, quote value, filters, overview, phone layout, and a Meta lead arriving through `leadIntake` landing in New lead. `bash test-ui/run.sh` (Phase 2) and `lead.e2e.js` (Phase 3) must still pass.
+* One existing backend test was updated on purpose: it asserted that a status change writes *only* `inboxStatus`; it now allows the new stage date and still asserts that nothing else (activity, unread, preview, contact, messages) changes.
+
+## Deploy and rollback
+
+Order matters: the two backward-compatible functions first, then the screen.
+
+1. `./scripts/deploy-crm.sh backend` — only `setConversationStatus` and `updateContact`; saves their current revisions. The existing live screen keeps working.
+2. `./scripts/deploy-crm.sh preview` — new screen on Hosting preview channel `phase4` (it uses live data; edits made there are real).
+3. After approval: `./scripts/deploy-crm.sh live` (production Hosting).
+
+Rollback: `./scripts/rollback-crm.sh` (functions, seconds); Hosting via the console's release history, or redeploy tag `phase-3-meta-leads-complete`. `firebase.json` now lists `crm.js` and `pipeline.js` in the no-cache headers so a deploy cannot serve a mix of old and new files.
+
+Not touched: `leadIntake`, the webhook, sending/receiving, media, deletion, retention, authentication, security rules, Make, Meta.
+
+## Not in this phase
+
+Drag-and-drop, quoting/invoices, projects/job status after Won, reminders ("quotes going cold"), a timeframe field (the Meta answer is already kept in Notes), exports.

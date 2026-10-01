@@ -10,7 +10,7 @@ const call = (name) => fns.httpsCallable(name);
 
 const TZ = 'Europe/Dublin';
 const WINDOW_MS = 24 * 3600 * 1000;
-const INBOX_STATUSES = { inbox: 'Inbox', booked: 'Booked', quoted: 'Quoted', won: 'Won', closed: 'Closed' };
+const INBOX_STATUSES = { inbox: 'New lead', booked: 'Booked', quoted: 'Quoted', won: 'Won', closed: 'Closed' };
 const inboxStatus = (c) => Object.hasOwn(INBOX_STATUSES, c.inboxStatus) ? c.inboxStatus : 'inbox';
 const statusRequests = new Map();
 const statusErrors = new Map();
@@ -168,6 +168,7 @@ function stopListening() {
   if (S.unsubList) { S.unsubList(); S.unsubList = null; }
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
+  if (window.PIPE) PIPE.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
 }
@@ -179,6 +180,7 @@ function watchList() {
     S.listLoaded = true;
     renderList();
     renderThreadHeader();
+    renderDetails(false);          // keeps the stage dates line current when the stage changes
     updateComposer();
     maybeMarkRead();
   }, (e) => { $('list-empty').hidden = false; $('list-empty').textContent = 'Cannot load conversations: ' + errText(e); });
@@ -205,7 +207,7 @@ function renderList() {
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
   else if (!S.convs.length) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search in ' + INBOX_STATUSES[S.statusFilter] + '.' : 'No conversations in ' + INBOX_STATUSES[S.statusFilter] + '.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search in ' + INBOX_STATUSES[S.statusFilter] + '.' : 'No conversations marked ' + INBOX_STATUSES[S.statusFilter] + '.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;
@@ -289,12 +291,14 @@ function renderConversationStatus() {
 
 // ---------- routing ----------
 function routeFromHash() {
+  if (location.hash === '#pipeline' && window.PIPE) { if (S.selected) closeConversation(true); PIPE.show(); return; }
+  if (window.PIPE && PIPE.active) PIPE.hide();
   const m = /^#c\/(\d+)$/.exec(location.hash);
   if (m) openConversation(m[1], true); else closeConversation(true);
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
@@ -307,11 +311,15 @@ function closeConversation(fromHash) {
   if (!fromHash && location.hash) history.replaceState(null, '', location.pathname + location.search);
   setView(); renderList();
 }
-$('back').onclick = () => closeConversation(false);
+$('back').onclick = () => {
+  if (window.PIPE && PIPE.origin) { PIPE.origin = false; location.hash = '#pipeline'; return; }   // came from the pipeline: go back to it
+  closeConversation(false);
+};
 
 function openConversation(id, fromHash) {
   if (!id) return;
   if (S.selected === id) { setView(); return; }
+  if (!fromHash && window.PIPE) PIPE.origin = false;      // opened from the Inbox list, not from the pipeline
   rememberDrafts();
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
@@ -714,7 +722,7 @@ $('new-form').addEventListener('submit', async (e) => {
 });
 
 // ---------- customer details panel ----------
-const DETAIL_FIELDS = ['name', 'email', 'location', 'projectType', 'budget', 'source', 'notes'];
+const DETAIL_FIELDS = ['name', 'email', 'location', 'projectType', 'budget', 'quoteValue', 'source', 'notes'];
 const detailsEl = () => $('details');
 function detailsPref() { try { return localStorage.getItem('ek.details'); } catch (e) { return null; } }
 function setDetailsPref(v) { try { localStorage.setItem('ek.details', v); } catch (e) { /* private mode */ } }
@@ -756,7 +764,7 @@ function renderDetails(force) {
   const c = S.contact || {}, conv = selectedConv() || {};
   $('d-phone').textContent = formatPhone(S.selected);
   for (const k of DETAIL_FIELDS) {
-    const v = k === 'name' ? (c.name != null ? c.name : conv.name) : c[k];
+    const v = k === 'name' ? (c.name != null ? c.name : conv.name) : k === 'quoteValue' ? CRM.money(c.quoteValue) : c[k];
     $('d-' + k).value = v || '';
   }
   // a stored value that is not in the dropdown (e.g. from a future lead import) must still show
@@ -766,7 +774,9 @@ function renderDetails(force) {
   }
   const made = c.createdAt && c.createdAt.toDate ? c.createdAt.toDate().toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : null;
   const upd = c.updatedAt && c.updatedAt.toDate ? c.updatedAt.toDate().toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : null;
-  $('d-meta').textContent = [made && 'Added ' + made, upd && 'Updated ' + upd].filter(Boolean).join(' · ');
+  const sd = conv.stageDates || {}, day = (t) => t && t.toDate ? t.toDate().toLocaleDateString('en-IE', { day: 'numeric', month: 'short', timeZone: TZ }) : null;
+  const stages = ['booked', 'quoted', 'won', 'closed'].filter((k) => day(sd[k])).map((k) => CRM.LABELS[k] + ' ' + day(sd[k]));
+  $('d-meta').textContent = [made && 'Added ' + made, ...stages, upd && 'Updated ' + upd].filter(Boolean).join(' · ');
   const draft = contactDrafts.get(S.selected);
   if (draft) {
     for (const k of DETAIL_FIELDS) $('d-'+k).value = draft[k];
@@ -780,13 +790,18 @@ function renderDetails(force) {
 
 function setDetailMsg(text, kind) { const m = $('d-msg'); m.textContent = text || ''; m.className = 'd-msg' + (kind ? ' ' + kind : ''); }
 
-$('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').disabled = false; setDetailMsg('Unsaved changes'); $('d-email').removeAttribute('aria-invalid'); });
+$('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').disabled = false; setDetailMsg('Unsaved changes'); $('d-email').removeAttribute('aria-invalid'); $('d-quoteValue').removeAttribute('aria-invalid'); });
 $('details-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const phone = S.selected;
   if (!phone || !S.dirty) return;
   const fields = {};
-  for (const k of DETAIL_FIELDS) fields[k] = $('d-' + k).value;
+  for (const k of DETAIL_FIELDS) if (k !== 'quoteValue') fields[k] = $('d-' + k).value;
+  const qv = CRM.parseMoney($('d-quoteValue').value), had = (S.contact && S.contact.quoteValue) || null;
+  if (Number.isNaN(qv) || (qv !== null && (qv < 1 || qv > 1000000))) {
+    $('d-quoteValue').setAttribute('aria-invalid', 'true'); setDetailMsg('Quote value should be a number of euros, e.g. 14500 or €14,500.', 'err'); return;
+  }
+  if (qv !== had) fields.quoteValue = qv;          // only sent when it changed, so ordinary saves never touch it
   $('d-save').disabled = true; setDetailMsg('Saving…');
   try {
     await call('updateContact')({ phone, fields });

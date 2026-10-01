@@ -27,9 +27,13 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>
       <span class="nav-label">Inbox</span><span class="rail-badge" id="rail-badge" hidden>0</span>
     </a>
+    <a class="rail-item" href="#pipeline" id="nav-pipeline" title="Pipeline">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h4v14H4z"/><path d="M10 5h4v9h-4z"/><path d="M16 5h4v5h-4z"/></svg>
+      <span class="nav-label">Pipeline</span>
+    </a>
     <details class="nav-future">
       <summary>Coming later <svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary>
-      <div class="planned-areas"><span>Leads</span><span>Pipeline</span><span>Appointments</span><span>Quotes</span><span>Projects</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
+      <div class="planned-areas"><span>Leads</span><span>Appointments</span><span>Quotes</span><span>Projects</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
     </details>
     <div class="rail-spacer"></div>
     <button id="signout" class="rail-item rail-out" title="Sign out" aria-label="Sign out">
@@ -42,12 +46,13 @@
       <h1>Inbox <span class="count" id="total-unread" hidden></span></h1>
       <div class="head-actions">
         <button id="new-btn" class="icon-btn new-conversation" aria-label="New conversation" title="New conversation"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button id="to-pipeline" class="icon-btn only-mobile" aria-label="Open pipeline" title="Pipeline"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h4v14H4z"/><path d="M10 5h4v9h-4z"/><path d="M16 5h4v5h-4z"/></svg></button>
         <button id="signout-m" class="icon-btn only-mobile" aria-label="Sign out" title="Sign out"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v16h5M9 12h12m-5-5 5 5-5 5"/></svg></button>
       </div>
     </header>
     <p class="pane-caption">WhatsApp conversations</p>
     <div id="status-filters" class="status-filters" role="group" aria-label="Filter conversations by status">
-      <button type="button" data-status="inbox" aria-pressed="true">Inbox<span class="status-unread" hidden></span></button>
+      <button type="button" data-status="inbox" aria-pressed="true">New lead<span class="status-unread" hidden></span></button>
       <button type="button" data-status="booked" aria-pressed="false">Booked<span class="status-unread" hidden></span></button>
       <button type="button" data-status="quoted" aria-pressed="false">Quoted<span class="status-unread" hidden></span></button>
       <button type="button" data-status="won" aria-pressed="false">Won<span class="status-unread" hidden></span></button>
@@ -60,6 +65,35 @@
     <div id="list" class="list" role="list"></div>
     <div id="list-empty" class="empty" hidden></div>
   </aside>
+
+  <main id="pipeline" class="pipeline-pane" aria-label="Pipeline">
+    <header class="pipe-head">
+      <button id="pipe-back" class="icon-btn only-mobile" aria-label="Back to inbox"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+      <h1>Pipeline</h1>
+      <div class="pipe-filters">
+        <div class="search pipe-search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+          <input id="pipe-search" type="search" placeholder="Search customers…" autocomplete="off" aria-label="Search customers"></div>
+        <select id="pipe-source" class="pipe-select" aria-label="Lead source"><option value="">All sources</option></select>
+        <select id="pipe-added" class="pipe-select" aria-label="Date added">
+          <option value="all">Added any time</option><option value="month">Added this month</option><option value="30d">Added in last 30 days</option><option value="custom">Added between…</option>
+        </select>
+        <span id="pipe-custom" class="pipe-custom" hidden><input id="pipe-from" type="date" aria-label="Added from"><span aria-hidden="true">–</span><input id="pipe-to" type="date" aria-label="Added to"></span>
+      </div>
+    </header>
+    <div class="pipe-scroll">
+      <section class="overview" aria-labelledby="ov-title">
+        <div class="ov-head"><h2 id="ov-title">Overview</h2>
+          <div id="ov-period" class="seg" role="group" aria-label="Overview period">
+            <button type="button" data-period="month" aria-pressed="true">This month</button><button type="button" data-period="30d" aria-pressed="false">30 days</button><button type="button" data-period="all" aria-pressed="false">All time</button>
+          </div></div>
+        <dl id="ov-grid" class="ov-grid"></dl>
+      </section>
+      <div id="pipe-stages" class="pipe-stages only-mobile" role="group" aria-label="Pipeline stage"></div>
+      <div id="pipe-toast" class="toast pipe-toast" role="status" hidden></div>
+      <div id="pipe-board" class="pipe-board"></div>
+      <p id="pipe-note" class="pipe-note" hidden></p>
+    </div>
+  </main>
 
   <main class="thread-pane" aria-label="Conversation">
     <div id="thread-empty" class="thread-empty">
@@ -79,7 +113,7 @@
         </button>
         <label class="conversation-state"><span>Status</span>
           <select id="conversation-status" aria-label="Conversation status" aria-describedby="status-feedback">
-            <option value="inbox">Inbox</option><option value="booked">Booked</option><option value="quoted">Quoted</option><option value="won">Won</option><option value="closed">Closed</option>
+            <option value="inbox">New lead</option><option value="booked">Booked</option><option value="quoted">Quoted</option><option value="won">Won</option><option value="closed">Closed</option>
           </select>
         </label>
         <button id="details-btn" class="btn btn-ghost btn-sm head-details" aria-expanded="false" aria-controls="details">Details</button>
@@ -127,6 +161,8 @@
         </select>
       </label>
       <label>Budget<input id="d-budget" name="budget" maxlength="60" placeholder="e.g. €15–20k"></label>
+      <label>Quote value<input id="d-quoteValue" name="quoteValue" maxlength="12" inputmode="decimal" placeholder="e.g. €14,500" aria-describedby="d-quote-help"></label>
+      <p class="hint field-hint" id="d-quote-help">What you quoted them. Used for the pipeline totals.</p>
       <label>Source
         <select id="d-source" name="source">
           <option value="">—</option><option>WhatsApp</option><option>Meta Ads</option><option>Website</option><option>Referral</option><option>Other</option>
@@ -187,6 +223,8 @@
 <script src="/__/firebase/10.14.1/firebase-functions-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-storage-compat.js"></script>
 <script src="/__/firebase/init.js"></script>
+<script src="/crm.js"></script>
 <script src="/app.js"></script>
+<script src="/pipeline.js"></script>
 </body>
 </html>

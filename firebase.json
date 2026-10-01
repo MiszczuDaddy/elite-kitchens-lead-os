@@ -17,7 +17,7 @@
     ],
     "headers": [
       {
-        "source": "/@(index.html|app.js|app.css)",
+        "source": "/@(index.html|app.js|app.css|crm.js|pipeline.js)",
         "headers": [
           {
             "key": "Cache-Control",
