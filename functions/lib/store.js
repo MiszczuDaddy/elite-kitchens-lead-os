@@ -92,6 +92,16 @@ async function markRead(db, phone) {
   return true;
 }
 
+// Inbox organisation only: never creates a document or touches activity/unread fields.
+async function setConversationStatus(db, phone, status) {
+  const ref = db.collection('conversations').doc(phone);
+  return db.runTransaction(async (tx) => {
+    if (!(await tx.get(ref)).exists) return false;
+    tx.update(ref, { inboxStatus: status });
+    return true;
+  });
+}
+
 // Staff-editable customer record. contacts/{phone} is the source of truth; name/location/projectType are
 // denormalised onto the conversation so the inbox list and search need no joins.
 async function updateContact(db, phone, fields) {
@@ -144,4 +154,4 @@ async function getConversation(db, phone) {
   return s.exists ? s.data() : null;
 }
 
-module.exports = { deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { setConversationStatus, deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

@@ -45,7 +45,15 @@
         <button id="signout-m" class="icon-btn only-mobile" aria-label="Sign out" title="Sign out"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v16h5M9 12h12m-5-5 5 5-5 5"/></svg></button>
       </div>
     </header>
-    <p class="pane-caption">WhatsApp conversations</p><div class="search"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+    <p class="pane-caption">WhatsApp conversations</p>
+    <div id="status-filters" class="status-filters" role="group" aria-label="Filter conversations by status">
+      <button type="button" data-status="inbox" aria-pressed="true">Inbox<span class="status-unread" hidden></span></button>
+      <button type="button" data-status="booked" aria-pressed="false">Booked<span class="status-unread" hidden></span></button>
+      <button type="button" data-status="quoted" aria-pressed="false">Quoted<span class="status-unread" hidden></span></button>
+      <button type="button" data-status="won" aria-pressed="false">Won<span class="status-unread" hidden></span></button>
+      <button type="button" data-status="closed" aria-pressed="false">Closed<span class="status-unread" hidden></span></button>
+    </div>
+    <div class="search"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
       <input id="search" type="search" placeholder="Search conversations…" autocomplete="off" aria-label="Search conversations">
     </div>
     <div id="toast" class="toast" role="status" hidden></div>
@@ -69,8 +77,14 @@
           <div class="who-name" id="t-name"></div>
           <div class="who-phone" id="t-phone"></div>
         </button>
+        <label class="conversation-state"><span>Status</span>
+          <select id="conversation-status" aria-label="Conversation status" aria-describedby="status-feedback">
+            <option value="inbox">Inbox</option><option value="booked">Booked</option><option value="quoted">Quoted</option><option value="won">Won</option><option value="closed">Closed</option>
+          </select>
+        </label>
         <button id="details-btn" class="btn btn-ghost btn-sm head-details" aria-expanded="false" aria-controls="details">Details</button>
       </header>
+      <div id="status-feedback" class="status-feedback" role="status" hidden></div>
       <div id="banner" class="banner" role="alert" hidden></div>
       <div id="msgs" class="msgs" aria-live="polite"></div>
       <div id="window-note" class="window-note" hidden>

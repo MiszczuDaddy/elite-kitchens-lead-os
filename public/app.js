@@ -10,12 +10,17 @@ const call = (name) => fns.httpsCallable(name);
 
 const TZ = 'Europe/Dublin';
 const WINDOW_MS = 24 * 3600 * 1000;
+const INBOX_STATUSES = { inbox: 'Inbox', booked: 'Booked', quoted: 'Quoted', won: 'Won', closed: 'Closed' };
+const inboxStatus = (c) => Object.hasOwn(INBOX_STATUSES, c.inboxStatus) ? c.inboxStatus : 'inbox';
+const statusRequests = new Map();
+const statusErrors = new Map();
 
 const S = {
   convs: [],            // conversation docs {id, ...data}
   selected: null,       // selected conversation id (phone digits)
   msgs: [],             // messages of the selected conversation
   query: '',
+  statusFilter: 'inbox',
   pending: [],          // messages being sent (optimistic)
   snapSeq: 0,
   markingRead: new Set(),
@@ -156,6 +161,7 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 function stopListening() {
+  statusRequests.clear(); statusErrors.clear(); S.statusFilter = 'inbox';
   resetAssets(); closeLightbox(); urlCache.clear();
   messageDrafts.clear(); contactDrafts.clear(); $('text').value = '';
   clearAttachment();
@@ -192,20 +198,27 @@ function renderList() {
   const q = S.query.trim().toLowerCase();
   const list = $('list');
   const keep = list.scrollTop;
-  const shown = S.convs.filter((c) => matchesQuery(c, q));
+  const shown = S.convs.filter((c) => inboxStatus(c) === S.statusFilter && matchesQuery(c, q));
   list.replaceChildren(...shown.map(convItem));
   list.scrollTop = keep;
 
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
   else if (!S.convs.length) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = 'No conversations match your search.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search in ' + INBOX_STATUSES[S.statusFilter] + '.' : 'No conversations in ' + INBOX_STATUSES[S.statusFilter] + '.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;
   $('total-unread').hidden = !n; $('total-unread').textContent = n;
   $('rail-badge').hidden = !n; $('rail-badge').textContent = n > 9 ? '9+' : n;
   document.title = (n ? `(${n}) ` : '') + 'Inbox · Elite Kitchens';
+  for (const button of $('status-filters').querySelectorAll('button')) {
+    const status = button.dataset.status;
+    const unread = S.convs.filter(c => inboxStatus(c) === status && isUnread(c)).length;
+    button.setAttribute('aria-pressed', String(status === S.statusFilter));
+    button.setAttribute('aria-label', INBOX_STATUSES[status] + (unread ? ', ' + unread + ' unread conversation' + (unread === 1 ? '' : 's') : ''));
+    button.querySelector('.status-unread').hidden = !unread;
+  }
 }
 
 function convItem(c) {
@@ -236,6 +249,43 @@ function convItem(c) {
 }
 
 $('search').addEventListener('input', (e) => { S.query = e.target.value; renderList(); });
+$('status-filters').addEventListener('click', e => {
+  const button = e.target.closest('button[data-status]');
+  if (!button) return;
+  S.statusFilter = button.dataset.status;
+  $('list').scrollTop = 0;
+  renderList();
+});
+
+$('conversation-status').addEventListener('change', async e => {
+  const phone = S.selected, status = e.target.value;
+  if (!phone || statusRequests.has(phone) || !Object.hasOwn(INBOX_STATUSES, status)) return;
+  const request = { status };
+  statusRequests.set(phone, request); statusErrors.delete(phone); renderConversationStatus();
+  try {
+    await call('setConversationStatus')({ phone, status });
+    if (statusRequests.get(phone) !== request) return; // signed out while saving
+    const conversation = S.convs.find(c => c.id === phone);
+    if (conversation) conversation.inboxStatus = status; // server-confirmed; no optimistic filter move
+  } catch (err) {
+    if (statusRequests.get(phone) !== request) return;
+    statusErrors.set(phone, 'Could not confirm the status change. Please try again.');
+  } finally {
+    if (statusRequests.get(phone) === request) {
+      statusRequests.delete(phone); renderList(); renderConversationStatus();
+    }
+  }
+});
+
+function renderConversationStatus() {
+  const c = selectedConv(), pending = statusRequests.get(S.selected), error = statusErrors.get(S.selected);
+  $('conversation-status').value = pending ? pending.status : inboxStatus(c || {});
+  $('conversation-status').disabled = !c || !!pending;
+  const feedback = $('status-feedback');
+  feedback.hidden = !pending && !error;
+  feedback.classList.toggle('error', !!error);
+  feedback.textContent = pending ? 'Updating status…' : error || '';
+}
 
 // ---------- routing ----------
 function routeFromHash() {
@@ -290,6 +340,7 @@ function openConversation(id, fromHash) {
 // ---------- thread ----------
 function renderThreadHeader() {
   if (!S.selected) return;
+  renderConversationStatus();
   const c = selectedConv() || { id: S.selected };
   $('t-avatar').textContent = initials(c);
   $('profile-avatar').textContent = initials(c);
@@ -769,6 +820,7 @@ $('del-form').addEventListener('submit', async (e) => {
   try {
     const r = await call('deleteCustomer')({ phone, confirm: $('del-confirm').value });
     delDlg.close();
+    statusRequests.delete(phone); statusErrors.delete(phone);
     messageDrafts.delete(phone); contactDrafts.delete(phone); S.dirty = false; $('text').value = '';
     closeConversation(false);
     toast(`Customer deleted (${r.data.messages} message(s), ${r.data.files} file(s)).`);

@@ -26,6 +26,8 @@ Plain HTML/CSS/JavaScript in public/ with no build step. Backend functions, payl
 
 Leads, pipeline, appointments, quotations, projects and AI are future scope and must not be fabricated in this redesign.
 
+Separately approved lightweight inbox organisation adds Inbox, Booked, Quoted, Won and Closed filters and a manual conversation status selector. It is not a CRM or pipeline implementation. The only new stored value is optional `conversations/{phone}.inboxStatus`; absent values mean Inbox. The owner separately authorised deployment of only its new callable to the shared backend. Production Hosting, main, existing functions and rules remain protected.
+
 ## Brand Commitments
 
 Premium, calm, light business software with off-white neutral surfaces, charcoal typography, restrained navigation and sparse intentional colour. The user's attached reference establishes visual language rather than an exact layout. Avoid gradients, excessive shadows, nested cards and indiscriminate rounding.

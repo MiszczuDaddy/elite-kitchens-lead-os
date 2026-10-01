@@ -218,6 +218,71 @@ test('markRead sets lastReadAt without reordering the inbox, and is staff-only',
   await rejects(h.markRead(staff, {}, deps()), 'invalid-argument');
 });
 
+test('conversation status changes only inboxStatus and leaves all customer, message and activity data intact', async () => {
+  const phone = '353851111111';
+  await post(inbound('wamid.STATUS1', 'Hello', phone));
+  const ref = db.collection('conversations').doc(phone);
+  const before = (await ref.get()).data();
+  const contactBefore = (await db.doc('contacts/' + phone).get()).data();
+  const messagesBefore = await msgs(phone);
+  assert.equal(before.inboxStatus, undefined); // default is interpreted; no webhook migration
+  for (const status of ['booked', 'quoted', 'won', 'closed', 'inbox']) {
+    await h.setConversationStatus(staff, { phone: '+353 85 111 1111', status, name: 'Ignored' }, deps());
+    assert.deepEqual((await ref.get()).data(), { ...before, inboxStatus: status });
+  }
+  assert.deepEqual((await db.doc('contacts/' + phone).get()).data(), contactBefore);
+  assert.deepEqual(await msgs(phone), messagesBefore);
+  assert.equal(graphCalls.length, 0);
+});
+
+test('conversation status validates values and retains existing staff security', async () => {
+  const phone = '353851111111';
+  await post(inbound('wamid.STATUS2', 'Hello', phone));
+  for (const status of [null, '', 'Booked', 'archived', 1, {}, '__proto__']) {
+    await rejects(h.setConversationStatus(staff, { phone, status }, deps()), 'invalid-argument');
+  }
+  await rejects(h.setConversationStatus(staff, { status: 'booked' }, deps()), 'invalid-argument');
+  await rejects(h.setConversationStatus(null, { phone, status: 'booked' }, deps()), 'unauthenticated');
+  for (const token of [
+    { email: 'thomas@example.com', email_verified: true },
+    { email: 'stranger@example.com', email_verified: true, staff: true },
+    { email: 'thomas@example.com', email_verified: false, staff: true },
+  ]) await rejects(h.setConversationStatus({ uid: 'x', token }, { phone, status: 'booked' }, deps()), 'permission-denied');
+  assert.equal((await db.doc('conversations/' + phone).get()).data().inboxStatus, undefined);
+});
+
+test('assigned inbox status survives incoming messages, replies, delivery ticks, media and contact edits', async () => {
+  const phone = '353851111111';
+  await post(inbound('wamid.STATUS3', 'Hello', phone));
+  await h.setConversationStatus(staff, { phone, status: 'closed' }, deps());
+  await post(inbound('wamid.STATUS4', 'Back again', phone));
+  assert.equal((await db.doc('conversations/' + phone).get()).data().unreadCount, 2);
+  await h.sendReply(staff, { phone, body: 'Still able to reply' }, deps());
+  await post(statusHook('wamid.OUT1', 'read', phone));
+  files.STATUSPHOTO = { mime: 'image/png', bytes: PNG };
+  await mediaHook('wamid.STATUSPHOTO', 'image', { id: 'STATUSPHOTO', mime_type: 'image/png' }, phone);
+  await h.updateContact(staff, { phone, fields: { location: 'Dublin' } }, deps());
+  await h.markRead(staff, { phone }, deps());
+  const c = (await db.doc('conversations/' + phone).get()).data();
+  assert.equal(c.inboxStatus, 'closed'); assert.equal(c.unreadCount, 0);
+  assert.equal((await msgDoc(phone, 'wamid.STATUSPHOTO')).media.status, 'stored');
+  assert.equal((await msgDoc(phone, 'wamid.OUT1')).status, 'read');
+});
+
+test('deletion removes inbox status; status changes cannot recreate missing customers', async () => {
+  const phone = '353851111111';
+  await rejects(h.setConversationStatus(staff, { phone, status: 'won' }, deps()), 'not-found');
+  assert.equal((await db.doc('conversations/' + phone).get()).exists, false);
+  await post(inbound('wamid.STATUS5', 'Hello', phone));
+  await h.setConversationStatus(staff, { phone, status: 'won' }, deps());
+  await h.deleteCustomer(staff, { phone, confirm: '1111' }, deps());
+  await rejects(h.setConversationStatus(staff, { phone, status: 'booked' }, deps()), 'not-found');
+  assert.equal((await db.doc('conversations/' + phone).get()).exists, false);
+  assert.equal((await db.doc('contacts/' + phone).get()).exists, false);
+  await post(inbound('wamid.STATUS6', 'Returning after deletion', phone));
+  assert.equal((await db.doc('conversations/' + phone).get()).data().inboxStatus, undefined);
+});
+
 test('updateContact saves the customer record, denormalises onto the conversation, validates input', async () => {
   await post(inbound('wamid.C1', 'Hello', '353851111111'));
   const conv = db.collection('conversations').doc('353851111111');

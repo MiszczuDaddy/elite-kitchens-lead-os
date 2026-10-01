@@ -41,6 +41,9 @@ exports.webhook = onRequest({ secrets: SECRETS, timeoutSeconds: 90, memory: '512
 exports.claimAccess = onCall({ secrets: SECRETS }, (req) => h.claimAccess(req.auth, deps()));
 exports.startConversation = onCall({ secrets: SECRETS }, (req) => h.startConversation(req.auth, req.data, deps()));
 exports.markRead = onCall({ secrets: SECRETS }, (req) => h.markRead(req.auth, req.data, deps()));
+exports.setConversationStatus = onCall({}, (req) => h.setConversationStatus(req.auth, req.data, {
+  db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() },
+}));
 exports.updateContact = onCall({ secrets: SECRETS }, (req) => h.updateContact(req.auth, req.data, deps()));
 exports.mediaUrl = onCall({ secrets: SECRETS }, (req) => h.mediaUrl(req.auth, req.data, deps()));
 exports.retryMedia = onCall({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' }, (req) => h.retryMedia(req.auth, req.data, deps()));

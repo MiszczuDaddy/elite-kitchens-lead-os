@@ -157,6 +157,18 @@ async function markRead(auth, data, { db, cfg }) {
   return { ok: true };
 }
 
+async function setConversationStatus(auth, data, { db, cfg }) {
+  assertStaff(auth, cfg);
+  const phone = normalizePhone(data && data.phone);
+  if (!phone) throw new HttpsError('invalid-argument', 'Missing phone.');
+  const status = data && data.status;
+  if (!['inbox', 'booked', 'quoted', 'won', 'closed'].includes(status)) {
+    throw new HttpsError('invalid-argument', 'Choose Inbox, Booked, Quoted, Won or Closed.');
+  }
+  if (!(await store.setConversationStatus(db, phone, status))) throw new HttpsError('not-found', 'Conversation not found.');
+  return { ok: true };
+}
+
 // Permanently delete a customer and everything stored about them. Staff must type the last 4 digits of the number to confirm.
 async function deleteCustomer(auth, data, { db, cfg, bucket }) {
   assertStaff(auth, cfg);
@@ -245,4 +257,4 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
   }
 }
 
-module.exports = { deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+module.exports = { setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

@@ -257,6 +257,8 @@ Hover changes the background for filled and ghost controls. The common keyboard 
 
 The Inbox count is a compact square-cornered tonal counter, not a large pill. Per-conversation unread counts use a small circular green badge with white text; an unread dot may be used when a number is unnecessary. Retain numeric and text cues alongside colour.
 
+Conversation-status filters sit in one compact row beneath the inbox caption: Inbox, Booked, Quoted, Won and Closed. Use the existing selected wash and charcoal text, a 5px corner radius, 36px minimum desktop height and 44px phone height. Each button exposes its pressed state and unread count accessibly. The header status selector uses the same restrained field styling; on phones it occupies a second header row so customer navigation retains space.
+
 ### Containers and conversation rows
 
 Panes are the principal containers. Selected conversation rows use the selected wash; their avatars receive a slightly stronger tint. Unread rows increase name weight and darken the preview. Keep names, snippets and timestamps at distinct levels of emphasis. Rows remain keyboard operable with a visible focus ring.

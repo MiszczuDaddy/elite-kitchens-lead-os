@@ -7,6 +7,8 @@ Branch: `phase-2-ui-redesign`.
 
 Plain HTML, CSS and JavaScript, with no frontend build step. Backend functions, callable payloads, Firestore shapes, authentication, storage, security rules and deployment configuration are unchanged.
 
+Subsequent approved exception: lightweight conversation statuses add one optional conversation field and one staff-only callable. Existing functions and contracts are unchanged; see `INBOX_STATUS.md` for the exact boundary and the separate shared-backend deployment requirement.
+
 Desktop: workspace navigation, inbox, conversation, customer profile. Below 1280px the profile opens over the conversation. Below 900px inbox and conversation are separate screens, with a full-screen customer profile. Future workspace labels are informational and have no fabricated functionality.
 
 Customer profile: Details, Media and Documents. All supported fields remain editable; closing and reopening the profile retains unsaved edits. Media includes exchanged photos/videos, dates and a private full-size viewer with arrow-key navigation, downloads, Escape and focus restoration. Documents reuse existing file cards and downloads. Native audio/video controls and existing media retry/retention states remain available.

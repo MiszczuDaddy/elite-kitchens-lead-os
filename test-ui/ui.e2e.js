@@ -475,6 +475,68 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   ok('redesign: phone profile, gallery, viewer and back navigation preserve the conversation');
 
 
+  // --- lightweight inbox organisation: real callable and two realtime clients ---
+  const filter = (p, status) => p.locator(`#status-filters button[data-status="${status}"]`);
+  const statusSaved = async (phone, status) => until(async () => (await getFirestore().doc('conversations/' + phone).get()).data().inboxStatus === status, 'status persisted');
+  assert.equal(await page.inputValue('#conversation-status'), 'inbox');
+  assert.equal(await filter(page, 'inbox').getAttribute('aria-pressed'), 'true');
+  assert.equal((await getFirestore().doc('conversations/' + A).get()).data().inboxStatus, undefined);
+  await page.fill('#text', 'Status changes must preserve this draft');
+  await page.selectOption('#conversation-status', 'booked'); await statusSaved(A, 'booked');
+  await page.waitForFunction(() => !document.getElementById('conversation-status').disabled);
+  await page.waitForFunction(p => !document.querySelector(`.conv[data-phone="${p}"]`), A);
+  assert.equal(await page.inputValue('#text'), 'Status changes must preserve this draft');
+  await filter(page, 'booked').click(); await page.waitForSelector(`.conv[data-phone="${A}"]`);
+  await filter(mp, 'booked').click(); await mp.waitForSelector(`.conv[data-phone="${A}"]`);
+  await mp.locator(`.conv[data-phone="${A}"]`).click();
+  await mp.waitForFunction(() => document.getElementById('conversation-status').value === 'booked');
+  ok('statuses: missing values default to Inbox; Booked persists and synchronises without losing the draft');
+
+  await page.fill('#search', 'Brian'); assert.equal(await page.locator('.conv').count(), 0);
+  await page.fill('#search', 'Anna'); assert.equal(await page.locator('.conv').count(), 1);
+  await page.fill('#search', '');
+  for (const status of ['quoted', 'won', 'closed', 'inbox']) {
+    await page.selectOption('#conversation-status', status); await statusSaved(A, status);
+    await page.waitForFunction(() => !document.getElementById('conversation-status').disabled);
+    await filter(page, status).click(); await page.waitForSelector(`.conv[data-phone="${A}"]`);
+    await mp.waitForFunction(s => document.getElementById('conversation-status').value === s, status);
+  }
+  ok('statuses: all five filters and scoped search work; another open client updates its selector');
+
+  await page.route('**/setConversationStatus', route => route.fulfill({ status: 400,
+    headers: { 'access-control-allow-origin': '*', 'content-type': 'application/json' },
+    body: JSON.stringify({ error: { status: 'FAILED_PRECONDITION', message: 'Test failure' } }) }));
+  await page.selectOption('#conversation-status', 'won');
+  await page.waitForSelector('#status-feedback.error:not([hidden])');
+  assert.equal(await page.inputValue('#conversation-status'), 'inbox');
+  assert.equal((await getFirestore().doc('conversations/' + A).get()).data().inboxStatus, 'inbox');
+  await page.unroute('**/setConversationStatus');
+  await page.selectOption('#conversation-status', 'closed'); await statusSaved(A, 'closed');
+  await page.waitForFunction(() => !document.getElementById('conversation-status').disabled);
+  await mp.click('#back'); await filter(mp, 'inbox').click();
+  await conv(B).click();
+  await text(A, 'Anna M. Murphy', 'A new message while Closed');
+  await page.waitForSelector('#status-filters [data-status="closed"] .status-unread:not([hidden])');
+  assert.equal((await getFirestore().doc('conversations/' + A).get()).data().inboxStatus, 'closed');
+  await filter(page, 'closed').click();
+  await page.waitForSelector(`.conv.unread[data-phone="${A}"]`);
+  await conv(A).click();
+  await page.waitForFunction(() => /A new message while Closed/.test(document.getElementById('msgs').innerText));
+  assert(await page.locator('#text').isEnabled());
+  await page.screenshot({ path: path.join(SHOTS, 'statuses-desktop.png') });
+  ok('statuses: failed saves recover; incoming messages stay Closed and signal unread activity in that filter');
+
+  await filter(mp, 'closed').click(); await mp.waitForSelector(`.conv[data-phone="${A}"]`);
+  await mp.screenshot({ path: path.join(SHOTS, 'statuses-mobile-list.png') });
+  await mp.locator(`.conv[data-phone="${A}"]`).click();
+  await mp.selectOption('#conversation-status', 'quoted'); await statusSaved(A, 'quoted');
+  await mp.waitForFunction(() => !document.getElementById('conversation-status').disabled);
+  assert(await mp.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await mp.screenshot({ path: path.join(SHOTS, 'statuses-mobile-thread.png') });
+  await mp.click('#back'); await filter(mp, 'quoted').focus(); await mp.keyboard.press('Enter');
+  await mp.waitForSelector(`.conv[data-phone="${A}"]`);
+  ok('statuses: phone selector, back navigation and keyboard-operated filters work');
+
   // --- TEST I (data layer): rules ---
   const idOf = async (tok) => (await (await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake',
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: tok, returnSecureToken: true }) })).json()).idToken;
