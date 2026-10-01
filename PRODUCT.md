@@ -30,6 +30,8 @@ Leads, pipeline, appointments, quotations, projects and AI are future scope and 
 
 Premium, calm, light business software with off-white neutral surfaces, charcoal typography, restrained navigation and sparse intentional colour. The user's attached reference establishes visual language rather than an exact layout. Avoid gradients, excessive shadows, nested cards and indiscriminate rounding.
 
+The owner supplied the black transparent Elite Kitchens logo. Compact branding uses its original E and K lettering, not a substitute typeface or the full logo squeezed into the navigation rail.
+
 ## Evidence on Hand
 
 Working frontend, Phase 2 hand-off documents, 51 emulator browser checks (45 foundation and six first-redesign checks), and test-ui/shots/. Screenshot content is synthetic test data, not customer evidence.

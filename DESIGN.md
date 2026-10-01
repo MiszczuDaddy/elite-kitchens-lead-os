@@ -237,6 +237,8 @@ The workspace is flat at rest. Tonal surfaces, whitespace and a few structural d
 
 ## Shapes
 
+The navigation brand mark displays the original E and K from the owner's supplied logo at 47 × 24px. CSS clips two regions of the unchanged transparent source image; preserve the original letterforms and use the compact mark in the narrow rail. Asset provenance is recorded in `docs/BRAND_ASSETS.md`.
+
 Fields, counters and gallery tiles use restrained small corners; buttons and rows use the control radius. Messages and dialogs use the message radius. Incoming and outgoing bubbles reduce the appropriate bottom corner to the message-tail radius. Only avatars and unread dots are circular.
 
 Do not put profile sections inside additional rounded cards. Fieldsets are borderless groups with concise legends. Borders identify pane edges, fields, tab selection and the deliberate destructive-action boundary.
@@ -296,4 +298,3 @@ Document rows use a drawn document icon, a readable filename, secondary file inf
 - Don't replace the existing messaging interface or alter backend contracts to implement a visual pattern.
 - Don't introduce a dark sidebar or apply the media viewer's dark scrim to the workspace.
 - Don't invent brand claims, metaphors, decorative imagery or new font dependencies.
-

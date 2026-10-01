@@ -43,7 +43,11 @@ h1, h2, p { overflow-wrap: anywhere; }
 .app { display: grid; grid-template-columns: 196px 328px minmax(0,1fr); height: 100vh; height: 100dvh; overflow: hidden; }
 .rail { background: var(--nav); display: flex; flex-direction: column; gap: 8px; padding: 26px 14px 18px; min-height: 0; }
 .rail-brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; margin-bottom: 30px; font-size: 14px; font-weight: 600; }
-.rail-logo { color: var(--ink); font-size: 25px; font-weight: 650; letter-spacing: -.05em; line-height: 1; width: 32px; }
+/* Show the original E and K artwork at 14% scale; the supplied logo stays unmodified. */
+.rail-logo { display: flex; align-items: flex-start; gap: 1px; flex: none; width: 47px; height: 24px; }
+.rail-logo::before, .rail-logo::after { content: ""; display: block; flex: none; height: 24px; background-image: url('/brand/elite-kitchens-logo.png'); background-repeat: no-repeat; background-size: 280px 128.66px; }
+.rail-logo::before { width: 21.4px; background-position: 0 -90.16px; }
+.rail-logo::after { width: 24.5px; background-position: -107.52px -90.16px; }
 .rail-brand small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 1px; }
 .rail-item { display: flex; align-items: center; gap: 11px; min-height: 44px; width: 100%; padding: 10px 12px; border: 0; border-radius: 6px; text-decoration: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; }
 .rail-item:hover { background: #e9ebe4; }
