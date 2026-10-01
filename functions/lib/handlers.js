@@ -122,6 +122,7 @@ async function sendReply(auth, data, { db, wa, cfg }) {
 }
 
 const CONTACT_FIELDS = { name: 100, email: 200, location: 100, projectType: 60, budget: 60, source: 60, notes: 5000 };
+const QUOTE_MAX = 1000000;   // whole euros: a manual record of what was quoted, never calculated
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Whitelist + trim + length-limit. Empty string clears a field (stored as null). Unknown keys are rejected.
@@ -129,6 +130,11 @@ function cleanContactFields(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpsError('invalid-argument', 'Missing fields.');
   const out = {};
   for (const [k, v] of Object.entries(input)) {
+    if (k === 'quoteValue') {   // the only non-text field: a whole-euro number, or empty/null to clear it
+      if (v === null || v === '') { out[k] = null; continue; }
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > QUOTE_MAX) throw new HttpsError('invalid-argument', 'Quote value must be a whole number of euros (up to 1,000,000).');
+      out[k] = v; continue;
+    }
     if (!(k in CONTACT_FIELDS)) throw new HttpsError('invalid-argument', `Unknown field: ${k}`);
     if (v != null && typeof v !== 'string') throw new HttpsError('invalid-argument', `${k} must be text.`);
     const t = String(v || '').trim();

@@ -228,7 +228,10 @@ test('conversation status changes only inboxStatus and leaves all customer, mess
   assert.equal(before.inboxStatus, undefined); // default is interpreted; no webhook migration
   for (const status of ['booked', 'quoted', 'won', 'closed', 'inbox']) {
     await h.setConversationStatus(staff, { phone: '+353 85 111 1111', status, name: 'Ignored' }, deps());
-    assert.deepEqual((await ref.get()).data(), { ...before, inboxStatus: status });
+    // Only the status and (Phase 4) its stage date change; activity, unread, preview and every other field stay identical.
+    const { stageDates, ...rest } = (await ref.get()).data();
+    assert.deepEqual(rest, { ...before, inboxStatus: status });
+    assert.deepEqual(Object.keys(stageDates || {}).includes(status), status !== 'inbox');
   }
   assert.deepEqual((await db.doc('contacts/' + phone).get()).data(), contactBefore);
   assert.deepEqual(await msgs(phone), messagesBefore);

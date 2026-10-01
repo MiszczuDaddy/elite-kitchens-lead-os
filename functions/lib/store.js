@@ -92,12 +92,19 @@ async function markRead(db, phone) {
   return true;
 }
 
-// Inbox organisation only: never creates a document or touches activity/unread fields.
+// Pipeline stage. Never creates a document or touches activity/unread fields. Entering booked/quoted/won/closed stamps
+// stageDates.<stage> (the latest time it was entered); "inbox" (New lead) needs no date because createdAt is the lead date.
+// Choosing the stage a customer is already in writes nothing, so a double click cannot move a date.
+const DATED_STAGES = new Set(['booked', 'quoted', 'won', 'closed']);
 async function setConversationStatus(db, phone, status) {
   const ref = db.collection('conversations').doc(phone);
   return db.runTransaction(async (tx) => {
-    if (!(await tx.get(ref)).exists) return false;
-    tx.update(ref, { inboxStatus: status });
+    const snap = await tx.get(ref);
+    if (!snap.exists) return false;
+    if ((snap.data().inboxStatus || 'inbox') === status) return true;
+    const patch = { inboxStatus: status };
+    if (DATED_STAGES.has(status)) patch[`stageDates.${status}`] = FieldValue.serverTimestamp();
+    tx.update(ref, patch);
     return true;
   });
 }
