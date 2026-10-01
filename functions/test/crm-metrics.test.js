@@ -79,8 +79,8 @@ test('overview for a month: counts, values, average job and conversion', () => {
   assert.equal(o.won.count, 2); assert.equal(o.won.value, 36000); assert.equal(o.won.avg, 18000);   // 5 and 6 only; 9 was moved back out of Won
   assert.equal(o.closed, 2);
   assert.deepEqual(o.openQuotes, { count: 3, value: 14500 + 8000, missingValue: 1 });
-  assert.deepEqual(o.leadToBooked, { num: 6, den: 8 });                     // 2,3,4,6,7,9 reached Booked or later; 1 and 8 did not
-  assert.deepEqual(o.quoteToWon, { num: 1, den: 5 });                       // of the 8 October leads, 5 reached Quoted (3,4,6,7,9); only 6 is Won
+  assert.deepEqual(o.leadToBooked, { num: 7, den: 9 });                     // all 9 became leads or moved in October (5 moved: Won on 6 Oct); 2,3,4,5,6,7,9 reached Booked or later
+  assert.deepEqual(o.quoteToWon, { num: 2, den: 6 });                       // 3,4,5,6,7,9 reached Quoted; 5 and 6 are Won now
 });
 
 test('Closed means lost: a Won customer stays Won and counts as a win; Closed is never a win and never adds value', () => {
@@ -99,15 +99,16 @@ test('all-time view counts customers from before stage dates existed by their cu
   assert.equal(o.newLeads, 5); assert.equal(o.won.count, 1); assert.equal(o.won.value, 12000);
   assert.equal(o.quoted.count, 2);                                          // quoted + won both necessarily had a quote
   assert.equal(o.booked, 3); assert.equal(o.closed, 1);
-  assert.deepEqual(o.quoteToWon, { num: 1, den: 2 }); assert.deepEqual(o.leadToBooked, { num: 3, den: 5 });
+  // No recorded history = not measured (never guessed): only the untouched New lead (5) is in Lead -> Booked, nobody is in Quote -> Won
+  assert.deepEqual(o.quoteToWon, { num: 0, den: 0 }); assert.deepEqual(o.leadToBooked, { num: 0, den: 1 });
   const month = C.overview(legacy, C.rangeFor('month', NOW));               // undated customers do not pollute a specific period
   assert.equal(month.won.count, 0); assert.equal(month.quoted.count, 0); assert.equal(month.booked, 0);
 });
 
-test('conversion can never exceed 100% and shows a plain fraction until there are enough customers', () => {
+test('conversion can never exceed 100% and always shows the percentage with the fraction it rests on', () => {
   const o = C.overview(sample(), null);
   assert.ok(o.quoteToWon.num <= o.quoteToWon.den); assert.ok(o.leadToBooked.num <= o.leadToBooked.den);
-  assert.equal(C.rate({ num: 3, den: 4 }), '3 of 4'); assert.equal(C.rate({ num: 3, den: 9 }), '3 of 9 · 33%'); assert.equal(C.rate({ num: 0, den: 0 }), '—');
+  assert.equal(C.rate({ num: 3, den: 4 }), '75% · 3 of 4'); assert.equal(C.rate({ num: 3, den: 9 }), '33% · 3 of 9'); assert.equal(C.rate({ num: 0, den: 0 }), '—');
 });
 
 test('filters: stage-independent search, source and added-date; digits match Irish and international forms', () => {
@@ -133,4 +134,52 @@ test('money: typed values are cleaned; junk is rejected rather than guessed', ()
   assert.equal(C.parseMoney('14500.40'), 14500); assert.equal(C.parseMoney(''), null); assert.equal(C.parseMoney(null), null);
   for (const bad of ['abc', '14,5,0x', '€-5', '1e5', '12.345', '14500 euro']) assert.ok(Number.isNaN(C.parseMoney(bad)), bad);
   assert.equal(C.money(14500), '€14,500'); assert.equal(C.money(null), '');
+});
+
+// ---- the Phase 4 conversion bug: test customers created long ago and moved TODAY were invisible to the rates ----
+const old = (id, over) => conv(id, { createdAt: ts('2026-07-01T09:00:00Z'), ...over });           // created months before NOW
+
+test('conversion: an older customer moved to Booked today counts in This month (the reported bug)', () => {
+  const r = rows([old('1', { inboxStatus: 'booked', stageDates: { booked: ts('2026-10-14T09:00:00Z') } })]);
+  for (const range of [C.rangeFor('month', NOW), C.rangeFor('30d', NOW), null]) {
+    const o = C.overview(r, range);
+    assert.deepEqual(o.leadToBooked, { num: 1, den: 1 }); assert.equal(C.rate(o.leadToBooked), '100% · 1 of 1');
+    assert.equal(o.booked, 1);
+  }
+});
+
+test('conversion: Quoted -> Won today counts, and a quote that ended in Closed counts as not won', () => {
+  const r = rows([
+    old('1', { inboxStatus: 'won', stageDates: { booked: ts('2026-07-10T09:00:00Z'), quoted: ts('2026-08-01T09:00:00Z'), won: ts('2026-10-14T09:00:00Z') } }),
+    old('2', { inboxStatus: 'closed', stageDates: { booked: ts('2026-07-10T09:00:00Z'), quoted: ts('2026-08-01T09:00:00Z'), closed: ts('2026-10-13T09:00:00Z') } }),
+    old('3', { inboxStatus: 'quoted', stageDates: { quoted: ts('2026-08-05T09:00:00Z') } }),         // still open, nothing happened this month: not measured this month
+  ]);
+  const m = C.overview(r, C.rangeFor('month', NOW));
+  assert.deepEqual(m.quoteToWon, { num: 1, den: 2 }); assert.equal(C.rate(m.quoteToWon), '50% · 1 of 2');
+  assert.deepEqual(m.leadToBooked, { num: 2, den: 2 });
+  const all = C.overview(r, null);
+  assert.deepEqual(all.quoteToWon, { num: 1, den: 3 });                                           // all time: the open quote counts as not won yet
+});
+
+test('conversion: customers with no recorded history are left out, never guessed', () => {
+  const legacy = rows([old('1', { inboxStatus: 'won' }), old('2', { inboxStatus: 'quoted' }), old('3', { inboxStatus: 'booked' }), old('4', { inboxStatus: 'closed' })]);
+  for (const range of [C.rangeFor('month', NOW), null]) {
+    const o = C.overview(legacy, range);
+    assert.deepEqual(o.leadToBooked, { num: 0, den: 0 }); assert.deepEqual(o.quoteToWon, { num: 0, den: 0 });
+    assert.equal(C.rate(o.quoteToWon), '—');
+  }
+  assert.equal(C.overview(legacy, null).won.count, 1);                                             // their current stage is still a fact, so the plain counts still include them
+  const pending = rows([old('5')]);                                                                // an old lead that is still a New lead is a fact too: pending in all time, not "in play" this month
+  assert.deepEqual(C.overview(pending, null).leadToBooked, { num: 0, den: 1 });
+  assert.deepEqual(C.overview(pending, C.rangeFor('month', NOW)).leadToBooked, { num: 0, den: 0 });
+  const mixed = rows([old('1', { inboxStatus: 'won' }), old('2', { inboxStatus: 'booked', stageDates: { booked: ts('2026-10-14T09:00:00Z') } })]);   // one untracked, one moved today
+  assert.deepEqual(C.overview(mixed, C.rangeFor('month', NOW)).leadToBooked, { num: 1, den: 1 });
+});
+
+test('conversion: a customer moved out of Won is no longer a win; moving through stages in order reaches each one', () => {
+  const back = rows([old('1', { inboxStatus: 'quoted', stageDates: { quoted: ts('2026-10-10T09:00:00Z'), won: ts('2026-10-11T09:00:00Z') } })]);
+  assert.deepEqual(C.overview(back, null).quoteToWon, { num: 0, den: 1 });
+  const skip = rows([old('2', { inboxStatus: 'won', stageDates: { won: ts('2026-10-12T09:00:00Z') } })]);              // New lead -> Won directly
+  assert.deepEqual(C.overview(skip, C.rangeFor('month', NOW)).quoteToWon, { num: 1, den: 1 });
+  assert.deepEqual(C.overview(skip, C.rangeFor('month', NOW)).leadToBooked, { num: 1, den: 1 });                       // a Won customer had necessarily been booked
 });

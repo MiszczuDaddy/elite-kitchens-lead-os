@@ -57,11 +57,34 @@ Chosen period: this month (default), last 30 days, all time (Irish calendar days
 * **Booked / Quoted / Won** — customers who entered that stage in the period (a Won customer later moved back out of Won is not counted as a win). Quoted and Won also show the total quote value.
 * **Open quotes** — what is in Quoted *right now* (total value, count, and how many have no value yet). Not period-based.
 * **Average job** — total Won value ÷ Won jobs that have a value.
-* **Lead → Booked** and **Quote → Won** — measured on the leads created in the period, so they can never exceed 100%. With fewer than 5 customers the screen shows "3 of 4" instead of a percentage.
+* **Lead → Booked** and **Quote → Won** — see "How the conversion rates are worked out" below. They show a percentage as soon as there is one customer to measure, with the fraction underneath ("2 of 3") and "small sample" until there are 5 or more.
+
+## How the conversion rates are worked out
+
+Both rates use only what Elite OS has actually recorded. Nothing is guessed for customers who have no history.
+
+**Which customers are measured**
+
+* A customer is *tracked* once Elite OS has recorded at least one stage date for them (Booked, Quoted, Won or Closed) by a move made since Phase 4. Customers still sitting in **New lead** are also measured (that is a plain fact).
+* Customers moved to Booked/Quoted/Won/Closed **before** stage dates existed, and so have no recorded dates, are **left out of both rates**, in every period. They still appear in the board and in the plain counts (their current stage is a fact), just not in conversion.
+* In a chosen period (this month, 30 days) a customer is measured if they **became a lead in it or moved to any stage in it**. So an older customer you move to Booked today counts today, wherever they were created. All time measures every customer with usable history.
+
+**Lead → Booked** = customers measured that have **reached Booked** ÷ all customers measured.
+*Reached Booked* means: a Booked date was recorded, or they are in Booked now, or they went on to Quoted or Won (the pipeline runs in order, so a tracked customer who is Quoted or Won had been booked). Closed customers who never booked count in the bottom number only.
+
+**Quote → Won** = tracked customers who **reached Quoted** and are **Won now** ÷ tracked customers who reached Quoted.
+A quote that is still open, or that ended in **Closed** (lost), counts as not won (yet). A customer moved back out of Won is no longer a win. Reaching Quoted means a Quoted date was recorded, or they are in Quoted now, or they are tracked and Won.
+
+**Example.** Three customers move this month: A New lead → Booked, B Quoted → Won, C Quoted → Closed. Lead → Booked is 3 of 3 (100%) and Quote → Won is 1 of 2 (50%).
+
+*One inference, stated plainly:* for a tracked customer who jumps straight past a stage (e.g. New lead → Won), the earlier stages are treated as reached. That never applies to customers without any recorded dates.
+
+*Why this changed:* the first version only measured customers *created* in the period, so older customers moved today were invisible and both rates sat at "—". It also hid the percentage below 5 customers.
 
 ## Tests
 
 * Backend (`npm test`): stage dates, quote value validation, existing fields unchanged, Phase 3 leads still start as New lead, security rules (`functions/test/crm.test.js`); the pipeline maths incl. old-shape customers, Closed = lost, Dublin months across the clock change (`functions/test/crm-metrics.test.js`).
+* Browser (`bash test-ui/run.sh conversion.e2e.js`): customers created 60 days ago are moved New lead → Booked (menu), Quoted → Won (drag), Quoted → Closed and back, and the percentages are checked after every step, including that history-less customers stay out.
 * Browser (`bash test-ui/run.sh dnd.e2e.js`): real mouse drags, destination highlighting and clean-up, one request identical to the menu's, stage date and overview update, same-column drop, failed save rolls back with a message, second drag while saving is blocked, phone has no drag and shows the colour dots.
 * Browser (`bash test-ui/run.sh crm.e2e.js`): the pipeline screen, moves, quote value, filters, overview, phone layout, and a Meta lead arriving through `leadIntake` landing in New lead. `bash test-ui/run.sh` (Phase 2) and `lead.e2e.js` (Phase 3) must still pass.
 * One existing backend test was updated on purpose: it asserted that a status change writes *only* `inboxStatus`; it now allows the new stage date and still asserts that nothing else (activity, unread, preview, contact, messages) changes.

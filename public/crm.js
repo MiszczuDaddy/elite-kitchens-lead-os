@@ -92,11 +92,19 @@
     const closed = rows.filter((r) => r.status === 'closed' && entered(r, 'closed', ['closed']));
     const wonWithValue = won.filter((r) => r.quoteValue);
 
-    // Conversion is measured on the people who became leads in the period, so it can never exceed 100%.
-    const cohort = range ? rows.filter((r) => inRange(r.createdAt, range)) : rows;
-    const reachedBooked = (r) => r.stageDates.booked != null || BOOKED_OR_LATER.includes(r.status);
-    const reachedQuoted = (r) => r.stageDates.quoted != null || QUOTED_OR_LATER.includes(r.status);
-    const quotedCohort = cohort.filter(reachedQuoted);
+    // ---- conversion rates (see docs/CRM_PIPELINE.md) ----
+    // Evidence only. A customer is "tracked" once Elite OS has recorded at least one stage date for them. Customers moved
+    // before stage dates existed (no dates, and not still a New lead) have no history, so they are left OUT of both rates
+    // rather than guessed. For tracked customers, being in or past a stage means they reached it (the pipeline runs in order).
+    const tracked = (r) => r.stageDates.booked != null || r.stageDates.quoted != null || r.stageDates.won != null || r.stageDates.closed != null;
+    const reachedQuoted = (r) => r.stageDates.quoted != null || r.status === 'quoted' || (tracked(r) && r.status === 'won');
+    const reachedBooked = (r) => r.stageDates.booked != null || r.status === 'booked' || r.stageDates.quoted != null || (tracked(r) && (r.status === 'quoted' || r.status === 'won'));
+    // Who is measured in a period: customers who became a lead in it OR moved to any stage in it (so an older customer you
+    // move today counts today). All time: everyone with usable history.
+    const touched = (r) => inRange(r.createdAt, range) || ['booked', 'quoted', 'won', 'closed'].some((k) => inRange(r.stageDates[k], range));
+    const leadPop = rows.filter((r) => (r.status === 'inbox' || tracked(r)) && (!range || touched(r)));
+    const quotePop = leadPop.filter((r) => tracked(r) && reachedQuoted(r));
+
     const open = rows.filter((r) => r.status === 'quoted');
 
     return {
@@ -106,8 +114,8 @@
       won: { count: won.length, value: sum(won), avg: wonWithValue.length ? Math.round(sum(wonWithValue) / wonWithValue.length) : null },
       closed: closed.length,
       openQuotes: { count: open.length, value: sum(open), missingValue: open.filter((r) => !r.quoteValue).length },
-      leadToBooked: { num: cohort.filter(reachedBooked).length, den: cohort.length },
-      quoteToWon: { num: cohort.filter((r) => r.status === 'won').length, den: quotedCohort.length },
+      leadToBooked: { num: leadPop.filter(reachedBooked).length, den: leadPop.length },
+      quoteToWon: { num: quotePop.filter((r) => r.status === 'won').length, den: quotePop.length },
     };
   }
 
@@ -150,7 +158,7 @@
     m = /^\d+(?:\.\d{1,2})?$/.exec(t); if (m) return Math.round(parseFloat(t));
     return NaN;
   }
-  const rate = (r) => (!r.den ? '—' : `${r.num} of ${r.den}` + (r.den >= 5 ? ` · ${Math.round((r.num / r.den) * 100)}%` : ''));
+  const rate = (r) => (!r.den ? '—' : `${Math.round((r.num / r.den) * 100)}% · ${r.num} of ${r.den}`);
 
   return { STAGES, LABELS, stageOf, buildRows, rangeFor, inRange, overview, filterRows, lanes, sourcesOf, daysInStage, money, parseMoney, rate, matches };
 });

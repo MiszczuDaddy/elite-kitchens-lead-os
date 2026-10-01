@@ -61,15 +61,19 @@ window.PIPE = (() => {
   const addedRange = () => CRM.rangeFor(P.added, Date.now(), { from: P.from, to: P.to });
 
   // ---------- overview ----------
-  function stat(label, value, sub) {
+  function stat(label, value, sub, help) {
     const d = el('div', 'ov-item');
-    d.append(el('dt', null, label), el('dd', 'ov-num', value), el('dd', 'ov-sub', sub || ' '));
+    const dt = el('dt', null, label); if (help) { dt.title = help; dt.classList.add('has-help'); }
+    d.append(dt, el('dd', 'ov-num', value), el('dd', 'ov-sub', sub || ' '));
     return d;
   }
-  function rateStat(label, r) {
-    if (!r.den) return stat(label, '—', 'no data yet');
-    return r.den >= 5 ? stat(label, Math.round((r.num / r.den) * 100) + '%', r.num + ' of ' + r.den) : stat(label, r.num + ' of ' + r.den, 'too few for a %');
+  // A percentage as soon as there is one customer to measure; the fraction underneath shows how much it rests on.
+  function rateStat(label, r, help) {
+    if (!r.den) return stat(label, '—', 'nobody to measure yet', help);
+    return stat(label, Math.round((r.num / r.den) * 100) + '%', r.num + ' of ' + r.den + (r.den < 5 ? ' · small sample' : ''), help);
   }
+  const L2B_HELP = 'Of the customers who became a lead, or moved to any stage, in this period: the share that have reached Booked. Customers with no recorded history are left out, not guessed.';
+  const Q2W_HELP = 'Of the customers who reached Quoted, and who became a lead or moved stage in this period: the share that are Won now. Quotes still open and quotes that ended in Closed count as not won (yet).';
   function renderOverview(rows) {
     const o = CRM.overview(rows, CRM.rangeFor(P.period, Date.now()));
     const open = o.openQuotes;
@@ -80,8 +84,8 @@ window.PIPE = (() => {
       stat('Won', String(o.won.count), o.won.value ? CRM.money(o.won.value) : o.won.count ? 'no values yet' : ''),
       stat('Open quotes', CRM.money(open.value) || '€0', plural(open.count, 'quote') + (open.missingValue ? ' · ' + open.missingValue + ' without a value' : '')),
       stat('Average job', o.won.avg ? CRM.money(o.won.avg) : '—', 'won jobs with a value'),
-      rateStat('Lead → Booked', o.leadToBooked),
-      rateStat('Quote → Won', o.quoteToWon),
+      rateStat('Lead → Booked', o.leadToBooked, L2B_HELP),
+      rateStat('Quote → Won', o.quoteToWon, Q2W_HELP),
     );
     $('ov-title').textContent = 'Overview' + (P.source ? ' · ' + P.source : '');
     for (const b of $('ov-period').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.period === P.period));

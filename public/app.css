@@ -324,6 +324,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .ov-grid { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 20px 28px; }
 .ov-item { min-width: 0; }
 .ov-item dt { font-size: 12px; color: var(--muted); }
+.ov-item dt.has-help { cursor: help; text-decoration: underline dotted #b9bdb2; text-underline-offset: 3px; width: fit-content; }
 .ov-item dd { margin: 0; }
 .ov-num { font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
 .ov-sub { font-size: 12px; color: var(--muted); min-height: 18px; }
