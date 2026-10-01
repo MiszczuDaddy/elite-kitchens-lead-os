@@ -5,6 +5,6 @@ set -e
 cd "$(dirname "$0")/.."
 # Emulator-only config, removed on exit (both files are gitignored). Fake secrets: nothing real is used.
 printf 'ALLOWED_EMAILS=staff@test.dev\nWHATSAPP_PHONE_NUMBER_ID=111\nWHATSAPP_API_BASE=http://127.0.0.1:9911\n' > functions/.env.local
-printf 'WHATSAPP_ACCESS_TOKEN=tok\nWHATSAPP_APP_SECRET=secret\nWHATSAPP_VERIFY_TOKEN=vt\n' > functions/.secret.local
+printf 'WHATSAPP_ACCESS_TOKEN=tok\nWHATSAPP_APP_SECRET=secret\nWHATSAPP_VERIFY_TOKEN=vt\nLEADS_API_KEY=emulator-leads-key-0123456789abcdef\n' > functions/.secret.local
 trap 'rm -f functions/.env.local functions/.secret.local' EXIT
-npx firebase emulators:exec --only auth,functions,firestore,storage --project demo-leados "node test-ui/ui.e2e.js"
+npx firebase emulators:exec --only auth,functions,firestore,storage --project demo-leados "node test-ui/${1:-ui.e2e.js}"
