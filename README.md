@@ -42,6 +42,7 @@ Design and milestones: `docs/PHASE2_DESIGN.md`. Inbox UI = `public/index.html`, 
 Delivered on the branch: multi-customer inbox (search, unread counts, thread, reply, new conversation), editable customer details,
 automatic download + display of incoming photos/documents/voice notes/video, sending attachments, delivery ticks, phone layout.
 See `docs/PHASE2_PROGRESS.md`, `docs/SECURITY.md`, `docs/DATA_CONTROLS.md`, `docs/SECRET_ROTATION.md`, `docs/RESTORE.md`, `DEPLOY.md`.
+Phase 3 (Meta lead intake): `docs/LEAD_INTAKE.md`. Phase 4 (pipeline / CRM): `docs/CRM_PIPELINE.md`.
 
 ## Tests
     npm test          # 37 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules)
