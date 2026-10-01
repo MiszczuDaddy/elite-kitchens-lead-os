@@ -42,6 +42,13 @@ Customers created before Phase 4 have no `stageDates` and no `quoteValue`. They 
 * The pipeline reads up to 1,000 customers while the screen is open (the Inbox list keeps its own 300). If that limit is ever reached the screen says so.
 * Quote value is edited in the customer's Details panel under Project. Typing `€14,500`, `14500` or `14.5k` all work.
 
+## Drag and drop, and stage colours
+
+* **Desktop:** drag a card from one column to another. The card fades, and only the destination column gets a very faint tint of its stage colour with a hairline outline. Dropping on the card's own column does nothing. The ⋯ menu is still there and is the only method on phones (cards are not draggable below 900px wide).
+* **One code path:** drag-and-drop and the menu both call the same `move()` in `pipeline.js`, which calls the existing `setConversationStatus` callable. That callable stamps the stage date, so dates and every overview number behave identically for both.
+* **Safe by construction:** a card is shown in its new column straight away (dimmed) and cannot be moved again until the save finishes (one request per customer at a time). If the save fails it returns to its original column with a message such as "Could not move X to Booked. They are back in Closed". The live data replaces the temporary position as soon as it arrives. The board does not redraw while a card is being dragged or a menu is open.
+* **Colours** are small dots beside each stage name (New lead grey, Booked soft blue, Quoted soft amber, Won soft green, Closed muted red) and the faint drop tint. Columns, cards and backgrounds stay uncoloured, and the stage name is always shown next to the dot. They are defined once as `--st-*` variables in `app.css`.
+
 ## Overview numbers
 
 Chosen period: this month (default), last 30 days, all time (Irish calendar days, Europe/Dublin).
@@ -55,6 +62,7 @@ Chosen period: this month (default), last 30 days, all time (Irish calendar days
 ## Tests
 
 * Backend (`npm test`): stage dates, quote value validation, existing fields unchanged, Phase 3 leads still start as New lead, security rules (`functions/test/crm.test.js`); the pipeline maths incl. old-shape customers, Closed = lost, Dublin months across the clock change (`functions/test/crm-metrics.test.js`).
+* Browser (`bash test-ui/run.sh dnd.e2e.js`): real mouse drags, destination highlighting and clean-up, one request identical to the menu's, stage date and overview update, same-column drop, failed save rolls back with a message, second drag while saving is blocked, phone has no drag and shows the colour dots.
 * Browser (`bash test-ui/run.sh crm.e2e.js`): the pipeline screen, moves, quote value, filters, overview, phone layout, and a Meta lead arriving through `leadIntake` landing in New lead. `bash test-ui/run.sh` (Phase 2) and `lead.e2e.js` (Phase 3) must still pass.
 * One existing backend test was updated on purpose: it asserted that a status change writes *only* `inboxStatus`; it now allows the new stage date and still asserts that nothing else (activity, unread, preview, contact, messages) changes.
 
@@ -72,4 +80,4 @@ Not touched: `leadIntake`, the webhook, sending/receiving, media, deletion, rete
 
 ## Not in this phase
 
-Drag-and-drop, quoting/invoices, projects/job status after Won, reminders ("quotes going cold"), a timeframe field (the Meta answer is already kept in Notes), exports.
+Quoting/invoices, projects/job status after Won, reminders ("quotes going cold"), a timeframe field (the Meta answer is already kept in Notes), exports.

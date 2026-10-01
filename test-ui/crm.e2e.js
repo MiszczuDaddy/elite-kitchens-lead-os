@@ -121,6 +121,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await page.click('.move-menu button:has-text("Booked")');
   await lane('booked').locator(`.prow[data-phone="${ph.legacy}"]`).waitFor();
   assert.equal(await count('inbox'), 0);
+  for (let i = 0; i < 60 && (await db.doc('conversations/' + ph.legacy).get()).data().inboxStatus !== 'booked'; i++) await sleep(100);   // the card moves instantly; wait for the save
   const moved = (await db.doc('conversations/' + ph.legacy).get()).data();
   assert.equal(moved.inboxStatus, 'booked'); assert.ok(moved.stageDates.booked); assert.equal(moved.unreadCount, 0);
   ok('"Move to…" changes the stage in one click, the customer jumps column, and the booked date is stamped automatically');
@@ -150,6 +151,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   assert.equal((await db.doc('contacts/' + ph.noval).get()).data().quoteValue, 12000);     // ordinary saves leave it alone
   await page.click('#nav-pipeline');
   await page.waitForSelector('.lane[data-stage="quoted"] .prow');
+  await page.waitForFunction(() => /€26,500/.test((document.querySelector('.lane[data-stage="quoted"] .lane-sum') || {}).textContent || ''));
   assert.match(await lane('quoted').locator('.lane-sum').innerText(), /€26,500/);
   assert.doesNotMatch(await row(ph.noval).innerText(), /No value yet/);
   ok('back on the Pipeline the Quoted total is now €26,500');
@@ -185,6 +187,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await mp.locator(`.prow[data-phone="${ph.quoted}"] .prow-menu`).tap();
   await mp.tap('.move-menu button:has-text("Won")');
   await mp.waitForFunction((p) => !document.querySelector(`.lane[data-stage="quoted"] .prow[data-phone="${p}"]`), ph.quoted);
+  for (let i = 0; i < 60 && (await db.doc('conversations/' + ph.quoted).get()).data().inboxStatus !== 'won'; i++) await sleep(100);
   assert.equal((await db.doc('conversations/' + ph.quoted).get()).data().inboxStatus, 'won');
   await mp.tap('#pipe-stages button[data-stage="won"]');
   await mp.locator(`.prow[data-phone="${ph.quoted}"]`).tap();

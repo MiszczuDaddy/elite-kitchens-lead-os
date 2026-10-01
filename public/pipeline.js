@@ -9,14 +9,19 @@ window.PIPE = (() => {
     convs: [], contacts: [], loadedC: false, loadedK: false, unsubC: null, unsubK: null, hitLimit: false,
     query: '', source: '', added: 'all', from: '', to: '', period: 'month', stage: 'inbox',
     moving: new Set(), menu: null, stale: false,
+    opt: new Map(),          // phone -> { to }: the stage a card is shown in while its move is being saved (rolled back if the save fails)
+    drag: null,              // { id, from } while a card is being dragged
   };
+  const desktop = () => window.matchMedia('(min-width: 900px)').matches;   // drag only where there is room and a mouse; phones use tap + menu
   const STAGES = CRM.STAGES;
 
   // ---------- data ----------
   function listen() {
     if (P.unsubC) return;
     P.unsubC = db.collection('conversations').orderBy('updatedAt', 'desc').limit(LIMIT).onSnapshot((snap) => {
-      P.convs = snap.docs.map((d) => ({ id: d.id, ...d.data() })); P.loadedC = true; P.hitLimit = snap.size >= LIMIT; render();
+      P.convs = snap.docs.map((d) => ({ id: d.id, ...d.data() })); P.loadedC = true; P.hitLimit = snap.size >= LIMIT;
+      for (const [id, o] of P.opt) { const c = P.convs.find((x) => x.id === id); if (!c || CRM.stageOf(c) === o.to) P.opt.delete(id); }
+      render();
     }, (e) => note('Cannot load the pipeline: ' + errText(e)));
     P.unsubK = db.collection('contacts').limit(LIMIT).onSnapshot((snap) => {
       P.contacts = snap.docs.map((d) => ({ id: d.id, ...d.data() })); P.loadedK = true; render();
@@ -25,7 +30,7 @@ window.PIPE = (() => {
   function unlisten() {
     if (P.unsubC) { P.unsubC(); P.unsubC = null; }
     if (P.unsubK) { P.unsubK(); P.unsubK = null; }
-    P.convs = []; P.contacts = []; P.loadedC = P.loadedK = false; P.hitLimit = false;
+    P.convs = []; P.contacts = []; P.loadedC = P.loadedK = false; P.hitLimit = false; P.opt.clear();
   }
 
   // ---------- show / hide ----------
@@ -43,7 +48,7 @@ window.PIPE = (() => {
     P.active = false; closeMenu(); setNav(false); unlisten();
   }
   function stop() {          // sign-out: forget everything
-    hide(); P.origin = false; P.moving.clear();
+    hide(); P.origin = false; P.moving.clear(); endDrag();
     P.query = ''; P.source = ''; P.added = 'all'; P.from = P.to = ''; P.period = 'month'; P.stage = 'inbox';
     $('pipe-search').value = ''; $('pipe-source').replaceChildren(new Option('All sources', '')); $('pipe-added').value = 'all';
     $('pipe-from').value = $('pipe-to').value = ''; $('pipe-custom').hidden = true; $('pipe-board').replaceChildren(); $('ov-grid').replaceChildren();
@@ -86,6 +91,7 @@ window.PIPE = (() => {
   function rowNode(r) {
     const item = el('div', 'prow' + (P.moving.has(r.id) ? ' pending' : ''));
     item.setAttribute('role', 'listitem'); item.tabIndex = 0; item.dataset.phone = r.id;
+    if (desktop()) item.draggable = true;
     const name = r.name || formatPhone(r.id);
     item.setAttribute('aria-label', name + (r.unread ? ', unread messages' : '') + '. Open conversation');
     const main = el('div', 'prow-main');
@@ -125,10 +131,10 @@ window.PIPE = (() => {
 
   function render() {
     if (!P.active) return;
-    if (P.menu) { P.stale = true; return; }                       // never redraw under an open menu
+    if (P.menu || P.drag) { P.stale = true; return; }             // never redraw under an open menu or a card being dragged
     const board = $('pipe-board');
     if (!P.loadedC || !P.loadedK) { board.replaceChildren(el('p', 'pipe-empty', 'Loading customers…')); $('ov-grid').replaceChildren(); return; }
-    const all = CRM.buildRows(P.convs, P.contacts);
+    const all = CRM.buildRows(P.convs, P.contacts).map((r) => (P.opt.has(r.id) ? { ...r, status: P.opt.get(r.id).to } : r));
     const sources = CRM.sourcesOf(all);
     const sel = $('pipe-source');
     if (P.source && !sources.includes(P.source)) sources.push(P.source);
@@ -168,7 +174,7 @@ window.PIPE = (() => {
     if (was) return;
     const node = el('div', 'move-menu'); node.setAttribute('role', 'menu'); node.setAttribute('aria-label', 'Move to');
     for (const s of STAGES) {
-      const b = el('button', null, CRM.LABELS[s]); b.type = 'button'; b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', String(s === r.status));
+      const b = el('button', null, CRM.LABELS[s]); b.type = 'button'; b.dataset.stage = s; b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', String(s === r.status));
       if (s === r.status) { b.disabled = true; b.append(el('span', 'tick-mark', '✓')); }
       b.onclick = () => { closeMenu(true); move(r.id, s); };
       node.append(b);
@@ -180,13 +186,64 @@ window.PIPE = (() => {
     btn.setAttribute('aria-expanded', 'true'); P.menu = { node, btn };
     (node.querySelector('button:not(:disabled)') || node).focus();
   }
+  // The single place a stage change happens. The menu and drag-and-drop both call this, which calls the existing
+  // setConversationStatus callable (that is what stamps the stage date). The card is shown in its new stage straight away
+  // and put back, with a message, if the save fails. One move per customer at a time.
+  const currentStage = (phone) => CRM.stageOf(P.convs.find((c) => c.id === phone));
   async function move(phone, status) {
     if (P.moving.has(phone)) return;
-    P.moving.add(phone); note(''); render();
-    try { await call('setConversationStatus')({ phone, status }); }
-    catch (e) { note('Could not move the customer. Please try again.'); }
-    finally { P.moving.delete(phone); render(); }
+    const from = currentStage(phone);
+    if (!CRM.STAGES.includes(status) || from === status) return;
+    const row = CRM.buildRows(P.convs, P.contacts).find((r) => r.id === phone);
+    const name = (row && row.name) || formatPhone(phone);
+    P.moving.add(phone); P.opt.set(phone, { to: status }); note(''); render();
+    try {
+      await call('setConversationStatus')({ phone, status });
+      const o = P.opt.get(phone);                        // the live data normally catches up within a moment; do not wait forever
+      if (o) setTimeout(() => { if (P.opt.get(phone) === o) { P.opt.delete(phone); render(); } }, 4000);
+    } catch (e) {
+      P.opt.delete(phone);
+      note('Could not move ' + name + ' to ' + CRM.LABELS[status] + '. They are back in ' + CRM.LABELS[from] + ' - please try again.');
+    } finally { P.moving.delete(phone); render(); }
   }
+
+  // ---------- drag and drop (desktop) ----------
+  function endDrag() {
+    P.drag = null;
+    const board = $('pipe-board');
+    board.classList.remove('is-dragging');
+    for (const n of board.querySelectorAll('.dragging, .drop-target')) n.classList.remove('dragging', 'drop-target');
+    if (P.stale && !P.menu) { P.stale = false; render(); }
+  }
+  const laneOf = (e) => (e.target.closest ? e.target.closest('.lane') : null);
+  const board = $('pipe-board');
+  board.addEventListener('dragstart', (e) => {
+    const row = e.target.closest && e.target.closest('.prow');
+    if (!row || !desktop() || P.moving.has(row.dataset.phone)) { e.preventDefault(); return; }
+    closeMenu();
+    P.drag = { id: row.dataset.phone, from: row.closest('.lane').dataset.stage };
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', P.drag.id);
+    board.classList.add('is-dragging');
+    setTimeout(() => row.classList.add('dragging'), 0);       // after the browser has taken its drag picture
+  });
+  board.addEventListener('dragover', (e) => {
+    const lane = laneOf(e);
+    if (!P.drag || !lane || lane.dataset.stage === P.drag.from) return;      // the card's own column is not a destination
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    for (const n of board.querySelectorAll('.drop-target')) if (n !== lane) n.classList.remove('drop-target');
+    lane.classList.add('drop-target');
+  });
+  board.addEventListener('dragleave', (e) => { const lane = laneOf(e); if (lane && !lane.contains(e.relatedTarget)) lane.classList.remove('drop-target'); });
+  board.addEventListener('drop', (e) => {
+    const lane = laneOf(e), d = P.drag;
+    if (!d || !lane) { endDrag(); return; }
+    e.preventDefault();
+    const to = lane.dataset.stage;
+    endDrag();
+    if (to !== d.from) move(d.id, to);
+  });
+  board.addEventListener('dragend', endDrag);
+  window.matchMedia('(min-width: 900px)').addEventListener('change', () => render());
 
   // ---------- wiring ----------
   document.addEventListener('click', (e) => { if (P.menu && !P.menu.node.contains(e.target)) closeMenu(); });
