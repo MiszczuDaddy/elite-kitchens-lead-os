@@ -1,6 +1,6 @@
 /* Elite Kitchens — an everyday workspace, with the conversation in focus. */
 :root {
-  color-scheme: light;
+  color-scheme: only light;
   --bg: #f7f7f4; --panel: #fdfdfc; --nav: #f3f3ef;
   --ink: #252724; --muted: #686b64; --line: #e6e7e1;
   --hover: #f0f1eb; --selected: #e9ece4; --accent: #465c45;
@@ -72,14 +72,18 @@ h1, h2, p { overflow-wrap: anywhere; }
 .new-conversation { border: 1px solid var(--line); width: 36px; min-height: 36px; }
 .count { vertical-align: middle; margin-left: 5px; font-size: 12px; font-weight: 600; background: var(--selected); color: var(--accent); padding: 2px 7px; border-radius: 4px; letter-spacing: 0; }
 .pane-caption { color: var(--muted); font-size: 13px; margin: 4px 22px 10px; }
-.status-filters { display: flex; gap: 2px; padding: 0 16px 12px; flex: none; }
-.status-filters button { position: relative; flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 7px 6px; white-space: nowrap; border: 0; border-radius: 5px; background: transparent; font-size: 12px; color: var(--muted); cursor: pointer; }
+.status-filters { display: flex; gap: 1px; padding: 0 10px 12px; flex: none; }
+.status-filters button { position: relative; flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 7px 4px; white-space: nowrap; border: 0; border-radius: 5px; background: transparent; font-size: 12px; color: var(--muted); cursor: pointer; }
 .status-filters button:hover { background: var(--hover); }
-.status-filters button[aria-pressed=true] { background: var(--selected); color: var(--ink); font-weight: 600; }
+.status-filters button::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--st); vertical-align: 1px; }
+.status-filters button:hover { background: rgb(var(--st-rgb) / calc(var(--tint) * 1.6)); }
+.status-filters button[aria-pressed=true] { background: rgb(var(--st-rgb) / calc(var(--tint-drag) * 1.15)); color: var(--ink); font-weight: 600; }
 .status-unread { position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--unread); }
 .conversation-state { display: flex; flex: none; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .conversation-state>span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.conversation-state select { width: 96px; min-height: 36px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); padding: 6px 8px; color: var(--ink); font-size: 13px; cursor: pointer; }
+.conversation-state { position: relative; }
+.conversation-state::before { content: ''; position: absolute; left: 11px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--st, var(--st-inbox)); pointer-events: none; z-index: 1; }
+.conversation-state select { width: 112px; min-height: 36px; border: 1px solid var(--line); border-radius: 5px; background: color-mix(in srgb, rgb(var(--st-rgb, var(--st-inbox-rgb))) calc(var(--tint, .065) * 140%), var(--panel)); padding: 6px 8px 6px 24px; color: var(--ink); font-size: 13px; cursor: pointer; }
 .conversation-state select:disabled { opacity: .6; cursor: wait; }
 .status-feedback { flex: none; padding: 7px 20px; background: var(--hover); color: var(--muted); font-size: 13px; }
 .status-feedback.error { color: var(--err); background: #f9eae6; }
@@ -329,11 +333,11 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .ov-num { font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
 .ov-sub { font-size: 12px; color: var(--muted); min-height: 18px; }
 .pipe-board { flex: 1 0 auto; min-height: 340px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(210px, 1fr); gap: 26px; align-items: stretch; padding: 0 10px; margin: 0 -10px; overflow-x: auto; }
-[data-stage=inbox] { --st: var(--st-inbox); --st-rgb: var(--st-inbox-rgb); --tint: .065; --tint-drag: .14; }
-[data-stage=booked] { --st: var(--st-booked); --st-rgb: var(--st-booked-rgb); --tint: .055; --tint-drag: .12; }
-[data-stage=quoted] { --st: var(--st-quoted); --st-rgb: var(--st-quoted-rgb); --tint: .05; --tint-drag: .11; }
-[data-stage=won] { --st: var(--st-won); --st-rgb: var(--st-won-rgb); --tint: .055; --tint-drag: .12; }
-[data-stage=closed] { --st: var(--st-closed); --st-rgb: var(--st-closed-rgb); --tint: .055; --tint-drag: .12; }
+[data-stage=inbox], [data-status=inbox] { --st: var(--st-inbox); --st-rgb: var(--st-inbox-rgb); --tint: .065; --tint-drag: .14; }
+[data-stage=booked], [data-status=booked] { --st: var(--st-booked); --st-rgb: var(--st-booked-rgb); --tint: .055; --tint-drag: .12; }
+[data-stage=quoted], [data-status=quoted] { --st: var(--st-quoted); --st-rgb: var(--st-quoted-rgb); --tint: .05; --tint-drag: .11; }
+[data-stage=won], [data-status=won] { --st: var(--st-won); --st-rgb: var(--st-won-rgb); --tint: .055; --tint-drag: .12; }
+[data-stage=closed], [data-status=closed] { --st: var(--st-closed); --st-rgb: var(--st-closed-rgb); --tint: .055; --tint-drag: .12; }
 .lane { position: relative; isolation: isolate; min-width: 0; min-height: 280px; padding-top: 16px; }
 .lane::before { content: ''; position: absolute; inset: 6px -10px 0; border-radius: 8px; background: rgb(var(--st-rgb) / var(--tint)); z-index: -1; transition: background-color 120ms ease-out; }
 .lane.drop-target::before { background: rgb(var(--st-rgb) / var(--tint-drag)); }

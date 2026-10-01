@@ -283,6 +283,7 @@ $('conversation-status').addEventListener('change', async e => {
 function renderConversationStatus() {
   const c = selectedConv(), pending = statusRequests.get(S.selected), error = statusErrors.get(S.selected);
   $('conversation-status').value = pending ? pending.status : inboxStatus(c || {});
+  $('conversation-status').closest('.conversation-state').dataset.status = $('conversation-status').value;   // stage colour for the dot and tint
   $('conversation-status').disabled = !c || !!pending;
   const feedback = $('status-feedback');
   feedback.hidden = !pending && !error;
