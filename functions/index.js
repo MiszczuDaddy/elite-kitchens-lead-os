@@ -50,3 +50,22 @@ exports.retryMedia = onCall({ secrets: SECRETS, timeoutSeconds: 120, memory: '51
 exports.sendMedia = onCall({ secrets: SECRETS, timeoutSeconds: 120, memory: '1GiB' }, (req) => h.sendMedia(req.auth, req.data, deps()));
 exports.deleteCustomer = onCall({ secrets: SECRETS, timeoutSeconds: 300, memory: '512MiB' }, (req) => h.deleteCustomer(req.auth, req.data, deps()));
 exports.sendReply = onCall({ secrets: SECRETS }, (req) => h.sendReply(req.auth, req.data, deps()));
+
+// ---- Phase 3: Meta Lead Ads intake. Make posts each lead here; Elite OS dedupes by Meta lead id, creates/updates the customer
+// and sends the approved WhatsApp template itself. Added at the end of the file: no existing function above is touched.
+// Needs only the WhatsApp token and its own key (least privilege), and its own secret LEADS_API_KEY (comma-separated keys allow rotation).
+const LEADS_API_KEY = defineSecret('LEADS_API_KEY');
+const leads = require('./lib/leads');
+exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeoutSeconds: 60 }, async (req, res) => {
+  try {
+    const c = { phoneId: PHONE_ID.value(), template: TEMPLATE.value(), lang: LANG.value(), version: API_VERSION.value(),
+      apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), apiKeys: LEADS_API_KEY.value() };
+    const r = await leads.handleLeadRequest({ method: req.method, headers: req.headers, rawBody: req.rawBody, body: req.body },
+      { db: getFirestore(), wa: createClient(c), cfg: c });
+    Object.entries(r.headers || {}).forEach(([k, v]) => res.set(k, v));
+    res.status(r.status).json(r.body);
+  } catch (e) {   // unexpected: 500 makes Make retry, which is safe because processing is idempotent. No lead data in the log.
+    console.error(JSON.stringify({ level: 'error', msg: 'leadIntake crashed', err: String(e && e.message).replace(/\+?\d[\d\s().\-]{5,}\d/g, '[number]').slice(0, 300) }));
+    res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
