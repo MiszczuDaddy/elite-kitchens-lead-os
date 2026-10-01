@@ -15,9 +15,17 @@ The existing live message listener still loads the latest 500 messages. The asse
 
 ## Verification
 
-Verified on 2026-10-01: all 51 browser checks passed (45 foundation + 6 redesign); desktop and phone screenshots inspected. Backend/configuration diff against the recovery tag is empty.
+Verified on 2026-10-01: all 53 browser checks passed (45 foundation + 8 redesign); desktop, tablet-width and phone screenshots inspected. Backend/configuration diff against the recovery tag is empty.
 
-`npm run test:ui` retains the original 45 checks and adds six redesign regressions. Emulator data and Meta calls are mocked; no real customer messages are sent by tests. Screenshots are written to ignored `test-ui/shots/`.
+`npm run test:ui` retains the original 45 checks and adds eight redesign regressions. Emulator data and Meta calls are mocked; no real customer messages are sent by tests. Screenshots are written to ignored `test-ui/shots/`.
+
+## Light interface refinement
+
+The screenshot-inspired refinement uses warm neutral surfaces, charcoal typography, a restrained sidebar and subtle selected states. Future areas sit under an explicitly labelled Coming later disclosure. Customer forms have clear Contact, Project and Notes groups with a persistent Save action. The Media gallery groups thumbnails by month; documents use consistent SVG file cards. The implementation remains plain HTML/CSS/JavaScript.
+
+Message drafts and unsaved customer edits stay associated with their own customer when switching conversations. Drafts are held only in memory and cleared on sign-out; they do not survive a page reload. On narrow screens the customer drawer contains keyboard focus and makes the underlying panes inert. Existing sends, media access, customer saves/deletion and Firebase contracts are unchanged.
+
+See `IMPECCABLE_CRITIQUE.md` for the initial independent reviews and their evidence limits, and the root `DESIGN.md` for the implemented visual system. Owner acceptance remains the final product check.
 
 On Windows, tests can use Git Bash, Node 22, Java 21, Playwright via NODE_PATH, and Chrome via CHROMIUM. Tooling is outside this repository in the local workspace.
 

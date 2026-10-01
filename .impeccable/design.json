@@ -1,0 +1,566 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-01T00:46:45.338Z",
+  "title": "Design System: Elite Kitchens Lead OS",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Off-white workspace",
+        "tonalRamp": [
+          "oklch(15.00% 0.00396 106.47)",
+          "oklch(26.43% 0.00396 106.47)",
+          "oklch(37.86% 0.00396 106.47)",
+          "oklch(49.29% 0.00396 106.47)",
+          "oklch(60.71% 0.00396 106.47)",
+          "oklch(72.14% 0.00396 106.47)",
+          "oklch(83.57% 0.00396 106.47)",
+          "oklch(95.00% 0.00396 106.47)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Near-white panel",
+        "tonalRamp": [
+          "oklch(15.00% 0.00132 106.42)",
+          "oklch(26.43% 0.00132 106.42)",
+          "oklch(37.86% 0.00132 106.42)",
+          "oklch(49.29% 0.00132 106.42)",
+          "oklch(60.71% 0.00132 106.42)",
+          "oklch(72.14% 0.00132 106.42)",
+          "oklch(83.57% 0.00132 106.42)",
+          "oklch(95.00% 0.00132 106.42)"
+        ]
+      },
+      "nav": {
+        "role": "neutral",
+        "displayName": "Pale navigation",
+        "tonalRamp": [
+          "oklch(15.00% 0.00530 106.50)",
+          "oklch(26.43% 0.00530 106.50)",
+          "oklch(37.86% 0.00530 106.50)",
+          "oklch(49.29% 0.00530 106.50)",
+          "oklch(60.71% 0.00530 106.50)",
+          "oklch(72.14% 0.00530 106.50)",
+          "oklch(83.57% 0.00530 106.50)",
+          "oklch(95.00% 0.00530 106.50)"
+        ]
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "Charcoal",
+        "tonalRamp": [
+          "oklch(15.00% 0.00617 134.94)",
+          "oklch(26.43% 0.00617 134.94)",
+          "oklch(37.86% 0.00617 134.94)",
+          "oklch(49.29% 0.00617 134.94)",
+          "oklch(60.71% 0.00617 134.94)",
+          "oklch(72.14% 0.00617 134.94)",
+          "oklch(83.57% 0.00617 134.94)",
+          "oklch(95.00% 0.00617 134.94)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Secondary grey",
+        "tonalRamp": [
+          "oklch(15.00% 0.01137 125.84)",
+          "oklch(26.43% 0.01137 125.84)",
+          "oklch(37.86% 0.01137 125.84)",
+          "oklch(49.29% 0.01137 125.84)",
+          "oklch(60.71% 0.01137 125.84)",
+          "oklch(72.14% 0.01137 125.84)",
+          "oklch(83.57% 0.01137 125.84)",
+          "oklch(95.00% 0.01137 125.84)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Quiet divider",
+        "tonalRamp": [
+          "oklch(15.00% 0.00808 114.23)",
+          "oklch(26.43% 0.00808 114.23)",
+          "oklch(37.86% 0.00808 114.23)",
+          "oklch(49.29% 0.00808 114.23)",
+          "oklch(60.71% 0.00808 114.23)",
+          "oklch(72.14% 0.00808 114.23)",
+          "oklch(83.57% 0.00808 114.23)",
+          "oklch(95.00% 0.00808 114.23)"
+        ]
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover wash",
+        "tonalRamp": [
+          "oklch(15.00% 0.00802 114.22)",
+          "oklch(26.43% 0.00802 114.22)",
+          "oklch(37.86% 0.00802 114.22)",
+          "oklch(49.29% 0.00802 114.22)",
+          "oklch(60.71% 0.00802 114.22)",
+          "oklch(72.14% 0.00802 114.22)",
+          "oklch(83.57% 0.00802 114.22)",
+          "oklch(95.00% 0.00802 114.22)"
+        ]
+      },
+      "selected": {
+        "role": "neutral",
+        "displayName": "Selected wash",
+        "tonalRamp": [
+          "oklch(15.00% 0.01110 123.46)",
+          "oklch(26.43% 0.01110 123.46)",
+          "oklch(37.86% 0.01110 123.46)",
+          "oklch(49.29% 0.01110 123.46)",
+          "oklch(60.71% 0.01110 123.46)",
+          "oklch(72.14% 0.01110 123.46)",
+          "oklch(83.57% 0.01110 123.46)",
+          "oklch(95.00% 0.01110 123.46)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Muted green",
+        "tonalRamp": [
+          "oklch(15.00% 0.04563 143.68)",
+          "oklch(26.43% 0.04563 143.68)",
+          "oklch(37.86% 0.04563 143.68)",
+          "oklch(49.29% 0.04563 143.68)",
+          "oklch(60.71% 0.04563 143.68)",
+          "oklch(72.14% 0.04563 143.68)",
+          "oklch(83.57% 0.04563 143.68)",
+          "oklch(95.00% 0.04563 143.68)"
+        ]
+      },
+      "in": {
+        "role": "neutral",
+        "displayName": "Incoming white",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "out": {
+        "role": "neutral",
+        "displayName": "Outgoing pale green",
+        "tonalRamp": [
+          "oklch(15.00% 0.01395 124.56)",
+          "oklch(26.43% 0.01395 124.56)",
+          "oklch(37.86% 0.01395 124.56)",
+          "oklch(49.29% 0.01395 124.56)",
+          "oklch(60.71% 0.01395 124.56)",
+          "oklch(72.14% 0.01395 124.56)",
+          "oklch(83.57% 0.01395 124.56)",
+          "oklch(95.00% 0.01395 124.56)"
+        ]
+      },
+      "out-ink": {
+        "role": "neutral",
+        "displayName": "Outgoing charcoal",
+        "tonalRamp": [
+          "oklch(15.00% 0.01821 145.08)",
+          "oklch(26.43% 0.01821 145.08)",
+          "oklch(37.86% 0.01821 145.08)",
+          "oklch(49.29% 0.01821 145.08)",
+          "oklch(60.71% 0.01821 145.08)",
+          "oklch(72.14% 0.01821 145.08)",
+          "oklch(83.57% 0.01821 145.08)",
+          "oklch(95.00% 0.01821 145.08)"
+        ]
+      },
+      "unread": {
+        "role": "semantic",
+        "displayName": "Unread green",
+        "tonalRamp": [
+          "oklch(15.00% 0.04563 143.68)",
+          "oklch(26.43% 0.04563 143.68)",
+          "oklch(37.86% 0.04563 143.68)",
+          "oklch(49.29% 0.04563 143.68)",
+          "oklch(60.71% 0.04563 143.68)",
+          "oklch(72.14% 0.04563 143.68)",
+          "oklch(83.57% 0.04563 143.68)",
+          "oklch(95.00% 0.04563 143.68)"
+        ]
+      },
+      "ok": {
+        "role": "semantic",
+        "displayName": "Read blue",
+        "tonalRamp": [
+          "oklch(15.00% 0.08861 229.84)",
+          "oklch(26.43% 0.08861 229.84)",
+          "oklch(37.86% 0.08861 229.84)",
+          "oklch(49.29% 0.08861 229.84)",
+          "oklch(60.71% 0.08861 229.84)",
+          "oklch(72.14% 0.08861 229.84)",
+          "oklch(83.57% 0.08861 229.84)",
+          "oklch(95.00% 0.08861 229.84)"
+        ]
+      },
+      "err": {
+        "role": "semantic",
+        "displayName": "Error red",
+        "tonalRamp": [
+          "oklch(15.00% 0.15725 27.21)",
+          "oklch(26.43% 0.15725 27.21)",
+          "oklch(37.86% 0.15725 27.21)",
+          "oklch(49.29% 0.15725 27.21)",
+          "oklch(60.71% 0.15725 27.21)",
+          "oklch(72.14% 0.15725 27.21)",
+          "oklch(83.57% 0.15725 27.21)",
+          "oklch(95.00% 0.15725 27.21)"
+        ]
+      },
+      "primary-hover": {
+        "role": "neutral",
+        "displayName": "primary hover",
+        "tonalRamp": [
+          "oklch(15.00% 0.01975 130.75)",
+          "oklch(26.43% 0.01975 130.75)",
+          "oklch(37.86% 0.01975 130.75)",
+          "oklch(49.29% 0.01975 130.75)",
+          "oklch(60.71% 0.01975 130.75)",
+          "oklch(72.14% 0.01975 130.75)",
+          "oklch(83.57% 0.01975 130.75)",
+          "oklch(95.00% 0.01975 130.75)"
+        ]
+      },
+      "ghost-hover": {
+        "role": "neutral",
+        "displayName": "ghost hover",
+        "tonalRamp": [
+          "oklch(15.00% 0.01089 118.03)",
+          "oklch(26.43% 0.01089 118.03)",
+          "oklch(37.86% 0.01089 118.03)",
+          "oklch(49.29% 0.01089 118.03)",
+          "oklch(60.71% 0.01089 118.03)",
+          "oklch(72.14% 0.01089 118.03)",
+          "oklch(83.57% 0.01089 118.03)",
+          "oklch(95.00% 0.01089 118.03)"
+        ]
+      },
+      "danger-hover": {
+        "role": "neutral",
+        "displayName": "danger hover",
+        "tonalRamp": [
+          "oklch(15.00% 0.13272 27.42)",
+          "oklch(26.43% 0.13272 27.42)",
+          "oklch(37.86% 0.13272 27.42)",
+          "oklch(49.29% 0.13272 27.42)",
+          "oklch(60.71% 0.13272 27.42)",
+          "oklch(72.14% 0.13272 27.42)",
+          "oklch(83.57% 0.13272 27.42)",
+          "oklch(95.00% 0.13272 27.42)"
+        ]
+      },
+      "nav-hover": {
+        "role": "neutral",
+        "displayName": "nav hover",
+        "tonalRamp": [
+          "oklch(15.00% 0.00956 119.58)",
+          "oklch(26.43% 0.00956 119.58)",
+          "oklch(37.86% 0.00956 119.58)",
+          "oklch(49.29% 0.00956 119.58)",
+          "oklch(60.71% 0.00956 119.58)",
+          "oklch(72.14% 0.00956 119.58)",
+          "oklch(83.57% 0.00956 119.58)",
+          "oklch(95.00% 0.00956 119.58)"
+        ]
+      },
+      "nav-active": {
+        "role": "neutral",
+        "displayName": "nav active",
+        "tonalRamp": [
+          "oklch(15.00% 0.01088 118.03)",
+          "oklch(26.43% 0.01088 118.03)",
+          "oklch(37.86% 0.01088 118.03)",
+          "oklch(49.29% 0.01088 118.03)",
+          "oklch(60.71% 0.01088 118.03)",
+          "oklch(72.14% 0.01088 118.03)",
+          "oklch(83.57% 0.01088 118.03)",
+          "oklch(95.00% 0.01088 118.03)"
+        ]
+      },
+      "field-bg": {
+        "role": "neutral",
+        "displayName": "field bg",
+        "tonalRamp": [
+          "oklch(15.00% 0.00536 117.92)",
+          "oklch(26.43% 0.00536 117.92)",
+          "oklch(37.86% 0.00536 117.92)",
+          "oklch(49.29% 0.00536 117.92)",
+          "oklch(60.71% 0.00536 117.92)",
+          "oklch(72.14% 0.00536 117.92)",
+          "oklch(83.57% 0.00536 117.92)",
+          "oklch(95.00% 0.00536 117.92)"
+        ]
+      },
+      "field-border": {
+        "role": "neutral",
+        "displayName": "field border",
+        "tonalRamp": [
+          "oklch(15.00% 0.01246 121.71)",
+          "oklch(26.43% 0.01246 121.71)",
+          "oklch(37.86% 0.01246 121.71)",
+          "oklch(49.29% 0.01246 121.71)",
+          "oklch(60.71% 0.01246 121.71)",
+          "oklch(72.14% 0.01246 121.71)",
+          "oklch(83.57% 0.01246 121.71)",
+          "oklch(95.00% 0.01246 121.71)"
+        ]
+      },
+      "field-hover-border": {
+        "role": "neutral",
+        "displayName": "field hover border",
+        "tonalRamp": [
+          "oklch(15.00% 0.02244 130.06)",
+          "oklch(26.43% 0.02244 130.06)",
+          "oklch(37.86% 0.02244 130.06)",
+          "oklch(49.29% 0.02244 130.06)",
+          "oklch(60.71% 0.02244 130.06)",
+          "oklch(72.14% 0.02244 130.06)",
+          "oklch(83.57% 0.02244 130.06)",
+          "oklch(95.00% 0.02244 130.06)"
+        ]
+      },
+      "search-bg": {
+        "role": "neutral",
+        "displayName": "search bg",
+        "tonalRamp": [
+          "oklch(15.00% 0.00670 115.71)",
+          "oklch(26.43% 0.00670 115.71)",
+          "oklch(37.86% 0.00670 115.71)",
+          "oklch(49.29% 0.00670 115.71)",
+          "oklch(60.71% 0.00670 115.71)",
+          "oklch(72.14% 0.00670 115.71)",
+          "oklch(83.57% 0.00670 115.71)",
+          "oklch(95.00% 0.00670 115.71)"
+        ]
+      },
+      "composer-bg": {
+        "role": "neutral",
+        "displayName": "composer bg",
+        "tonalRamp": [
+          "oklch(15.00% 0.00801 114.22)",
+          "oklch(26.43% 0.00801 114.22)",
+          "oklch(37.86% 0.00801 114.22)",
+          "oklch(49.29% 0.00801 114.22)",
+          "oklch(60.71% 0.00801 114.22)",
+          "oklch(72.14% 0.00801 114.22)",
+          "oklch(83.57% 0.00801 114.22)",
+          "oklch(95.00% 0.00801 114.22)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Inbox heading",
+        "purpose": "Primary pane heading."
+      },
+      "title": {
+        "displayName": "Conversation title",
+        "purpose": "Customer name in the conversation header."
+      },
+      "body": {
+        "displayName": "Conversation body",
+        "purpose": "Messages and desktop composer text."
+      },
+      "label": {
+        "displayName": "Field label",
+        "purpose": "Profile labels and secondary details."
+      },
+      "button": {
+        "displayName": "Action label",
+        "purpose": "Standard action controls."
+      }
+    },
+    "shadows": [
+      {
+        "name": "profile-overlay",
+        "value": "-10px 0 32px #242a2214",
+        "purpose": "Profile overlay from 900px through 1279px; removed on phones."
+      },
+      {
+        "name": "dialog",
+        "value": "0 16px 50px #20271c26",
+        "purpose": "Confirmation and new-conversation dialogs."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-background",
+        "value": "background-color 150ms ease-out",
+        "purpose": "Buttons, icon controls, rail destinations and conversation rows only when prefers-reduced-motion is no-preference."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone-max",
+        "value": "899px"
+      },
+      {
+        "name": "compact-desktop-min",
+        "value": "900px"
+      },
+      {
+        "name": "overlay-max",
+        "value": "1279px"
+      },
+      {
+        "name": "four-pane-min",
+        "value": "1280px"
+      },
+      {
+        "name": "narrow-desktop-max",
+        "value": "1439px"
+      },
+      {
+        "name": "wide-desktop-min",
+        "value": "1440px"
+      }
+    ],
+    "focus": {
+      "value": "2px solid var(--accent)",
+      "offset": "3px",
+      "purpose": "Common visible keyboard focus treatment."
+    },
+    "tonalRampPurpose": "Generated OKLCH strips for palette inspection only. They are not implemented application tokens.",
+    "source": {
+      "stylesheet": "public/app.css",
+      "markup": "public/index.html",
+      "extraction": "Source-based extraction of the implemented light interface; previews use synthetic customer text."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Compact primary button with visible keyboard focus.",
+      "html": "<button type=\"button\" class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:6px;min-height:40px;padding:9px 15px;font:600 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);background:var(--ink, #252724);color:#fff;cursor:pointer;}.ds-btn-primary:hover:not(:disabled){background:#42483d}.ds-btn-primary:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}.ds-btn-primary:disabled{opacity:.5;cursor:default}@media(max-width:899px){.ds-btn-primary{min-height:44px}}@media(prefers-reduced-motion:no-preference){.ds-btn-primary{transition:background-color 150ms ease-out}}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Compact secondary button with visible keyboard focus.",
+      "html": "<button type=\"button\" class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:6px;min-height:40px;padding:9px 15px;font:600 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);background:var(--hover, #f0f1eb);color:var(--ink, #252724);cursor:pointer;}.ds-btn-ghost:hover:not(:disabled){background:#e5e7df}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}.ds-btn-ghost:disabled{opacity:.5;cursor:default}@media(max-width:899px){.ds-btn-ghost{min-height:44px}}@media(prefers-reduced-motion:no-preference){.ds-btn-ghost{transition:background-color 150ms ease-out}}"
+    },
+    {
+      "name": "Destructive confirmation",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Filled variant for a confirmed destructive action. The profile entry action uses unfilled red text.",
+      "html": "<button type=\"button\" class=\"ds-btn-danger\">Delete permanently</button>",
+      "css": ".ds-btn-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:6px;min-height:40px;padding:9px 15px;font:600 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);background:var(--err, #a52d28);color:#fff;cursor:pointer;}.ds-btn-danger:hover:not(:disabled){background:#862520}.ds-btn-danger:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}.ds-btn-danger:disabled{opacity:.5;cursor:default}@media(max-width:899px){.ds-btn-danger{min-height:44px}}@media(prefers-reduced-motion:no-preference){.ds-btn-danger{transition:background-color 150ms ease-out}}"
+    },
+    {
+      "name": "Link button",
+      "kind": "button",
+      "refersTo": "button-link",
+      "description": "Compact link button with visible keyboard focus.",
+      "html": "<button type=\"button\" class=\"ds-btn-link\">Sign out</button>",
+      "css": ".ds-btn-link{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:6px;min-height:40px;padding:9px 15px;font:600 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);background:none;color:var(--muted, #686b64);cursor:pointer;text-decoration:underline;text-underline-offset:3px;}.ds-btn-link:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}.ds-btn-link:disabled{opacity:.5;cursor:default}@media(max-width:899px){.ds-btn-link{min-height:44px}}@media(prefers-reduced-motion:no-preference){.ds-btn-link{transition:background-color 150ms ease-out}}"
+    },
+    {
+      "name": "Profile field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Compact labeled customer field with hover, focus and invalid states.",
+      "html": "<label class=\"ds-field\">Name<input name=\"customer-name\" value=\"Sample customer\" autocomplete=\"off\"></label>",
+      "css": ".ds-field{display:block;font:400 12px/1.5 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);color:var(--muted, #686b64);margin-bottom:12px}.ds-field input{display:block;width:100%;margin-top:4px;padding:9px 10px;border:1px solid #e1e4db;border-radius:4px;background:#fafbf7;font:400 14px/1.4 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);color:var(--ink, #252724);min-height:38px}.ds-field input:hover{border-color:#bdc5b6}.ds-field input:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}.ds-field input[aria-invalid=true]{border-color:var(--err, #a52d28)}@media(max-width:899px){.ds-field input{font-size:16px}}"
+    },
+    {
+      "name": "Active navigation",
+      "kind": "nav",
+      "refersTo": "navigation-active",
+      "description": "Pale rail with an understated active Inbox destination.",
+      "html": "<nav class=\"ds-rail\" aria-label=\"Sample main navigation\"><a class=\"ds-nav\" href=\"#inbox\" aria-current=\"page\"><svg viewBox=\"0 0 24 24\" width=\"19\" height=\"19\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z\"/></svg><span>Inbox</span></a></nav>",
+      "css": ".ds-rail{background:var(--nav, #f3f3ef);padding:14px;width:196px}.ds-nav{display:flex;align-items:center;gap:11px;min-height:44px;padding:10px 12px;border:0;border-radius:6px;text-decoration:none;background:#e6e8e0;color:var(--ink, #252724);font:600 14px/1.5 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);cursor:pointer}.ds-nav svg{flex:none}.ds-nav:hover{background:#e6e8e0}.ds-nav:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}@media(prefers-reduced-motion:no-preference){.ds-nav{transition:background-color 150ms ease-out}}"
+    },
+    {
+      "name": "Inbox count",
+      "kind": "chip",
+      "refersTo": "unread-count",
+      "description": "Non-interactive compact counter used beside the Inbox heading.",
+      "html": "<span class=\"ds-count\" aria-label=\"3 unread conversations\">3</span>",
+      "css": ".ds-count{display:inline;vertical-align:middle;margin-left:5px;padding:2px 7px;border-radius:4px;background:var(--selected, #e9ece4);color:var(--accent, #465c45);font:600 12px/1.3 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);letter-spacing:0}"
+    },
+    {
+      "name": "Selected conversation",
+      "kind": "custom",
+      "refersTo": "conversation-selected",
+      "description": "Synthetic selected unread conversation showing name, preview and time hierarchy.",
+      "html": "<div class=\"ds-conv\" role=\"button\" tabindex=\"0\" aria-label=\"Sample customer, unread conversation\"><span class=\"ds-avatar\">SC</span><div class=\"ds-conv-body\"><div class=\"ds-conv-top\"><span class=\"ds-name\">Sample customer</span><time class=\"ds-time\">10:42</time></div><div class=\"ds-preview\">Thank you, I will send the plans.</div></div></div>",
+      "css": ".ds-conv{display:flex;align-items:center;gap:11px;padding:15px 12px;margin:2px 0;border-radius:6px;background:var(--selected, #e9ece4);color:var(--ink, #252724);font:400 15px/1.5 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);cursor:pointer}.ds-conv:hover{background:var(--selected, #e9ece4)}.ds-conv:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}.ds-avatar{width:38px;height:38px;flex:none;display:grid;place-items:center;border-radius:50%;background:#dce2d3;color:#45543c;font-size:13px;font-weight:500}.ds-conv-body{min-width:0;flex:1}.ds-conv-top{display:flex;align-items:baseline;justify-content:space-between;gap:6px}.ds-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-time{flex:none;font-size:11px;color:var(--accent, #465c45);font-variant-numeric:tabular-nums}.ds-preview{font-size:13px;font-weight:550;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}@media(max-width:899px){.ds-conv{padding:16px 12px}.ds-name{font-size:16px}.ds-preview{font-size:14px}}@media(prefers-reduced-motion:no-preference){.ds-conv{transition:background-color 150ms ease-out}}"
+    },
+    {
+      "name": "Outgoing message",
+      "kind": "card",
+      "refersTo": "message-outgoing",
+      "description": "A quiet message surface with a reduced bottom corner and read receipt; synthetic content.",
+      "html": "<div class=\"ds-message\">Thanks, we have received your plans.<div class=\"ds-meta\"><time>10:43</time><span class=\"ds-read\" aria-label=\"Read\">✓✓</span></div></div>",
+      "css": ".ds-message{max-width:min(82%,560px);padding:9px 12px 6px;border-radius:8px;border-bottom-right-radius:2px;background:var(--out, #e9ede3);color:var(--out-ink, #252d25);font:400 15px/1.5 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);white-space:pre-wrap;overflow-wrap:anywhere}.ds-meta{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:5px;font-size:11px;color:#5f675a;font-variant-numeric:tabular-nums}.ds-read{color:var(--ok, #267393);white-space:nowrap}@media(max-width:899px){.ds-message{max-width:88%}}"
+    },
+    {
+      "name": "Customer section tabs",
+      "kind": "nav",
+      "refersTo": "profile-tab",
+      "description": "Details, Media and Documents with a quiet underline. Static style preview; application JavaScript owns tab switching.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\" aria-label=\"Sample customer sections\"><button type=\"button\" role=\"tab\" aria-selected=\"true\">Details</button><button type=\"button\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Media</button><button type=\"button\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Documents</button></div>",
+      "css": ".ds-tabs{display:flex;padding:0 18px;gap:17px;border-bottom:1px solid var(--line, #e6e7e1)}.ds-tabs button{padding:10px 1px 12px;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted, #686b64);font:400 13px/1.5 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif);cursor:pointer}.ds-tabs button[aria-selected=true]{color:var(--ink, #252724);border-color:var(--ink, #252724);font-weight:600}.ds-tabs button:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}@media(max-width:899px){.ds-tabs{padding:0 22px;gap:28px}.ds-tabs button{min-height:44px}}"
+    },
+    {
+      "name": "Document row",
+      "kind": "custom",
+      "refersTo": "document",
+      "description": "Drawn icon, filename, secondary metadata and underlined actions without another nested card.",
+      "html": "<div class=\"ds-document\"><span class=\"ds-doc-icon\"><svg viewBox=\"0 0 24 24\" width=\"24\" height=\"28\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8M8 16h6\"/></svg></span><div class=\"ds-doc-main\"><div class=\"ds-doc-name\">Sample kitchen plan.pdf</div><div class=\"ds-doc-sub\">PDF document</div><div class=\"ds-doc-actions\"><button class=\"ds-doc-link\" type=\"button\">Open</button><button class=\"ds-doc-link\" type=\"button\">Download</button></div></div></div>",
+      "css": ".ds-document{display:flex;align-items:flex-start;gap:11px;min-width:205px;padding:8px 5px;color:var(--ink, #252724);font:400 15px/1.5 var(--font, \"Segoe UI Variable Text\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif)}.ds-doc-icon{flex:none;color:#636c5b;margin-top:3px}.ds-doc-main{min-width:0;flex:1}.ds-doc-name{font-size:14px;font-weight:600;overflow-wrap:anywhere}.ds-doc-sub{font-size:12px;color:#62695c;margin-top:2px}.ds-doc-actions{display:flex;gap:15px;margin-top:7px;align-items:center;font-size:13px}.ds-doc-link{border:0;padding:0;background:none;font:inherit;cursor:pointer;color:var(--accent, #465c45);text-decoration:underline;text-underline-offset:3px}.ds-doc-link:focus-visible{outline:2px solid var(--accent, #465c45);outline-offset:3px}@media(max-width:899px){.ds-doc-link{display:inline-flex;align-items:center;min-height:36px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Premium, calm, light business software",
+    "overview": "Off-white surfaces, charcoal typography and restrained navigation give customer conversations priority. Compact, controlled spacing supports daily work; subtle selections and a small set of meaningful colours make state visible without making the interface loud.\n\nThis documents the implemented plain HTML/CSS/JavaScript interface in `public/app.css` and `public/index.html`. The confirmed direction rejects gradients, nested cards, oversized controls and generic dashboard decoration. No new brand metaphor or business claim is implied.",
+    "keyCharacteristics": [
+      "Light neutral surfaces and charcoal text.",
+      "Compact spacing and a clear name, message, metadata hierarchy.",
+      "Restrained navigation and subtle selected states.",
+      "Customer messages and media take visual priority.",
+      "Minimal borders and shadows, reserved for structural separation."
+    ],
+    "rules": [
+      {
+        "name": "The Sparse Colour Rule",
+        "body": "Use colour to communicate interaction, message direction or status; do not tint whole working areas for decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Structural Depth Rule",
+        "body": "Reserve elevation for an overlay that sits above another working surface.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the workspace light, calm and compact.",
+      "Do give conversations, customer media and readable text priority over chrome.",
+      "Do use subtle fills for selection and sparse colour for meaningful state.",
+      "Do keep profile tabs stable and Save reachable while content scrolls.",
+      "Do preserve visible focus, useful labels and the implemented phone touch targets.",
+      "Do derive new styling from the frontmatter and current CSS before adding another token."
+    ],
+    "donts": [
+      "Don't add gradients, decorative shadows or nested cards.",
+      "Don't enlarge routine controls or introduce generic dashboard decoration.",
+      "Don't turn future destinations into apparently working features.",
+      "Don't replace the existing messaging interface or alter backend contracts to implement a visual pattern.",
+      "Don't introduce a dark sidebar or apply the media viewer's dark scrim to the workspace.",
+      "Don't invent brand claims, metaphors, decorative imagery or new font dependencies."
+    ]
+  }
+}

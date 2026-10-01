@@ -382,7 +382,7 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await signIn(staffToken);
   await page.waitForFunction(() => /Hi Anna/.test(document.getElementById('msgs').innerText)); ok('deep link (#c/phone) reopens the right conversation after a reload');
 
-  await page.evaluate(() => document.getElementById('details').scrollTop = 0);
+  await page.evaluate(() => document.getElementById('profile-body').scrollTop = 0);
   await page.screenshot({ path: path.join(SHOTS, 'desktop.png') });
 
   // Redesign regressions, in addition to all 45 foundation checks.
@@ -410,6 +410,19 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert.equal(await page.inputValue('#d-notes'),'Unsaved profile note');
   await page.click('#d-save'); await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
   ok('redesign: closing and reopening the customer profile preserves unsaved edits');
+  await page.fill('#text', 'Draft intended only for Anna');
+  await page.fill('#d-notes', 'Unsaved customer-specific notes');
+  await conv(B).click();
+  assert.equal(await page.inputValue('#text'), '');
+  assert.notEqual(await page.inputValue('#d-notes'), 'Unsaved customer-specific notes');
+  await page.fill('#text', 'Draft intended only for Brian');
+  await conv(A).click();
+  assert.equal(await page.inputValue('#text'), 'Draft intended only for Anna');
+  assert.equal(await page.inputValue('#d-notes'), 'Unsaved customer-specific notes');
+  await page.fill('#text', '');
+  await page.click('#d-save');
+  await page.waitForFunction(() => document.getElementById('d-msg').innerText === 'Saved');
+  ok('light redesign: message drafts and unsaved profile edits remain with their own customer');
   for(const width of [1024,1280,1440]) {
     await page.setViewportSize({width,height:820});
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -435,6 +448,15 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert(!(await mp.locator('#details').isVisible()));
   await mp.click('#details-btn'); await mp.waitForSelector('#details:not([hidden])');
   assert.equal(await mp.inputValue('#d-location'), 'Swords');
+  const saveBounds = await mp.locator('#d-save').boundingBox();
+  assert(saveBounds && saveBounds.y >= 0 && saveBounds.y + saveBounds.height <= 800);
+  assert(await mp.locator('.thread-pane').evaluate(n => n.inert));
+  await mp.locator('#details-close').focus();
+  await mp.keyboard.press('Shift+Tab');
+  assert(await mp.evaluate(() => document.getElementById('details').contains(document.activeElement)));
+  ok('light redesign: phone profile keeps Save visible and keyboard focus inside the drawer');
+  await mp.locator('#details-close').focus();
+  await mp.locator('#profile-body').evaluate(n => { n.scrollTop = 0; });
   await mp.screenshot({ path: path.join(SHOTS, 'mobile-details.png') });
   await mp.click('#details-close'); assert(!(await mp.locator('#details').isVisible()));
   await mp.click('#back'); assert(await mp.locator('.list-pane').isVisible());

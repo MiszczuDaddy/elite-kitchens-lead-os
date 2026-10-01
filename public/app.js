@@ -114,6 +114,15 @@ function banner(text) {
   b.hidden = !text;
 }
 
+const messageDrafts = new Map();
+const contactDrafts = new Map();
+function rememberDrafts() {
+  if (!S.selected) return;
+  if ($('text').value) messageDrafts.set(S.selected, $('text').value);
+  else messageDrafts.delete(S.selected);
+  if (S.dirty) contactDrafts.set(S.selected, Object.fromEntries(DETAIL_FIELDS.map(k => [k, $('d-'+k).value])));
+}
+
 const selectedConv = () => S.convs.find((c) => c.id === S.selected) || null;
 
 // ---------- auth ----------
@@ -148,6 +157,8 @@ auth.onAuthStateChanged(async (user) => {
 
 function stopListening() {
   resetAssets(); closeLightbox(); urlCache.clear();
+  messageDrafts.clear(); contactDrafts.clear(); $('text').value = '';
+  clearAttachment();
   if (S.unsubList) { S.unsubList(); S.unsubList = null; }
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
@@ -201,13 +212,15 @@ function convItem(c) {
   const unread = isUnread(c);
   const item = el('div', 'conv' + (unread ? ' unread' : '') + (c.id === S.selected ? ' sel' : ''));
   item.setAttribute('role', 'listitem'); item.tabIndex = 0; item.dataset.phone = c.id;
+  if (c.id === S.selected) item.setAttribute('aria-current', 'true');
+  item.setAttribute('aria-label', displayName(c) + (unread ? ', unread messages' : '') + '. Open conversation');
   item.append(el('div', 'avatar', initials(c)));
   const body = el('div', 'conv-body');
   const top = el('div', 'conv-top');
   top.append(el('div', 'conv-name', displayName(c)), el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
   const tag = [c.projectType, c.location].filter(Boolean).join(' · ');
-  if (c.name || tag) body.append(el('div', 'conv-sub', tag || formatPhone(c.id)));
+  if (tag) body.append(el('div', 'conv-sub', tag));
   const prev = el('div', 'conv-prev');
   prev.append(el('span', 't', previewOf(c) || ' '));
   if (unread) {
@@ -234,6 +247,7 @@ window.addEventListener('hashchange', routeFromHash);
 function setView() { $('app').dataset.view = S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
+  rememberDrafts();
   resetAssets(); closeLightbox();
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
@@ -248,9 +262,11 @@ $('back').onclick = () => closeConversation(false);
 function openConversation(id, fromHash) {
   if (!id) return;
   if (S.selected === id) { setView(); return; }
+  rememberDrafts();
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
   S.selected = id; S.msgs = []; S.pending = []; banner('');
+  $('text').value = messageDrafts.get(id) || ''; $('text').style.height = 'auto';
   if (!fromHash) history.replaceState(null, '', '#c/' + id);
   $('thread').hidden = false; $('thread-empty').hidden = true;
   $('msgs').replaceChildren();
@@ -322,6 +338,13 @@ const io = 'IntersectionObserver' in window ? new IntersectionObserver((entries)
 }, { root: $('msgs'), rootMargin: '1000px' }) : null;
 function whenVisible(host, fn) { host._load = fn; if (io) io.observe(host); else fn(); }
 
+function fileIcon() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  for (const [k,v] of Object.entries({viewBox:'0 0 24 24',width:'24',height:'24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'})) svg.setAttribute(k,v);
+  const path = document.createElementNS(ns,'path'); path.setAttribute('d','M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8M8 16h6'); svg.append(path); return svg;
+}
+
 function chip(icon, text) { const c = el('div', 'media-status'); c.append(el('span', null, icon), el('span', null, text)); return c; }
 
 function saveAs(url, name) { const a = document.createElement('a'); a.href = url; a.download = name || 'file'; a.rel = 'noopener'; document.body.append(a); a.click(); a.remove(); }
@@ -387,7 +410,7 @@ function mediaBlock(m, type) {
     box.append(a);
   } else {   // document
     const card = el('div', 'doc-card');
-    card.append(el('div', 'doc-icon', icon));
+    const fileMark = el('div', 'doc-icon'); fileMark.append(fileIcon()); card.append(fileMark);
     const main = el('div', 'doc-main');
     main.append(el('div', 'doc-name', md.filename || label), el('div', 'doc-sub', [SIZE(md.size), (md.mimeType || '').split('/').pop().toUpperCase()].filter(Boolean).join(' · ')));
     const act = el('div', 'doc-actions');
@@ -651,6 +674,7 @@ function setDetailsOpen(open, remember) {
   $('app').classList.toggle('has-details', open && !!S.selected);
   $('details-btn').setAttribute('aria-expanded', String(open && !!S.selected));
   $('profile-trigger').setAttribute('aria-expanded', String(open && !!S.selected));
+  syncProfileOverlay();
   if (open && window.innerWidth < 1280) $('details-close').focus();
   if (!open && S.selected) $('profile-trigger').focus({preventScroll:true});
   if (remember) setDetailsPref(open ? 'open' : 'closed');
@@ -663,7 +687,8 @@ $('details-close').onclick = () => setDetailsOpen(false, true);
 function watchContact(id) {
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
   S.contact = null; S.dirty = false;
-  detailsEl().scrollTop = 0;
+  setDetailMsg('');
+  $('profile-body').scrollTop = 0;
   if (!id) { setDetailsOpen(false, false); return; }
   // Wide screens: default open (remembered choice wins). Narrow screens: closed until asked for.
   const pref = detailsPref();
@@ -691,12 +716,20 @@ function renderDetails(force) {
   const made = c.createdAt && c.createdAt.toDate ? c.createdAt.toDate().toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : null;
   const upd = c.updatedAt && c.updatedAt.toDate ? c.updatedAt.toDate().toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : null;
   $('d-meta').textContent = [made && 'Added ' + made, upd && 'Updated ' + upd].filter(Boolean).join(' · ');
-  S.dirty = false; $('d-save').disabled = true; setDetailMsg('');
+  const draft = contactDrafts.get(S.selected);
+  if (draft) {
+    for (const k of DETAIL_FIELDS) $('d-'+k).value = draft[k];
+    S.dirty = true; $('d-save').disabled = false; setDetailMsg('Unsaved changes');
+  } else {
+    S.dirty = false; $('d-save').disabled = true;
+    // A late snapshot must not erase the confirmation from a completed save.
+    if ($('d-msg').textContent !== 'Saved') setDetailMsg('');
+  }
 }
 
 function setDetailMsg(text, kind) { const m = $('d-msg'); m.textContent = text || ''; m.className = 'd-msg' + (kind ? ' ' + kind : ''); }
 
-$('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').disabled = false; setDetailMsg(''); $('d-email').removeAttribute('aria-invalid'); });
+$('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').disabled = false; setDetailMsg('Unsaved changes'); $('d-email').removeAttribute('aria-invalid'); });
 $('details-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const phone = S.selected;
@@ -706,8 +739,10 @@ $('details-form').addEventListener('submit', async (e) => {
   $('d-save').disabled = true; setDetailMsg('Saving…');
   try {
     await call('updateContact')({ phone, fields });
+    contactDrafts.delete(phone);
     if (S.selected === phone) { S.dirty = false; setDetailMsg('Saved', 'ok'); setTimeout(() => { if ($('d-msg').textContent === 'Saved') setDetailMsg(''); }, 2500); }
   } catch (err) {
+    if (S.selected !== phone) return;
     $('d-save').disabled = false; setDetailMsg(errText(err), 'err');
     $('d-email').setAttribute('aria-invalid', /email/i.test(errText(err)) ? 'true' : 'false');
   }
@@ -734,6 +769,7 @@ $('del-form').addEventListener('submit', async (e) => {
   try {
     const r = await call('deleteCustomer')({ phone, confirm: $('del-confirm').value });
     delDlg.close();
+    messageDrafts.delete(phone); contactDrafts.delete(phone); S.dirty = false; $('text').value = '';
     closeConversation(false);
     toast(`Customer deleted (${r.data.messages} message(s), ${r.data.files} file(s)).`);
   } catch (err) { $('del-err').textContent = errText(err); $('del-go').disabled = false; }
@@ -754,7 +790,8 @@ function assetMessages() {
 }
 function setProfileTab(tab) {
   profileTab = tab;
-  detailsEl().scrollTop = 0;
+  $('profile-footer').hidden = tab !== 'details';
+  $('profile-body').scrollTop = 0;
   ['details','media','documents'].forEach(k => {
     $('tab-'+k).setAttribute('aria-selected', String(k === tab));
     $('tab-'+k).tabIndex = k === tab ? 0 : -1;
@@ -787,16 +824,22 @@ function renderAssets() {
       item = el('button','gallery-item'); item.type = 'button'; item.setAttribute('aria-label', 'Open '+m.type+' from '+assetDate(m));
       const thumb = el(m.type === 'video' ? 'video' : 'img');
       if (m.type === 'video') { thumb.muted = true; thumb.preload = 'metadata'; thumb.playsInline = true; } else thumb.alt = m.body && !/^\[/.test(m.body) ? m.body : 'Customer photo';
-      item.append(thumb,el('span',null,(m.type === 'video' ? 'Video · ' : '')+assetDate(m)));
+      item.append(thumb,el('span',null,(m.type === 'video' ? 'Video · ' : '')+(ms(m.createdAt) ? new Date(ms(m.createdAt)).toLocaleDateString('en-IE',{day:'numeric',month:'short',timeZone:TZ}) : '')));
       item._loadAsset = () => loadUrl(phone,m.id,false).then(u => thumb.src = u).catch(() => { item.textContent = "Couldn't load · click to retry"; });
       item.onclick = () => openLightbox(phone,m);
       assetObserver.observe(item);
     } else {
-      item = el('div','asset-document'); item.append(mediaBlock(m,m.type),el('div','asset-date',(m.direction === 'out' ? 'Sent · ' : 'Received · ')+assetDate(m)));
+      item = el('div','asset-document'+(media ? ' asset-unavailable' : '')); item.append(mediaBlock(m,m.type),el('div','asset-date',(m.direction === 'out' ? 'Sent · ' : 'Received · ')+assetDate(m)));
     }
     assetNodes.set(key,item); return item;
   });
-  box.replaceChildren(...(nodes.length ? nodes : [el('p','asset-empty',media ? 'No photos or videos in the loaded messages.' : 'No documents in the loaded messages.')]));
+  const grouped = []; let previousMonth = '';
+  nodes.forEach((node,i) => {
+    const month = ms(msgs[i].createdAt) ? new Date(ms(msgs[i].createdAt)).toLocaleDateString('en-IE',{month:'long',year:'numeric',timeZone:TZ}) : 'Date unavailable';
+    if (media && month !== previousMonth) { grouped.push(el('h3','asset-month',month)); previousMonth = month; }
+    grouped.push(node);
+  });
+  box.replaceChildren(...(grouped.length ? grouped : [el('p','asset-empty',media ? 'No photos or videos in the loaded messages.' : 'No documents in the loaded messages.')]));
   ['older-media','older-documents'].forEach(id => { $(id).hidden = historyDone || S.msgs.length < 500; $(id).disabled = historyLoading; $(id).textContent = historyLoading ? 'Loading…' : 'Load earlier messages'; });
 }
 async function loadEarlierAssets() {
@@ -844,4 +887,20 @@ document.addEventListener('keydown',e => {
     if(e.key === 'ArrowLeft') moveViewer(-1); if(e.key === 'ArrowRight') moveViewer(1);
     if(e.key === 'Tab') { const controls = [...$('lightbox').querySelectorAll('button:not(:disabled),video:not([hidden])')]; const i = controls.indexOf(document.activeElement); e.preventDefault(); controls[(i+(e.shiftKey ? controls.length-1 : 1))%controls.length].focus(); }
   } else if(e.key === 'Escape' && detailsOpen()) setDetailsOpen(false,true);
+});
+
+
+function syncProfileOverlay() {
+  const overlay = detailsOpen() && window.innerWidth < 1280;
+  for (const pane of document.querySelectorAll('.rail, .list-pane, .thread-pane')) pane.inert = overlay;
+  if (overlay) { detailsEl().setAttribute('role','dialog'); detailsEl().setAttribute('aria-modal','true'); }
+  else { detailsEl().removeAttribute('role'); detailsEl().removeAttribute('aria-modal'); }
+}
+window.addEventListener('resize', syncProfileOverlay);
+$('details').addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || window.innerWidth >= 1280 || !detailsOpen()) return;
+  const focusable = [...detailsEl().querySelectorAll('button:not(:disabled),input,select,textarea,[tabindex="0"],a[href]')].filter(n => n.getClientRects().length && !n.closest('[hidden]'));
+  const first = focusable[0], last = focusable[focusable.length-1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
