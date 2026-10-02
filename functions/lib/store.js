@@ -108,20 +108,26 @@ async function setConversationStatus(db, phone, status, nowMs = Date.now()) {
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return false;
-    const c = snap.data(), cur = c.inboxStatus || 'inbox';
-    if (cur === status) return { corrected: false };
-    const lm = c.lastMove;
-    if (lm && lm.to === cur && lm.from === status && lm.at && typeof lm.at.toMillis === 'function' && nowMs - lm.at.toMillis() <= CORRECTION_WINDOW_MS) {
-      const patch = { inboxStatus: status, lastMove: FieldValue.delete() };
-      if (DATED_STAGES.has(lm.to)) patch[`stageDates.${lm.to}`] = lm.prev || FieldValue.delete();
-      tx.update(ref, patch);
-      return { corrected: true, undone: lm.to };
-    }
-    const patch = { inboxStatus: status, lastMove: { from: cur, to: status, at: Timestamp.fromMillis(nowMs), prev: (DATED_STAGES.has(status) && c.stageDates && c.stageDates[status]) || null } };
-    if (DATED_STAGES.has(status)) patch[`stageDates.${status}`] = FieldValue.serverTimestamp();
-    tx.update(ref, patch);
-    return { corrected: false };
+    const plan = planStatusChange(snap.data(), status, nowMs);
+    if (!plan) return { corrected: false };
+    tx.update(ref, plan.patch);
+    return plan.result;
   });
+}
+// The decision itself, without writing it, so booking an appointment (Phase 5) can move a New lead to Booked by exactly the
+// same rules inside its own transaction. Returns null when the customer is already in that stage, else { patch, result }.
+function planStatusChange(c, status, nowMs) {
+  const cur = c.inboxStatus || 'inbox';
+  if (cur === status) return null;
+  const lm = c.lastMove;
+  if (lm && lm.to === cur && lm.from === status && lm.at && typeof lm.at.toMillis === 'function' && nowMs - lm.at.toMillis() <= CORRECTION_WINDOW_MS) {
+    const patch = { inboxStatus: status, lastMove: FieldValue.delete() };
+    if (DATED_STAGES.has(lm.to)) patch[`stageDates.${lm.to}`] = lm.prev || FieldValue.delete();
+    return { patch, result: { corrected: true, undone: lm.to } };
+  }
+  const patch = { inboxStatus: status, lastMove: { from: cur, to: status, at: Timestamp.fromMillis(nowMs), prev: (DATED_STAGES.has(status) && c.stageDates && c.stageDates[status]) || null } };
+  if (DATED_STAGES.has(status)) patch[`stageDates.${status}`] = FieldValue.serverTimestamp();
+  return { patch, result: { corrected: false } };
 }
 
 // Staff-editable customer record. contacts/{phone} is the source of truth; name/location/projectType are
@@ -153,7 +159,7 @@ async function getMessage(db, phone, msgId) {
   return s.exists ? s.data() : null;
 }
 
-// Permanently erase one customer: conversation + every message + stored files + the customer record.
+// Permanently erase one customer: conversation + every message + stored files + the customer record + their appointments.
 // Files go first and are swept again at the end so a media download that was in flight cannot leave anything behind.
 async function deleteCustomerData(db, bucket, phone) {
   const convRef = db.collection('conversations').doc(phone);
@@ -164,11 +170,13 @@ async function deleteCustomerData(db, bucket, phone) {
   const prefix = `media/${phone}/`;
   let files = (await bucket.getFiles({ prefix }))[0].length;
   await bucket.deleteFiles({ prefix, force: true });
+  const appts = await db.collection('appointments').where('phone', '==', phone).get();
+  for (let i = 0; i < appts.size; i += 400) { const b = db.batch(); appts.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref)); await b.commit(); }
   await db.recursiveDelete(convRef);                 // the conversation document and all its subcollections
   await contactRef.delete();
   const late = (await bucket.getFiles({ prefix }))[0].length;
   if (late) { files += late; await bucket.deleteFiles({ prefix, force: true }); }
-  return { messages, files };
+  return { messages, files, appointments: appts.size };
 }
 
 async function getConversation(db, phone) {
@@ -176,4 +184,4 @@ async function getConversation(db, phone) {
   return s.exists ? s.data() : null;
 }
 
-module.exports = { CORRECTION_WINDOW_MS, setConversationStatus, deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { CORRECTION_WINDOW_MS, setConversationStatus, planStatusChange, deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

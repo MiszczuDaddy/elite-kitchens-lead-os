@@ -2,6 +2,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const store = require('./store');
 const mediaLib = require('./media');
+const appointments = require('./appointments');
 const { verifySignature, parseWebhook, normalizePhone } = require('./whatsapp');
 
 const WINDOW_MS = 24 * 3600 * 1000;
@@ -186,9 +187,9 @@ async function deleteCustomer(auth, data, { db, cfg, bucket }) {
   if (!r) throw new HttpsError('not-found', 'Customer not found (already deleted?).');
   // Audit entry with NO personal content: a one-way hash (not reversible to the number), last 3 digits, counts, who, when.
   await db.collection('auditLog').add({ action: 'deleteCustomer', phoneHash: require('crypto').createHash('sha256').update(phone).digest('hex'),
-    phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, by: (auth.token && auth.token.email) || auth.uid, at: require('firebase-admin/firestore').Timestamp.now() });
-  log('info', 'customer deleted', { last3: phone.slice(-3), messages: r.messages, files: r.files });
-  return r;
+    phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, by: (auth.token && auth.token.email) || auth.uid, at: require('firebase-admin/firestore').Timestamp.now() });
+  log('info', 'customer deleted', { last3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments });
+  return { messages: r.messages, files: r.files };
 }
 
 const ASK = (data) => ({ phone: normalizePhone(data && data.phone), id: String((data && data.id) || '') });
@@ -264,4 +265,10 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
   }
 }
 
-module.exports = { setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+// ---- Phase 5: appointments. The rules live in ./appointments; these wrappers only check who is asking. ----
+const actorOf = (auth) => ({ kind: 'staff', id: (auth.token && auth.token.email) || auth.uid });
+async function createAppointment(auth, data, { db, cfg }) { assertStaff(auth, cfg); return appointments.create(db, actorOf(auth), data); }
+async function updateAppointment(auth, data, { db, cfg }) { assertStaff(auth, cfg); return appointments.update(db, actorOf(auth), data); }
+async function cancelAppointment(auth, data, { db, cfg }) { assertStaff(auth, cfg); return appointments.cancel(db, actorOf(auth), data); }
+
+module.exports = { createAppointment, updateAppointment, cancelAppointment, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

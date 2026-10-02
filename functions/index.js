@@ -69,3 +69,10 @@ exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeout
     res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
+
+// ---- Phase 5: appointments. Staff-only callables with no WhatsApp secrets (least privilege). Elite OS is the source of truth
+// for appointments and the browser only reads them. Added at the end of the file: no existing function above is touched.
+const staffDeps = () => ({ db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } });
+exports.createAppointment = onCall({}, (req) => h.createAppointment(req.auth, req.data, staffDeps()));
+exports.updateAppointment = onCall({}, (req) => h.updateAppointment(req.auth, req.data, staffDeps()));
+exports.cancelAppointment = onCall({}, (req) => h.cancelAppointment(req.auth, req.data, staffDeps()));
