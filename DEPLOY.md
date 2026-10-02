@@ -23,9 +23,10 @@ The scripts run `npm --prefix functions install --omit=dev` and `firebase deploy
    `gcloud organizations remove-iam-policy-binding 1048933872885 --member=user:info@elitekitchens.ie --role=roles/orgpolicy.policyAdmin`
 
 ## Config
-- Secrets (Secret Manager): WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET (placeholders until Meta values are set),
-  WHATSAPP_VERIFY_TOKEN (random). Update a secret: `firebase functions:secrets:set NAME`, then redeploy functions.
-- `functions/.env.elite-kitchens-lead-os` (gitignored): ALLOWED_EMAILS, WHATSAPP_PHONE_NUMBER_ID (placeholder 0 until set).
+- WhatsApp secrets (Secret Manager): WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN. All hold real values: the placeholder
+  versions were destroyed and the app secret and verify token rotated on 2026-09-30 (`docs/SECRET_ROTATION.md`).
+  Update a secret: `firebase functions:secrets:set NAME`, then redeploy functions.
+- `functions/.env.elite-kitchens-lead-os` (gitignored): ALLOWED_EMAILS, WHATSAPP_PHONE_NUMBER_ID.
 - Container image cleanup policy: 1 day (keeps Artifact Registry cost ~0).
 
 ## Webhook cutover (2026-09-30): DONE, Chatwoot no longer receives WhatsApp
@@ -44,8 +45,8 @@ The scripts run `npm --prefix functions install --omit=dev` and `firebase deploy
 ## Follow-ups
 - Remove temporary org role: see item 3 above.
 
-## Phase 2 deploys (branch `phase-2-inbox`)
-Deploy from Cloud Shell: `cd ~/elite-kitchens-lead-os && git pull && ./scripts/deploy-preview.sh`
+## Phase 2 deploys (`scripts/deploy-preview.sh`)
+Deploy from Cloud Shell, with the clone on `main` (the `phase-2-inbox` branch is merged into it): `cd ~/elite-kitchens-lead-os && git pull && ./scripts/deploy-preview.sh`
 - Stage A (default): storage rules + all functions except the live webhook + preview page. Safe to repeat.
 - Stage B: `./scripts/deploy-preview.sh --with-webhook` ONLY after the owner has approved a webhook change.
   Saves the live revision to `~/.webhook-previous-revision`; `./scripts/rollback-webhook.sh` restores it in seconds.
