@@ -1,7 +1,9 @@
 # Deployment notes (Firebase project `elite-kitchens-lead-os`)
 
-Deployed from Google Cloud Shell: upload repo ZIP, `npm --prefix functions install --omit=dev`,
-`firebase login --no-localhost`, `firebase deploy`. Live at https://elite-kitchens-lead-os.web.app
+Deployed from Google Cloud Shell, from a clone of the GitHub repo (`cd ~/elite-kitchens-lead-os && git pull`), using the scripts in
+`scripts/` (`deploy-preview.sh`, `deploy-lead-intake.sh`, `deploy-crm.sh`; details below and in `docs/LEAD_INTAKE.md`, `docs/CRM_PIPELINE.md`).
+The scripts run `npm --prefix functions install --omit=dev` and `firebase deploy` themselves; Firebase sign-in in Cloud Shell is
+`firebase login --no-localhost`. Live at https://elite-kitchens-lead-os.web.app
 
 ## Things that had to be fixed on this project (the org is `elitekitchens.ie`, secure-by-default)
 1. **Build failed** ("missing permission on the build service account"): the org policy
@@ -41,10 +43,6 @@ Deployed from Google Cloud Shell: upload repo ZIP, `npm --prefix functions insta
 
 ## Follow-ups
 - Remove temporary org role: see item 3 above.
-- Rotate the Meta app secret and the webhook verify token (both were shown in the setup chat), then redeploy functions.
-- Destroy the placeholder secret versions (version 1 of WHATSAPP_ACCESS_TOKEN / WHATSAPP_APP_SECRET).
-- Deploys currently run from an uploaded ZIP in Cloud Shell. Move to a git clone or CI so the repo is the source of truth.
-- Check any Make.com / Lead Ads flow that relied on Chatwoot.
 
 ## Phase 2 deploys (branch `phase-2-inbox`)
 Deploy from Cloud Shell: `cd ~/elite-kitchens-lead-os && git pull && ./scripts/deploy-preview.sh`

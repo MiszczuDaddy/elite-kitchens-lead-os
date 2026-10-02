@@ -5,7 +5,7 @@ WhatsApp Cloud API**, with no Chatwoot in the loop.
 
     Customer WhatsApp <-> Meta Cloud API <-> Cloud Function (webhook) <-> Firestore <-> web UI
 
-Not in scope yet: Lead Ads, Make.com, quotes, appointments, CRM, AI agents, media downloads.
+Not in Phase 1 scope: quotes, appointments, AI agents. Added since: media downloads (Phase 2), Lead Ads via Make.com (Phase 3), pipeline / CRM (Phase 4).
 
 ## Stack (all Firebase, one project)
 | Piece | Firebase product |
@@ -45,13 +45,14 @@ See `docs/PHASE2_PROGRESS.md`, `docs/SECURITY.md`, `docs/DATA_CONTROLS.md`, `doc
 Phase 3 (Meta lead intake): `docs/LEAD_INTAKE.md`. Phase 4 (pipeline / CRM): `docs/CRM_PIPELINE.md`.
 
 ## Tests
-    npm test          # 37 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules)
-    npm run test:ui   # 45-check full-stack test: real page in Chromium + real functions + Auth/Firestore emulators
+    npm test          # 100 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules, lead intake, pipeline)
+    npm run test:ui   # 57-check full-stack test: real page in Chromium + real functions + Auth/Firestore emulators
                       # + mocked Meta API (needs Java and Playwright; set NODE_PATH if Playwright is installed globally)
 
 Older notes:
     npm install && npm --prefix functions install
     npm test     # starts the Firestore emulator (needs Java) and runs 15 integration tests, incl. security rules
 
-## Meta webhook: NOT changed by this repo
-The live Meta webhook still points at Chatwoot. Cutover and rollback notes will be added here before anything is changed.
+## Meta webhook
+Meta delivers WhatsApp messages and delivery statuses straight to `https://elite-kitchens-lead-os.web.app/webhook` (the `webhook` Cloud Function). Chatwoot is no longer in the loop: the cutover was done on 2026-09-30.
+That setting lives in Meta, not in this repo, and deploying the repo does not change it. The cutover record and the check command are in `DEPLOY.md`; `scripts/rollback-webhook.sh` restores the previous revision of the webhook function.

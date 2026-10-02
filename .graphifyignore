@@ -1,0 +1,4 @@
+# graphify: keep the graph about source and docs, not lockfiles or image assets.
+# (.gitignore is honored automatically; this file only adds exclusions.)
+package-lock.json
+public/brand/
