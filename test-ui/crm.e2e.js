@@ -28,6 +28,7 @@ const graph = [];
 const meta = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => {
   graph.push({ url: req.url, body: JSON.parse(Buffer.concat(c).toString() || '{}') });
   res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ messages: [{ id: 'wamid.OUT' + graph.length }] })); }); }).listen(9911);
+meta.keepAliveTimeout = 0;   // test harness only: never drop an idle connection mid-test (avoids an ECONNRESET race with the emulator's pooled connections)
 
 const DAY = 86400000, ago = (d) => Timestamp.fromMillis(Date.now() - d * DAY);
 const ph = { legacy: '353850000001', booked: '353850000002', quoted: '353850000003', noval: '353850000004', won: '353850000005', closed: '353850000006', legacyWon: '353850000007', meta: '353850000008' };

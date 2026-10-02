@@ -27,6 +27,7 @@ const graph = [];
 const meta = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => {
   graph.push({ url: req.url, body: JSON.parse(Buffer.concat(c).toString() || '{}') });
   res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ messages: [{ id: 'wamid.OUT' + graph.length }] })); }); }).listen(9911);
+meta.keepAliveTimeout = 0;   // test harness only: never drop an idle connection mid-test (avoids an ECONNRESET race with the emulator's pooled connections)
 const post = (body, key = KEY) => fetch(FN + '/leadIntake', { method: 'POST', headers: { 'content-type': 'application/json', ...(key ? { authorization: 'Bearer ' + key } : {}) }, body: JSON.stringify(body) });
 
 (async () => {

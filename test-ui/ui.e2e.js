@@ -66,6 +66,7 @@ const meta = http.createServer((req, res) => {
     json({ error: { message: 'unexpected ' + req.method + ' ' + u } }, 404);
   });
 }).listen(9911);
+meta.keepAliveTimeout = 0;   // test harness only: never drop an idle connection mid-test (avoids an ECONNRESET race with the emulator's pooled connections)
 
 // ---- fake Meta -> our webhook ----
 async function hook(payload) {
