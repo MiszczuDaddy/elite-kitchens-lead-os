@@ -95,7 +95,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await page.waitForSelector('#appt-dlg[open]');
   assert.equal(await page.inputValue('#a-date'), D1);
   assert.equal(await page.inputValue('#a-time'), '10:00'); assert.equal(await page.inputValue('#a-duration'), '60');
-  assert.equal(await page.inputValue('#a-type'), 'consultation'); assert.equal(await page.inputValue('#a-location'), 'Swords');
+  assert.equal(await page.inputValue('#a-type'), 'consultation');
+  await page.waitForFunction(() => document.getElementById('a-location').value === 'Swords');      // prefilled from the customer (even if their details were still loading)
   assert.deepEqual(await page.locator('#a-type option').allInnerTexts(), ['Consultation', 'Site visit', 'Other']);
   const times = await page.locator('#a-time option').allInnerTexts();
   assert.ok(times.includes('10:15') && times.includes('10:30') && !times.includes('10:10'), '15-minute steps');
@@ -140,9 +141,102 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal((await apptsOf(ph.closed)).length, 1);
   ok('Quoted and Closed customers keep their stage when booked; closing the dialog books nothing');
 
-  // ---- the Appointments screen ----
+  // ---- the Appointments calendar (the default on desktop) ----
+  const toastSays = (re) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('appts-toast').textContent), re.source);
+  const monthTitle = (y, m) => new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('en-IE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const TODAY = dublin(Date.now()), [TY, TM] = TODAY.split('-').map(Number);
+  const toThisMonth = (pg) => pg.evaluate(() => { const b = document.getElementById('cal-today'); if (!b.disabled) b.click(); });
+  async function showDay(pg, k) {                    // the month containing day k (tomorrow may already be next month)
+    await toThisMonth(pg);
+    for (let i = 0; i < 2 && !(await pg.locator(`.cal-cell[data-day="${k}"]`).count()); i++) {
+      const was = await pg.textContent('#cal-title'); await pg.click('#cal-next');
+      await pg.waitForFunction((t) => document.getElementById('cal-title').textContent !== t, was);
+    }
+    await pg.locator(`.cal-cell[data-day="${k}"]`).waitFor();
+  }
   await page.click('#nav-appointments');
+  await page.waitForSelector('#appts-cal:not([hidden]) .cal-cell');
+  assert.equal(await page.getAttribute('#app', 'data-view'), 'appointments');
+  assert.equal(await page.getAttribute('#appts-view button[data-view="calendar"]', 'aria-pressed'), 'true');
+  assert.equal(await page.isVisible('#appts-list'), false);
+  assert.equal(await page.textContent('#cal-title'), monthTitle(TY, TM));
+  assert.deepEqual(await page.locator('.cal-dow').allInnerTexts(), ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+  assert.equal(await page.locator('.cal-cell.today').count(), 1);
+  assert.equal(await page.locator('.cal-cell.today').getAttribute('data-day'), TODAY);
+  assert.equal(await page.locator('.cal-cell.today').getAttribute('aria-current'), 'date');
+  assert.equal(await page.isDisabled('#cal-today'), true);
+  await showDay(page, D1);
+  const d1 = page.locator(`.cal-cell[data-day="${D1}"]`);
+  await d1.locator('.cal-ev').nth(1).waitFor();
+  assert.deepEqual(await d1.locator('.cal-ev').evaluateAll((es) => es.map((e) => [e.dataset.phone, e.dataset.status, e.innerText.replace(/\s+/g, ' ').trim()])),
+    [[ph.quoted, 'quoted', '10:00 Quinn Quoted'], [ph.lead, 'booked', '10:30 Lena Lead']]);
+  assert.notEqual(await d1.locator('.cal-ev').nth(0).evaluate((e) => getComputedStyle(e).borderLeftColor), await d1.locator('.cal-ev').nth(1).evaluate((e) => getComputedStyle(e).borderLeftColor));
+  await showDay(page, D2);
+  assert.match(await page.locator(`.cal-cell[data-day="${D2}"] .cal-ev`).innerText(), /09:00\s+Cathal Closed/);
+  await showDay(page, D1);
+  await page.screenshot({ path: path.join(SHOTS, 'appointments-calendar.png') });
+  ok('Calendar is the default on desktop: a Monday-first month with today highlighted; each appointment sits in its day with time, name and a subtle stage colour');
+
+  await d1.locator(`.cal-ev[data-phone="${ph.lead}"]`).click();
+  await page.waitForSelector('.appt-pop');
+  assert.match(await page.locator('.appt-pop').innerText(), /Lena Lead[\s\S]*Booked[\s\S]*Tomorrow, 10:30–11:30[\s\S]*Consultation · 12 Main St, Swords[\s\S]*In Google Calendar/);
+  assert.deepEqual(await page.locator('.appt-pop .pop-actions button').allInnerTexts(), ['Open customer', 'Reschedule', 'Cancel']);
+  await page.screenshot({ path: path.join(SHOTS, 'appointments-calendar-card.png') });
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.appt-pop').count(), 0);
+  await showDay(page, D2);
+  await page.locator(`.cal-cell[data-day="${D2}"] .cal-ev[data-phone="${ph.closed}"]`).click();
+  await page.click('.appt-pop button:has-text("Reschedule")');
+  await page.waitForSelector('#appt-dlg[open]');
+  assert.equal(await page.inputValue('#a-time'), '09:00');
+  await page.selectOption('#a-time', '09:30'); await page.click('#a-go');
+  await page.waitForFunction((k) => /09:30\s+Cathal Closed/.test((document.querySelector(`.cal-cell[data-day="${k}"] .cal-ev`) || {}).innerText || ''), D2);
+  await toastSays(/Moved to/);
+  assert.match(await page.textContent('#appts-toast'), /Moved to .* at 09:30\. Google Calendar updated\./);
+  ok('clicking an appointment opens a card with its details and Open customer / Reschedule / Cancel; Reschedule from the card moves it in the calendar');
+
+  const D5 = dublin(Date.now() + 5 * DAY), [y5, m5, dd5] = D5.split('-').map(Number);
+  for (let i = 0; i < 4; i++) {                       // a busy day, written straight to the database for this check and removed after it
+    await db.doc('appointments/e2e-busy-' + i).set({ phone: ph.quoted, customerName: 'Busy ' + (i + 1), type: 'consultation', status: 'scheduled', version: 1,
+      start: Timestamp.fromMillis(Date.UTC(y5, m5 - 1, dd5, 8 + i)), end: Timestamp.fromMillis(Date.UTC(y5, m5 - 1, dd5, 9 + i)), sync: { google: { state: 'synced' } } });
+  }
+  await showDay(page, D5);
+  const d5 = page.locator(`.cal-cell[data-day="${D5}"]`);
+  await d5.locator('.cal-more').waitFor();
+  assert.equal(await d5.locator('.cal-ev').count(), 3); assert.equal(await d5.locator('.cal-more').innerText(), '+1 more');
+  await d5.locator('.cal-more').click();
+  await page.waitForSelector('.day-pop');
+  assert.equal(await page.locator('.day-pop .cal-ev').count(), 4);
+  await page.locator('.day-pop .cal-ev').nth(3).click();
+  await page.waitForSelector('.appt-pop:not(.day-pop)');
+  assert.match(await page.locator('.appt-pop').innerText(), /Busy 4/);
+  await page.keyboard.press('Escape');
+  for (let i = 0; i < 4; i++) await db.doc('appointments/e2e-busy-' + i).delete();
+  await page.waitForFunction((k) => !document.querySelector(`.cal-cell[data-day="${k}"] .cal-more`), D5);
+  ok('a busy day shows three appointments and "+1 more", which lists them all and opens each one');
+
+  await toThisMonth(page);
+  await page.waitForFunction((t) => document.getElementById('cal-title').textContent === t, monthTitle(TY, TM));
+  const next = new Date(Date.UTC(TY, TM, 1)), prev = new Date(Date.UTC(TY, TM - 2, 1));
+  await page.click('#cal-next');
+  await page.waitForFunction((t) => document.getElementById('cal-title').textContent === t, monthTitle(next.getUTCFullYear(), next.getUTCMonth() + 1));
+  assert.equal(await page.isDisabled('#cal-today'), false);
+  await page.click('#cal-prev'); await page.click('#cal-prev');
+  await page.waitForFunction((t) => document.getElementById('cal-title').textContent === t, monthTitle(prev.getUTCFullYear(), prev.getUTCMonth() + 1));
+  await page.click('#cal-today');
+  await page.waitForFunction((t) => document.getElementById('cal-title').textContent === t, monthTitle(TY, TM));
+  assert.equal(await page.locator('.cal-cell.today').count(), 1);
+  ok('Previous month / Today / Next month navigation; Today returns to the current month');
+
+  // ---- the Appointments list (the existing view), remembered for the session ----
+  await page.click('#appts-view button[data-view="list"]');
   await page.waitForSelector('.arow');
+  assert.equal(await page.isVisible('#appts-cal'), false);
+  await page.reload();
+  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('.arow');
+  assert.equal(await page.getAttribute('#appts-view button[data-view="list"]', 'aria-pressed'), 'true');
+  ok('Calendar | List toggle: List shows the upcoming list, and the choice is remembered after a reload');
   assert.equal(await page.getAttribute('#app', 'data-view'), 'appointments');
   assert.equal(await page.locator('#nav-appointments').getAttribute('aria-current'), 'page');
   assert.equal(await page.locator('#nav-inbox').getAttribute('aria-current'), null);
@@ -167,7 +261,6 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await page.selectOption('#a-time', '14:00');
   await page.click('#a-go');
   await page.waitForFunction((p) => /^14:00/.test((document.querySelector(`.arow[data-phone="${p}"] .arow-time`) || {}).textContent || ''), ph.lead);
-  const toastSays = (re) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('appts-toast').textContent), re.source);
   await toastSays(/Moved to/);                         // the row moves as soon as the save lands; the message follows once Google is updated
   assert.match(await page.textContent('#appts-toast'), /Moved to tomorrow at 14:00\. Google Calendar updated\./);
   const [moved] = await apptsOf(ph.lead);
@@ -196,6 +289,23 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await row(ph.quoted).locator('.arow-menu').count(), 1);
   await page.uncheck('#appts-show-cancelled');
   ok('Cancel from the row menu: removed from Google Calendar, kept in Elite OS (shown with "Show cancelled"), stage unchanged');
+  await page.click('#appts-view button[data-view="calendar"]');
+  await showDay(page, D1);
+  await page.locator(`.cal-cell[data-day="${D1}"] .cal-ev[data-phone="${ph.lead}"]`).waitFor();
+  assert.equal(await page.locator(`.cal-cell[data-day="${D1}"] .cal-ev[data-phone="${ph.quoted}"]`).count(), 0);   // cancelled: not cluttering the calendar
+  await page.check('#appts-show-cancelled');
+  const gone2 = page.locator(`.cal-cell[data-day="${D1}"] .cal-ev[data-phone="${ph.quoted}"]`);
+  await gone2.waitFor();
+  assert.match(await gone2.getAttribute('class'), /\bcancelled\b/);
+  await gone2.click();
+  await page.waitForSelector('.appt-pop');
+  assert.match(await page.locator('.appt-pop').innerText(), /Cancelled[\s\S]*Removed from Google Calendar/);
+  assert.deepEqual(await page.locator('.appt-pop .pop-actions button').allInnerTexts(), ['Open customer']);
+  await page.keyboard.press('Escape');
+  await page.uncheck('#appts-show-cancelled');
+  await page.click('#appts-view button[data-view="list"]');
+  await page.waitForSelector('.arow');
+  ok('the calendar leaves cancelled appointments out by default; "Show cancelled" brings them back, struck through, with only Open customer');
 
   // ---- Google down, then "failed", then Retry now ----
   await row(ph.lead).locator('.arow-name').click();
@@ -265,6 +375,24 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-dialog.png') });
   await mp.tap('#a-cancel');
   ok('phone: Appointments opens from the Inbox header with no sideways scroll; Open customer and Back return to it; the booking dialog fits the screen');
+  await mp.evaluate(() => { location.hash = '#appointments'; });
+  await mp.waitForSelector('.arow');
+  assert.equal(await mp.getAttribute('#appts-view button[data-view="list"]', 'aria-pressed'), 'true');      // phones start with the list
+  await mp.tap('#appts-view button[data-view="calendar"]');
+  await mp.waitForSelector('#appts-cal:not([hidden]) .cal-cell');
+  await showDay(mp, D1);
+  assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  const md1 = mp.locator(`.cal-cell[data-day="${D1}"]`);
+  await md1.locator('.cal-dot').first().waitFor();
+  assert.equal(await md1.locator('.cal-ev').first().isVisible(), false);               // names do not fit: dots instead
+  assert.equal(await md1.locator('.cal-dot').count(), 2);
+  await md1.tap();
+  await mp.waitForFunction((k) => document.querySelector(`.cal-cell[data-day="${k}"]`).classList.contains('sel'), D1);
+  await mp.locator('#cal-day .arow').nth(1).waitFor();
+  assert.equal(await mp.locator('#cal-day .arow').count(), 2);
+  assert.match(await mp.locator('#cal-day .appts-day').innerText(), /^Tomorrow/);
+  await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-calendar.png') });
+  ok('phone: List by default; Calendar shows a compact month with dots, and tapping a day lists its appointments underneath, with no sideways scroll');
   await mctx.close();
 
   assert.deepEqual(errors, [], 'browser errors: ' + JSON.stringify(errors)); ok('no JavaScript errors in the browser');

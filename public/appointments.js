@@ -11,7 +11,16 @@ window.APPT = (() => {
     customer: null, custList: [], custLoaded: false, unsubCust: null, showPast: false,
     dlg: null,                 // { mode: 'create' | 'update', phone, appt, requestId }
     cancelling: null,
+    view: null,                // 'calendar' | 'list' (remembered for the browser session)
+    month: null,               // { y, m } shown in the calendar (Dublin)
+    selDay: null,              // YYYY-MM-DD picked on a phone: that day's appointments are listed under the month
+    calList: [], calLoaded: false, unsubCal: null, calKey: null,
   };
+  const VIEW_KEY = 'ek.apptView';
+  function initialView() {
+    try { const v = sessionStorage.getItem(VIEW_KEY); if (v === 'calendar' || v === 'list') return v; } catch (e) { /* private mode */ }
+    return window.matchMedia('(min-width: 900px)').matches ? 'calendar' : 'list';     // phones start with the list
+  }
   const ts = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : null);
   const syncOf = (a) => (a.sync && a.sync.google) || {};
   const nameOf = (a) => a.customerName || formatPhone(a.phone);
@@ -71,22 +80,59 @@ window.APPT = (() => {
   }
 
   // ---------- data ----------
+  // One listener for the view on screen: the list reads upcoming appointments; the calendar reads the month it shows (a plain range
+  // on `start`, so no extra index). A failed listener is dead, so it is cleared and the next show() can try again.
   function listen() {
+    if ($('app').hidden) return;                   // not before sign-in has finished: reading needs the staff claim (routing calls show() again then)
+    if (!A.unsubFailed) {
+      A.unsubFailed = db.collection('appointments').where('sync.google.state', '==', 'failed').limit(50).onSnapshot((snap) => {
+        A.failed = snap.docs.map((d) => ({ id: d.id, ...d.data() })); render();
+      }, () => { if (A.unsubFailed) { A.unsubFailed(); A.unsubFailed = null; } });
+    }
+    if (A.view === 'list') { stopCal(); startList(); } else { stopList(); startCal(); }
+  }
+  function startList() {
     if (A.unsub) return;
     const from = firebase.firestore.Timestamp.fromMillis(startOfToday());
     A.unsub = db.collection('appointments').where('start', '>=', from).orderBy('start').limit(LIMIT).onSnapshot((snap) => {
       A.list = snap.docs.map((d) => ({ id: d.id, ...d.data() })); A.loaded = true; A.hitLimit = snap.size >= LIMIT;
       render();
-    }, (e) => note('Cannot load appointments: ' + errText(e)));
-    A.unsubFailed = db.collection('appointments').where('sync.google.state', '==', 'failed').limit(50).onSnapshot((snap) => {
-      A.failed = snap.docs.map((d) => ({ id: d.id, ...d.data() })); render();
-    }, () => {});
+    }, (e) => { stopList(); note('Cannot load appointments: ' + errText(e)); });
   }
+  function stopList() { if (A.unsub) { A.unsub(); A.unsub = null; } A.list = []; A.loaded = false; A.hitLimit = false; }
+  function startCal() {
+    const r = monthRange(A.month), key = r.from + '-' + r.to;
+    if (A.unsubCal && A.calKey === key) return;
+    stopCal(); A.calKey = key;
+    const T = firebase.firestore.Timestamp;
+    A.unsubCal = db.collection('appointments').where('start', '>=', T.fromMillis(r.from)).where('start', '<', T.fromMillis(r.to)).orderBy('start').limit(500).onSnapshot((snap) => {
+      if (A.calKey !== key) return;
+      A.calList = snap.docs.map((d) => ({ id: d.id, ...d.data() })); A.calLoaded = true;
+      render();
+    }, (e) => { stopCal(); note('Cannot load the calendar: ' + errText(e)); });
+  }
+  function stopCal() { if (A.unsubCal) { A.unsubCal(); A.unsubCal = null; } A.calKey = null; A.calList = []; A.calLoaded = false; }
   function unlisten() {
-    if (A.unsub) { A.unsub(); A.unsub = null; }
+    stopList(); stopCal();
     if (A.unsubFailed) { A.unsubFailed(); A.unsubFailed = null; }
-    A.list = []; A.failed = []; A.loaded = false; A.hitLimit = false;
+    A.failed = [];
   }
+
+  // ---------- month grid (pure date arithmetic on Dublin calendar dates) ----------
+  const keyOf = (y, m, d) => new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);       // overflows correctly (d = 0, 32, ...)
+  const thisMonth = () => { const [y, m] = dublinDate(Date.now()).split('-').map(Number); return { y, m }; };
+  const addMonths = (mo, n) => { const t = new Date(Date.UTC(mo.y, mo.m - 1 + n, 1)); return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1 }; };
+  const monthTitle = (mo) => new Date(Date.UTC(mo.y, mo.m - 1, 15)).toLocaleDateString('en-IE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const sameMonth = (k, mo) => k.slice(0, 7) === `${mo.y}-${pad(mo.m)}`;
+  function monthCells(mo) {               // whole weeks, Monday first, covering the month
+    const lead = (new Date(Date.UTC(mo.y, mo.m - 1, 1)).getUTCDay() + 6) % 7;
+    const days = new Date(Date.UTC(mo.y, mo.m, 0)).getUTCDate();
+    const cells = [];
+    for (let i = 0; i < Math.ceil((lead + days) / 7) * 7; i++) cells.push(keyOf(mo.y, mo.m, 1 - lead + i));
+    return cells;
+  }
+  function monthRange(mo) { const c = monthCells(mo); return CRM.rangeFor('custom', Date.now(), { from: c[0], to: c[c.length - 1] }); }
+  const longDay = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('en-IE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }); };
 
   // ---------- show / hide ----------
   function setNav(on) {
@@ -101,6 +147,8 @@ window.APPT = (() => {
     }
   }
   function show() {
+    if (!A.view) A.view = initialView();
+    if (!A.month) { A.month = thisMonth(); A.selDay = dublinDate(Date.now()); }
     A.active = true; setNav(true); listen(); setView();
     document.title = 'Appointments · Elite Kitchens';
     render();
@@ -110,7 +158,20 @@ window.APPT = (() => {
     hide(); A.origin = false; watchCustomer(null);
     A.showCancelled = false; $('appts-show-cancelled').checked = false;
     closeDialog($('appt-dlg')); closeDialog($('appt-cancel-dlg')); A.dlg = null; A.cancelling = null;
-    $('appts-list').replaceChildren(); note('');
+    A.month = null; A.selDay = null;
+    $('appts-list').replaceChildren(); $('cal-grid').replaceChildren(); $('cal-day').replaceChildren(); note('');
+  }
+  function setMode(v) {
+    if (v !== 'calendar' && v !== 'list') return;
+    A.view = v;
+    try { sessionStorage.setItem(VIEW_KEY, v); } catch (e) { /* private mode */ }
+    closeMenu(); listen(); render();
+  }
+  function goMonth(mo) {
+    A.month = mo;
+    const today = dublinDate(Date.now());
+    A.selDay = sameMonth(today, mo) ? today : keyOf(mo.y, mo.m, 1);
+    closeMenu(); listen(); render();
   }
 
   // ---------- the Appointments screen ----------
@@ -124,6 +185,12 @@ window.APPT = (() => {
       const b = el('button', 'linkbtn', 'Retry all'); b.type = 'button'; b.onclick = () => retryAll(b);
       f.replaceChildren(el('span', null, (nFailed === 1 ? '1 appointment is' : nFailed + ' appointments are') + ' not up to date in Google Calendar (' + failText(syncOf(A.failed[0])) + ').'), b);
     }
+    for (const b of $('appts-view').querySelectorAll('button[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === A.view));
+    $('appts-cal').hidden = A.view !== 'calendar';
+    $('appts-list').hidden = A.view !== 'list';
+    if (A.view === 'calendar') renderCalendar(); else renderList();
+  }
+  function renderList() {
     const list = $('appts-list');
     if (!A.loaded) { list.replaceChildren(el('p', 'appts-empty', 'Loading appointments…')); return; }
     const shown = A.list.filter((a) => A.showCancelled || a.status !== 'cancelled');
@@ -172,6 +239,109 @@ window.APPT = (() => {
     if (window.PIPE) PIPE.origin = false;
     const c = convOf(a.phone); if (c) S.statusFilter = inboxStatus(c);
     location.hash = '#c/' + a.phone;
+  }
+
+  // ---------- the calendar (month view) ----------
+  const MAX_CHIPS = 3;
+  const headingFor = (k) => dayHeading(CRM.rangeFor('custom', Date.now(), { from: k }).from + 12 * 3600000);
+  const stageOf = (a) => { const c = convOf(a.phone); return c ? inboxStatus(c) : null; };
+  function renderCalendar() {
+    $('cal-title').textContent = monthTitle(A.month);
+    const today = dublinDate(Date.now());
+    $('cal-today').disabled = sameMonth(today, A.month);
+    const byDay = new Map();
+    for (const a of A.calList) {
+      if (!A.showCancelled && a.status === 'cancelled') continue;          // cancelled ones stay out of the way unless asked for
+      const k = dublinDate(ts(a.start));
+      if (!byDay.has(k)) byDay.set(k, []);
+      byDay.get(k).push(a);
+    }
+    const nodes = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => el('div', 'cal-dow', d));
+    for (const k of monthCells(A.month)) {
+      const items = byDay.get(k) || [];
+      const cell = el('div', 'cal-cell' + (sameMonth(k, A.month) ? '' : ' out') + (k === today ? ' today' : '') + (k === A.selDay ? ' sel' : ''));
+      cell.dataset.day = k; cell.setAttribute('role', 'group');
+      cell.setAttribute('aria-label', longDay(k) + (items.length ? ', ' + items.length + ' appointment' + (items.length === 1 ? '' : 's') : ''));
+      if (k === today) cell.setAttribute('aria-current', 'date');
+      cell.append(el('span', 'cal-num', String(Number(k.slice(8)))));
+      items.slice(0, MAX_CHIPS).forEach((a) => cell.append(chipNode(a)));
+      if (items.length > MAX_CHIPS) {
+        const more = el('button', 'cal-more', '+' + (items.length - MAX_CHIPS) + ' more'); more.type = 'button';
+        more.setAttribute('aria-label', 'Show all ' + items.length + ' appointments on ' + longDay(k));
+        more.onclick = (e) => { e.stopPropagation(); openDay(k, items, more); };
+        cell.append(more);
+      }
+      if (items.length) {                  // on a phone the day shows dots instead of names
+        const dots = el('div', 'cal-dots'); dots.setAttribute('aria-hidden', 'true');
+        items.slice(0, 4).forEach((a) => { const d = el('span', 'cal-dot'); const st = stageOf(a); if (st) d.dataset.status = st; dots.append(d); });
+        cell.append(dots);
+      }
+      cell.onclick = () => { if (A.selDay !== k) { A.selDay = k; render(); } };
+      nodes.push(cell);
+    }
+    $('cal-grid').replaceChildren(...nodes);
+    $('cal-status').textContent = A.calLoaded ? '' : 'Loading appointments…';
+    // phone: the picked day's appointments under the month (hidden on wider screens, where names fit in the cells)
+    const sel = (A.selDay && byDay.get(A.selDay)) || [];
+    const day = $('cal-day');
+    const h = el('h2', 'appts-day', A.selDay ? headingFor(A.selDay) : ''); h.append(el('span', 'n', String(sel.length)));
+    const body = el('div', 'appts-group'); body.setAttribute('role', 'list');
+    if (sel.length) body.append(...sel.map(rowNode)); else body.append(el('p', 'appts-empty cal-day-empty', A.calLoaded ? 'No appointments on this day.' : 'Loading appointments…'));
+    day.replaceChildren(h, body);
+  }
+  function chipNode(a) {
+    const st = stageOf(a), cancelled = a.status === 'cancelled', failed = syncOf(a).state === 'failed';
+    const b = el('button', 'cal-ev' + (cancelled ? ' cancelled' : '') + (failed ? ' sync-failed' : ''));
+    b.type = 'button'; b.dataset.id = a.id; b.dataset.phone = a.phone; if (st) b.dataset.status = st;
+    b.append(el('span', 'cal-ev-time', clock(ts(a.start))), el('span', 'cal-ev-name', nameOf(a)));
+    b.setAttribute('aria-label', `${clock(ts(a.start))} ${nameOf(a)}, ${kindOf(a)}${cancelled ? ', cancelled' : ''}${failed ? ', not in Google Calendar' : ''}. Show details`);
+    b.setAttribute('aria-haspopup', 'dialog'); b.setAttribute('aria-expanded', 'false');
+    b.onclick = (e) => { e.stopPropagation(); openCard(a, b); };
+    return b;
+  }
+  // A small floating card next to whatever was clicked; shares the menu's outside-click / Escape handling.
+  function placePopover(node, rc) {
+    document.body.append(node);
+    const w = node.offsetWidth, h = node.offsetHeight;
+    const left = rc.right + w + 8 <= window.innerWidth ? rc.right + 6 : rc.left - w - 6;
+    node.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, left)) + 'px';
+    node.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, rc.top - 6)) + 'px';
+  }
+  function openCard(a, anchor) {
+    const rc = anchor.getBoundingClientRect();
+    const was = A.menu && A.menu.btn === anchor && A.menu.kind === 'card' && A.menu.id === a.id; closeMenu();
+    if (was) return;
+    const cancelled = a.status === 'cancelled';
+    const node = el('div', 'appt-pop'); node.setAttribute('role', 'dialog'); node.setAttribute('aria-label', 'Appointment with ' + nameOf(a));
+    const head = el('div', 'pop-head'); head.append(el('strong', 'pop-name', nameOf(a)));
+    const st = stageOf(a);
+    if (st) { const s = el('span', 'arow-stage', INBOX_STATUSES[st]); s.dataset.status = st; head.append(s); }
+    if (cancelled) head.append(el('span', 'chip-cancelled', 'Cancelled'));
+    const sync = el('div', 'pop-sync'); sync.append(syncBadge(a), ...syncActions(a));
+    const acts = el('div', 'pop-actions');
+    const action = (label, cls, fn) => { const b = el('button', cls, label); b.type = 'button'; b.onclick = () => { closeMenu(); fn(); }; acts.append(b); };
+    action('Open customer', 'btn btn-ghost btn-sm', () => openCustomer(a));
+    if (!cancelled) { action('Reschedule', 'btn btn-ghost btn-sm', () => openReschedule(a)); action('Cancel', 'btn btn-ghost btn-sm pop-cancel', () => openCancel(a)); }
+    node.append(head, el('div', 'pop-when', when(a)), el('div', 'pop-sub', [kindOf(a), a.location].filter(Boolean).join(' · ')), sync, acts);
+    placePopover(node, rc);
+    anchor.setAttribute('aria-expanded', 'true'); A.menu = { node, btn: anchor, kind: 'card', id: a.id };
+    acts.querySelector('button').focus();
+  }
+  function openDay(k, items, anchor) {
+    const rc = anchor.getBoundingClientRect();
+    const was = A.menu && A.menu.btn === anchor && A.menu.kind === 'day'; closeMenu();
+    if (was) return;
+    const node = el('div', 'appt-pop day-pop'); node.setAttribute('role', 'dialog'); node.setAttribute('aria-label', 'Appointments on ' + longDay(k));
+    const list = el('div', 'pop-list');
+    for (const a of items) {
+      const c = chipNode(a);
+      c.onclick = (e) => { e.stopPropagation(); openCard(a, anchor); };          // the card opens next to "+N more"
+      list.append(c);
+    }
+    node.append(el('strong', 'pop-name', headingFor(k)), list);
+    placePopover(node, rc);
+    anchor.setAttribute('aria-expanded', 'true'); A.menu = { node, btn: anchor, kind: 'day' };
+    list.querySelector('button').focus();
   }
 
   // ---------- row menu ----------
@@ -279,6 +449,13 @@ window.APPT = (() => {
     fillTimes('10:00'); fillDuration(60); $('a-type').value = 'consultation';
     $('a-location').value = contact.location || c.location || ''; $('a-notes').value = '';
     openForm('Book appointment', (contact.name || c.name || formatPhone(phone)) + ' · ' + formatPhone(phone), 'Book appointment');
+    if (!$('a-location').value && !(S.selected === phone && S.contact)) {      // the customer's details were still loading: fill the location in when they arrive
+      const req = A.dlg;
+      db.collection('contacts').doc(phone).get().then((d) => {
+        const loc = d.exists && d.data().location;
+        if (loc && A.dlg === req && !$('a-location').value) $('a-location').value = loc;
+      }).catch(() => {});
+    }
   }
   function openReschedule(a) {
     A.dlg = { mode: 'update', phone: a.phone, appt: a };
@@ -361,6 +538,10 @@ window.APPT = (() => {
   });
   window.addEventListener('resize', () => closeMenu());
   $('appts-show-cancelled').addEventListener('change', (e) => { A.showCancelled = e.target.checked; render(); });
+  $('appts-view').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b && b.dataset.view !== A.view) setMode(b.dataset.view); });
+  $('cal-prev').onclick = () => goMonth(addMonths(A.month, -1));
+  $('cal-next').onclick = () => goMonth(addMonths(A.month, 1));
+  $('cal-today').onclick = () => goMonth(thisMonth());
   $('to-appointments').onclick = () => { location.hash = '#appointments'; };
   $('appts-back').onclick = () => { location.hash = ''; };
   $('nav-appointments').addEventListener('click', (e) => { if (A.active) e.preventDefault(); });   // already here

@@ -109,11 +109,23 @@
     <header class="appts-head">
       <button id="appts-back" class="icon-btn only-mobile" aria-label="Back to inbox"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
       <h1>Appointments</h1>
+      <div id="appts-view" class="seg appts-view" role="group" aria-label="Appointments view"><button type="button" data-view="calendar" aria-pressed="false">Calendar</button><button type="button" data-view="list" aria-pressed="false">List</button></div>
       <label class="appts-toggle"><input type="checkbox" id="appts-show-cancelled"> Show cancelled</label>
     </header>
     <div class="appts-scroll">
       <div id="appts-toast" class="toast appts-toast" role="status" hidden></div>
       <div id="appts-failed" class="appts-failed" role="alert" hidden></div>
+      <section id="appts-cal" class="appts-cal" aria-label="Calendar" hidden>
+        <div class="cal-nav">
+          <button id="cal-today" type="button" class="btn btn-ghost btn-sm">Today</button>
+          <button id="cal-prev" type="button" class="icon-btn" aria-label="Previous month" title="Previous month"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+          <button id="cal-next" type="button" class="icon-btn" aria-label="Next month" title="Next month"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+          <h2 id="cal-title" class="cal-title" aria-live="polite"></h2>
+          <span id="cal-status" class="cal-status" role="status"></span>
+        </div>
+        <div id="cal-grid" class="cal-grid"></div>
+        <div id="cal-day" class="cal-day"></div>
+      </section>
       <div id="appts-list" class="appts-list"></div>
     </div>
   </main>
