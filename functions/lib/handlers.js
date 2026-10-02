@@ -3,6 +3,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const store = require('./store');
 const mediaLib = require('./media');
 const appointments = require('./appointments');
+const calendarSync = require('./calendarSync');
 const { verifySignature, parseWebhook, normalizePhone } = require('./whatsapp');
 
 const WINDOW_MS = 24 * 3600 * 1000;
@@ -178,17 +179,20 @@ async function setConversationStatus(auth, data, { db, cfg }) {
 }
 
 // Permanently delete a customer and everything stored about them. Staff must type the last 4 digits of the number to confirm.
-async function deleteCustomer(auth, data, { db, cfg, bucket }) {
+async function deleteCustomer(auth, data, deps) {
+  const { db, cfg, bucket } = deps;
   assertStaff(auth, cfg);
   const phone = normalizePhone(data && data.phone);
   if (phone.length < 9) throw new HttpsError('invalid-argument', 'Missing phone.');
   if (String((data && data.confirm) || '').trim() !== phone.slice(-4)) throw new HttpsError('invalid-argument', `To confirm, type the last 4 digits of the number (${phone.slice(-4)}).`);
+  const events = await calendarSync.erasureTargets(db, phone);    // Phase 5: their Google Calendar events, read before the records go
   const r = await store.deleteCustomerData(db, bucket, phone);
   if (!r) throw new HttpsError('not-found', 'Customer not found (already deleted?).');
   // Audit entry with NO personal content: a one-way hash (not reversible to the number), last 3 digits, counts, who, when.
   await db.collection('auditLog').add({ action: 'deleteCustomer', phoneHash: require('crypto').createHash('sha256').update(phone).digest('hex'),
     phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, by: (auth.token && auth.token.email) || auth.uid, at: require('firebase-admin/firestore').Timestamp.now() });
   log('info', 'customer deleted', { last3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments });
+  await calendarSync.removeEvents(deps, events);                  // never throws: anything Google refuses now is finished by the sweeper
   return { messages: r.messages, files: r.files };
 }
 
@@ -266,9 +270,19 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
 }
 
 // ---- Phase 5: appointments. The rules live in ./appointments; these wrappers only check who is asking. ----
+// The appointment is saved first; Google Calendar is then updated straight away when possible (calendar.state in the reply),
+// otherwise by the sweeper. A Google problem never fails or rolls back a booking.
 const actorOf = (auth) => ({ kind: 'staff', id: (auth.token && auth.token.email) || auth.uid });
-async function createAppointment(auth, data, { db, cfg }) { assertStaff(auth, cfg); return appointments.create(db, actorOf(auth), data); }
-async function updateAppointment(auth, data, { db, cfg }) { assertStaff(auth, cfg); return appointments.update(db, actorOf(auth), data); }
-async function cancelAppointment(auth, data, { db, cfg }) { assertStaff(auth, cfg); return appointments.cancel(db, actorOf(auth), data); }
+const withCalendar = async (deps, r) => ({ ...r, calendar: await calendarSync.pushNow(deps, r.id) });
+async function createAppointment(auth, data, deps) { assertStaff(auth, deps.cfg); return withCalendar(deps, await appointments.create(deps.db, actorOf(auth), data)); }
+async function updateAppointment(auth, data, deps) { assertStaff(auth, deps.cfg); return withCalendar(deps, await appointments.update(deps.db, actorOf(auth), data)); }
+async function cancelAppointment(auth, data, deps) { assertStaff(auth, deps.cfg); return withCalendar(deps, await appointments.cancel(deps.db, actorOf(auth), data)); }
+async function retryCalendarSync(auth, data, deps) {
+  assertStaff(auth, deps.cfg);
+  if (!appointments.isAppointmentId(data && data.id)) throw new HttpsError('invalid-argument', 'Missing appointment.');
+  const calendar = await calendarSync.retryNow(deps, data.id);
+  if (calendar.state === 'unknown') throw new HttpsError('not-found', 'Appointment not found.');
+  return { id: data.id, calendar };
+}
 
-module.exports = { createAppointment, updateAppointment, cancelAppointment, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+module.exports = { createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

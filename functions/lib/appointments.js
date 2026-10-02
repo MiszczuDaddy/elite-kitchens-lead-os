@@ -8,6 +8,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp } = require('firebase-admin/firestore');
 const { planStatusChange } = require('./store');
 const { normalizePhone } = require('./whatsapp');
+const { eventIdFor } = require('./gcal');
 
 const TZ = 'Europe/Dublin';
 const MIN = 60 * 1000, DAY = 24 * 60 * MIN;
@@ -83,10 +84,16 @@ function checkVersion(a, expected) {
   if (!Number.isInteger(expected)) throw bad('Bad version.');
   if (expected !== a.version) throw new HttpsError('failed-precondition', 'This appointment was changed by someone else. Please check it and try again.');
 }
+const isAppointmentId = (id) => typeof id === 'string' && APPT_ID.test(id);
 function appointmentRef(db, id) {
-  if (typeof id !== 'string' || !APPT_ID.test(id)) throw bad('Missing appointment.');
+  if (!isAppointmentId(id)) throw bad('Missing appointment.');
   return db.collection('appointments').doc(id);
 }
+// Google Calendar follows every change (see calendarSync.js): a new appointment starts as "pending" with the event id it will
+// always use; any later change sets it back to "pending" so the new version is pushed.
+const newSync = (id, at) => ({ google: { state: 'pending', eventId: eventIdFor(id), calendarId: null, created: false, syncedVersion: 0, attempts: 0,
+  failingSince: null, nextAttemptAt: at, lastAttemptAt: null, syncedAt: null, lastError: null, htmlLink: null, leaseUntil: null } });
+const syncPending = (at) => ({ 'sync.google.state': 'pending', 'sync.google.attempts': 0, 'sync.google.failingSince': null, 'sync.google.nextAttemptAt': at });
 // The same request (double click, network retry, a future automation retrying) always lands on the same document.
 const appointmentId = (phone, requestId) => 'a_' + crypto.createHash('sha256').update(phone + '|' + requestId).digest('hex').slice(0, 24);
 const withHistory = (a, entry) => [...(a.history || []), entry].slice(-HISTORY_MAX);
@@ -130,6 +137,7 @@ async function create(db, actor, data, nowMs = Date.now()) {
       createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor,
       cancelledAt: null, cancelledBy: null, cancelReason: null,
       rescheduleCount: 0, history: [{ action: 'created', at, by: actor.id, start }],
+      sync: newSync(id, at),
     };
     tx.set(ref, a);
     return { ...summary(id, a), existing: false, stage };
@@ -173,7 +181,7 @@ async function update(db, actor, data, nowMs = Date.now()) {
       version: a.version + 1, updatedAt: at, updatedBy: actor,
       rescheduleCount: (a.rescheduleCount || 0) + (moved ? 1 : 0),
       history: withHistory(a, { action: rescheduled ? 'rescheduled' : 'edited', at, by: actor.id, start: patch.start || a.start }),
-    });
+    }, syncPending(at));
     tx.update(ref, patch);
     return { ...summary(ref.id, { ...a, ...patch }), unchanged: false };
   });
@@ -193,10 +201,10 @@ async function cancel(db, actor, data, nowMs = Date.now()) {
     checkVersion(a, data.expectedVersion);
     const at = Timestamp.fromMillis(nowMs);
     const patch = { status: 'cancelled', cancelledAt: at, cancelledBy: actor, cancelReason: reason,
-      version: a.version + 1, updatedAt: at, updatedBy: actor, history: withHistory(a, { action: 'cancelled', at, by: actor.id }) };
+      version: a.version + 1, updatedAt: at, updatedBy: actor, history: withHistory(a, { action: 'cancelled', at, by: actor.id }), ...syncPending(at) };
     tx.update(ref, patch);
     return { ...summary(ref.id, { ...a, ...patch }), alreadyCancelled: false };
   });
 }
 
-module.exports = { TYPES, TZ, DEFAULT_DURATION, HISTORY_MAX, create, update, cancel, dublinToMs, appointmentId };
+module.exports = { TYPES, TZ, DEFAULT_DURATION, HISTORY_MAX, create, update, cancel, dublinToMs, appointmentId, isAppointmentId };

@@ -48,7 +48,7 @@ exports.updateContact = onCall({ secrets: SECRETS }, (req) => h.updateContact(re
 exports.mediaUrl = onCall({ secrets: SECRETS }, (req) => h.mediaUrl(req.auth, req.data, deps()));
 exports.retryMedia = onCall({ secrets: SECRETS, timeoutSeconds: 120, memory: '512MiB' }, (req) => h.retryMedia(req.auth, req.data, deps()));
 exports.sendMedia = onCall({ secrets: SECRETS, timeoutSeconds: 120, memory: '1GiB' }, (req) => h.sendMedia(req.auth, req.data, deps()));
-exports.deleteCustomer = onCall({ secrets: SECRETS, timeoutSeconds: 300, memory: '512MiB' }, (req) => h.deleteCustomer(req.auth, req.data, deps()));
+exports.deleteCustomer = onCall({ secrets: SECRETS, timeoutSeconds: 300, memory: '512MiB' }, (req) => h.deleteCustomer(req.auth, req.data, { ...deps(), ...calendarDeps() }));
 exports.sendReply = onCall({ secrets: SECRETS }, (req) => h.sendReply(req.auth, req.data, deps()));
 
 // ---- Phase 3: Meta Lead Ads intake. Make posts each lead here; Elite OS dedupes by Meta lead id, creates/updates the customer
@@ -70,9 +70,36 @@ exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeout
   }
 });
 
-// ---- Phase 5: appointments. Staff-only callables with no WhatsApp secrets (least privilege). Elite OS is the source of truth
-// for appointments and the browser only reads them. Added at the end of the file: no existing function above is touched.
-const staffDeps = () => ({ db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } });
+// ---- Phase 5: appointments + one-way Google Calendar sync. Staff-only callables with no WhatsApp secrets (least privilege).
+// Elite OS is the source of truth for appointments and the browser only reads them. Apart from deleteCustomer (which now also
+// removes the customer's calendar events), no existing function above is touched.
+// Google Calendar is off unless GCAL_SYNC=on and both ids are set (functions/.env.<project>). Authentication is keyless: the
+// runtime identity gets a short-lived token for GCAL_SERVICE_ACCOUNT, the only account the calendar is shared with for editing.
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const gcalLib = require('./lib/gcal');
+const calendarSync = require('./lib/calendarSync');
+const GCAL_SYNC = defineString('GCAL_SYNC', { default: 'off' });
+const GCAL_CALENDAR_ID = defineString('GCAL_CALENDAR_ID', { default: '' });
+const GCAL_SERVICE_ACCOUNT = defineString('GCAL_SERVICE_ACCOUNT', { default: '' });
+let gcalClient = null, gcalKey = null;
+function calendarDeps() {
+  const calendarId = GCAL_CALENDAR_ID.value().trim(), serviceAccount = GCAL_SERVICE_ACCOUNT.value().trim();
+  const testBase = process.env.FUNCTIONS_EMULATOR === 'true' ? process.env.GCAL_API_BASE : undefined;   // emulator tests: a local fake Calendar
+  const key = [calendarId, serviceAccount, testBase].join('|');
+  if (key !== gcalKey) {           // one client per instance, so the short-lived token is reused between calls
+    const tokens = testBase ? { get: async () => 'emulator-token' } : gcalLib.serviceAccountTokenProvider({ serviceAccount });
+    gcalClient = gcalLib.createCalendarClient({ apiBase: testBase || undefined, tokens }); gcalKey = key;
+  }
+  const enabled = GCAL_SYNC.value().trim().toLowerCase() === 'on' && !!calendarId && (!!serviceAccount || !!testBase);
+  return { calendar: { enabled, calendarId, appUrl: `https://${process.env.GCLOUD_PROJECT}.web.app` }, gcal: gcalClient };
+}
+const staffDeps = () => ({ db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, ...calendarDeps() });
 exports.createAppointment = onCall({}, (req) => h.createAppointment(req.auth, req.data, staffDeps()));
 exports.updateAppointment = onCall({}, (req) => h.updateAppointment(req.auth, req.data, staffDeps()));
 exports.cancelAppointment = onCall({}, (req) => h.cancelAppointment(req.auth, req.data, staffDeps()));
+exports.retryCalendarSync = onCall({}, (req) => h.retryCalendarSync(req.auth, req.data, staffDeps()));
+// Retries anything Google has not caught up with yet, and finishes calendar clean-up after an erasure. Not callable from outside.
+exports.calendarSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', timeoutSeconds: 300, retryCount: 0 }, async () => {
+  const r = await calendarSync.sweep({ db: getFirestore(), ...calendarDeps() });
+  console.log(JSON.stringify({ level: 'info', msg: 'calendar sweep', ...r }));
+});
