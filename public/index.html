@@ -36,9 +36,13 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h4v14H4z"/><path d="M10 5h4v9h-4z"/><path d="M16 5h4v5h-4z"/></svg>
       <span class="nav-label">Pipeline</span>
     </a>
+    <a class="rail-item" href="#appointments" id="nav-appointments" title="Appointments">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <span class="nav-label">Appointments</span>
+    </a>
     <details class="nav-future">
       <summary>Coming later <svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary>
-      <div class="planned-areas"><span>Leads</span><span>Appointments</span><span>Quotes</span><span>Projects</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
+      <div class="planned-areas"><span>Leads</span><span>Quotes</span><span>Projects</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
     </details>
     <div class="rail-spacer"></div>
     <button id="signout" class="rail-item rail-out" title="Sign out" aria-label="Sign out">
@@ -52,6 +56,7 @@
       <div class="head-actions">
         <button id="new-btn" class="icon-btn new-conversation" aria-label="New conversation" title="New conversation"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
         <button id="to-pipeline" class="icon-btn only-mobile" aria-label="Open pipeline" title="Pipeline"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h4v14H4z"/><path d="M10 5h4v9h-4z"/><path d="M16 5h4v5h-4z"/></svg></button>
+        <button id="to-appointments" class="icon-btn only-mobile" aria-label="Open appointments" title="Appointments"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
         <button id="signout-m" class="icon-btn only-mobile" aria-label="Sign out" title="Sign out"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v16h5M9 12h12m-5-5 5 5-5 5"/></svg></button>
       </div>
     </header>
@@ -97,6 +102,19 @@
       <div id="pipe-toast" class="toast pipe-toast" role="status" hidden></div>
       <div id="pipe-board" class="pipe-board"></div>
       <p id="pipe-note" class="pipe-note" hidden></p>
+    </div>
+  </main>
+
+  <main id="appointments" class="appts-pane" aria-label="Appointments">
+    <header class="appts-head">
+      <button id="appts-back" class="icon-btn only-mobile" aria-label="Back to inbox"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+      <h1>Appointments</h1>
+      <label class="appts-toggle"><input type="checkbox" id="appts-show-cancelled"> Show cancelled</label>
+    </header>
+    <div class="appts-scroll">
+      <div id="appts-toast" class="toast appts-toast" role="status" hidden></div>
+      <div id="appts-failed" class="appts-failed" role="alert" hidden></div>
+      <div id="appts-list" class="appts-list"></div>
     </div>
   </main>
 
@@ -153,7 +171,11 @@
     </header>
     <div class="customer-summary"><div class="avatar" id="profile-avatar"></div><strong id="profile-name"></strong><span>WhatsApp customer</span></div>
     <div class="profile-tabs" role="tablist" aria-label="Customer sections"><button id="tab-details" role="tab" aria-selected="true" aria-controls="panel-details">Details</button><button id="tab-media" role="tab" aria-selected="false" aria-controls="panel-media">Media</button><button id="tab-documents" role="tab" aria-selected="false" aria-controls="panel-documents">Documents</button></div>
-    <div class="profile-body" id="profile-body"><section id="panel-details" role="tabpanel" tabindex="0" aria-labelledby="tab-details"><form id="details-form" class="details-form" autocomplete="off" novalidate>
+    <div class="profile-body" id="profile-body"><section id="panel-details" role="tabpanel" tabindex="0" aria-labelledby="tab-details"><section id="d-appts" class="d-appts" aria-labelledby="d-appts-title">
+      <div class="d-appts-head"><h3 id="d-appts-title">Appointments</h3><button id="d-appt-new" type="button" class="btn btn-ghost btn-sm">Book appointment</button></div>
+      <div id="d-appts-list"></div>
+      <div id="d-appts-msg" class="d-msg" role="status"></div>
+    </section><form id="details-form" class="details-form" autocomplete="off" novalidate>
       <fieldset><legend>Contact</legend>
       <div class="d-phone"><span class="d-label">Phone</span><span id="d-phone" class="d-phone-val"></span></div>
       <label>Name<input id="d-name" name="name" maxlength="100"></label>
@@ -221,6 +243,43 @@
   </form>
 </dialog>
 
+<dialog id="appt-dlg" class="dlg">
+  <form id="appt-form" autocomplete="off">
+    <h2 id="appt-title">Book appointment</h2>
+    <p id="appt-who" class="hint"></p>
+    <div class="appt-grid">
+      <label>Date<input id="a-date" type="date" required></label>
+      <label>Time<select id="a-time" required></select></label>
+      <label>Duration
+        <select id="a-duration"><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">1 hour</option><option value="90">1½ hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select>
+      </label>
+      <label>Type
+        <select id="a-type"><option value="consultation">Consultation</option><option value="site_visit">Site visit</option><option value="other">Other</option></select>
+      </label>
+    </div>
+    <label>Location<input id="a-location" maxlength="200" placeholder="e.g. 12 Main Street, Swords"></label>
+    <label>Notes <span class="label-note">(internal: never sent to Google Calendar)</span><textarea id="a-notes" rows="3" maxlength="2000"></textarea></label>
+    <div id="a-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="a-cancel" class="btn btn-ghost">Close</button>
+      <button type="submit" id="a-go" class="btn btn-primary">Book appointment</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="appt-cancel-dlg" class="dlg">
+  <form id="appt-cancel-form" autocomplete="off">
+    <h2>Cancel appointment</h2>
+    <p id="ac-text" class="hint"></p>
+    <label>Reason (optional)<input id="ac-reason" maxlength="300"></label>
+    <div id="ac-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="ac-keep" class="btn btn-ghost">Keep appointment</button>
+      <button type="submit" id="ac-go" class="btn btn-danger">Cancel appointment</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- Firebase config is served automatically by Firebase Hosting (public identifiers, not secrets). -->
 <script src="/__/firebase/10.14.1/firebase-app-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-auth-compat.js"></script>
@@ -231,5 +290,6 @@
 <script src="/crm.js"></script>
 <script src="/app.js"></script>
 <script src="/pipeline.js"></script>
+<script src="/appointments.js"></script>
 </body>
 </html>

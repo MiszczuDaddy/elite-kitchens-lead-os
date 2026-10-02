@@ -169,6 +169,7 @@ function stopListening() {
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
   if (window.PIPE) PIPE.stop();
+  if (window.APPT) APPT.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
 }
@@ -293,6 +294,9 @@ function renderConversationStatus() {
 
 // ---------- routing ----------
 function routeFromHash() {
+  if (location.hash === '#appointments' && window.APPT) { if (S.selected) closeConversation(true); if (window.PIPE && PIPE.active) PIPE.hide(); APPT.show(); return; }
+  if (window.APPT && APPT.active) APPT.hide();
+  if (location.hash === '#pipeline' && window.APPT) APPT.origin = false;
   if (location.hash === '#pipeline' && window.PIPE) { if (S.selected) closeConversation(true); PIPE.show(); return; }
   if (window.PIPE && PIPE.active) PIPE.hide();
   const m = /^#c\/(\d+)$/.exec(location.hash);
@@ -300,7 +304,7 @@ function routeFromHash() {
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
@@ -314,6 +318,7 @@ function closeConversation(fromHash) {
   setView(); renderList();
 }
 $('back').onclick = () => {
+  if (window.APPT && APPT.origin) { APPT.origin = false; location.hash = '#appointments'; return; }   // came from Appointments: go back to it
   if (window.PIPE && PIPE.origin) { PIPE.origin = false; location.hash = '#pipeline'; return; }   // came from the pipeline: go back to it
   closeConversation(false);
 };
@@ -322,6 +327,7 @@ function openConversation(id, fromHash) {
   if (!id) return;
   if (S.selected === id) { setView(); return; }
   if (!fromHash && window.PIPE) PIPE.origin = false;      // opened from the Inbox list, not from the pipeline
+  if (!fromHash && window.APPT) APPT.origin = false;
   rememberDrafts();
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
@@ -747,6 +753,7 @@ $('details-close').onclick = () => setDetailsOpen(false, true);
 
 function watchContact(id) {
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
+  if (window.APPT) APPT.watchCustomer(id);           // the customer's appointments, shown above the details form
   S.contact = null; S.dirty = false;
   setDetailMsg('');
   $('profile-body').scrollTop = 0;
