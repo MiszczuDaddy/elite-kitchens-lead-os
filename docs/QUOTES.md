@@ -1,6 +1,7 @@
 # Phase 6 — Quotes (agreed design)
 
-Status: **M0 (design) and M1 (price calculator) done.** Nothing is deployed and no screen uses quotes yet. This document
+Status: **M0 (design), M1 (price calculator) and M2 (server side) done.** Nothing is deployed and no screen uses quotes
+yet. This document
 is the specification that the milestones below implement. A rule in it changes only with the owner's approval.
 
 Quotes become a native part of Elite OS: a Quotes section in the side rail, a Quotes block on every customer profile, a
@@ -96,11 +97,11 @@ Money is worked out exactly (whole cents, quantities in hundredths), never with 
 
 | Where | What |
 |---|---|
-| `quotes/{id}` | `phone` (the customer), `number`, `status` (`draft` / `sent` / `accepted` / `declined`), `customerName`, `currentVersion`, `sentVersion`, a summary of the options and prices for lists, `validUntil` of the sent version, `acceptedOption`, `sentAt/By`, `acceptedAt/By`, `declinedAt/By`, `declineReason`, `stageChanges` (what this quote did to the pipeline), `history` (who did what, when), `version` (for "changed by someone else" checks), `requestId`, `createdAt/By`, `updatedAt/By` |
-| `quotes/{id}/versions/{n}` | One per version: the answers, the frozen price list, the calculator id and version, the price sheet, the customer's name, phone, email and address, the business details, and once sent the issue date, `validUntil`, who sent it and the stored PDF (path, size, checksum). **A sent version never changes again.** |
-| `quoteSettings/current` | Price list, extras catalogue, business details printed on quotes, validity period (30 days), VAT rate, quote-number setup |
-| `counters/quoteNumber` | The next quote number. Can only go up. |
-| Storage `quotes/{phone}/{id}/v{n}.pdf` | The exact PDF of each sent version. Closed to browsers; staff open it through a 10-minute signed link, like media. |
+| `quotes/{id}` | `phone` (the customer), `ref` (EK-0034, or TEST-0001 before numbering is set), `number`, `testNumber`, `status` (`draft` / `sent` / `accepted` / `declined`), `customerName`, `currentVersion`, `sentVersion` (the version the customer has), `draftVersion` (an unsent draft, if any), `summary` (each option's price including VAT and the dearest, for lists), `sent` (`version`, `issueDate`, `validUntil`, `summary` of the version the customer has), `validUntil`, `acceptedOption` (`key`, `name`, `incVat`, `version`), `sentAt/By`, `acceptedAt/By`, `declinedAt/By`, `declineReason`, `notes` (internal), `pipelineChanges` (what this quote did to the stage and the pipeline value, last 20), `history` (who did what, when, last 50), `rev` (for "changed by someone else" checks), `requestId`, `lastSendRequestId`, `createdAt/By`, `updatedAt/By` |
+| `quotes/{id}/versions/{n}` | One per version: `state` (`draft` / `sent`), the calculator (`engine`), the `answers`, the frozen `priceList` and `vatRate`, the price `sheet`; once sent also `issueDate` and `validUntil` (Dublin dates, `YYYY-MM-DD`), `customer` (name, phone, email, address), `business`, `sentAt/By` and `pdf` (path, size, SHA-256). **A sent version never changes again.** |
+| `quoteSettings/current` | `priceList`, `vatRate`, `validityDays` (30), `business` (trading name, signature name, phone, email, web, address, VAT number), `rev`, `history` |
+| `counters/quoteNumber` | `next` (the next EK number: set once at cut-over, can only go up) and `testNext` (TEST numbers before that) |
+| Storage `quotes/{phone}/{id}/v{n}-{request}.pdf` | The exact PDF of each sent version (one path per send request, so two sends can never overwrite each other). Closed to browsers; staff open it through a 10-minute signed link, like media. |
 
 * The quote id comes from the phone number and the request id, so a double click or a retry creates one quote.
 * Stored quote PDFs are kept until the customer is deleted. The automatic 24-month clean-up of customer media
@@ -226,14 +227,15 @@ that quote's PDF.
 
 * No change to Firestore or Storage rules. Browsers still cannot write anything.
 * Every quote action is a staff-only function (`assertStaff`) with strict input checks. New quotes and sends carry a
-  request id (no duplicates), and edits carry the version they started from ("changed by someone else" is refused).
-* Planned functions:
-  * New: `createQuote`, `saveQuoteDraft`, `sendQuote`, `acceptQuote`, `declineQuote`, `reopenQuote`,
-    `discardQuoteDraft`, `deleteQuoteDraft`, `quotePdfUrl`, `saveQuoteSettings` and `createCustomer`.
+  request id (no duplicates), and edits carry the revision they started from ("changed by someone else" is refused).
+* Functions (built in M2):
+  * New: `createCustomer`, `saveQuoteSettings`, `setQuoteNumbering`, `createQuote`, `saveQuoteDraft`, `sendQuote`,
+    `acceptQuote`, `declineQuote`, `reopenQuote`, `reviseQuote`, `discardQuoteDraft`, `deleteQuoteDraft`,
+    `setQuoteNotes` and `quotePdfUrl`. "Renew" is `reviseQuote` followed by `sendQuote` with no changes.
   * Changed:
     * `updateContact`: accepts `address`; every other field behaves exactly as before.
     * `deleteCustomer`: also erases the customer's quotes, their versions and stored PDFs; the audit entry adds the
-      number of quotes; its answer to the screen is unchanged.
+      number of quotes and quote files; its answer to the screen is unchanged.
 * The PDF upload uses the existing private upload folder (`uploads/{uid}/`, create-only). The function checks the file
   is a PDF of sensible size before moving it to `quotes/`.
 * `functions/.env` and secrets are unchanged: quotes need no new secret.
@@ -351,6 +353,56 @@ browser suites `ui` 57/57, `crm` 14/14, `dnd` 13/13, `conversion` 10/10, `appoin
 `lead` 11/11. `lead` check 9 again failed on the first run straight after `ui` (the same `sendReply` cold start as in the
 M0 baseline: the function began after the test's 5-second wait) and passed when run again. Nothing M1 changed runs in that
 suite.
+
+### M2: the server side
+
+Built and tested on 2026-10-03. Nothing deployed; no screen calls these functions yet.
+
+| File | What |
+|---|---|
+| `functions/lib/quotes.js` | Quote records, versions, numbering, statuses, expiry, Quote Settings, the stored PDF |
+| `functions/lib/quotePipeline.js` | The pipeline rules (stage and pipeline value), using `planStatusChange` unchanged |
+| `functions/lib/store.js` | `deleteCustomerData` also erases quotes and quote PDFs; new `createCustomer` |
+| `functions/lib/handlers.js` | Staff-only wrappers; `createCustomer`; `address` in Details; quote counts in the erasure audit |
+| `functions/index.js` | The 14 new callables, holding no WhatsApp or Google secrets |
+| `functions/test/quotes.test.js`, `functions/test/customers.test.js` | 37 tests, part of `npm test` |
+
+How the actions behave, beyond the rules above:
+
+* **Send** checks, before anything is stored, that the draft has not changed since the PDF was made, Quote Settings have
+  not changed, the customer's name, email and address are the ones on the PDF, the issue date is today (or yesterday,
+  for a quote finished just before midnight), the file is a real PDF of at most 25 MB from the sender's own upload
+  folder, and at least one option is offered. If anything fails, nothing is stored or changed. The same request sent
+  twice does nothing the second time.
+* **Accept** needs the customer's option to be on the version they were sent, and no unsent draft. It works on an expired
+  quote and says so.
+* **Reopen** an accepted quote: "move back" only if this quote's accept moved the customer and they are still in Won;
+  "restore value" only if the pipeline value is still what the accept set. Otherwise it is refused with a message and
+  nothing changes.
+* **Revise** from Sent or Declined (an accepted quote is reopened first); at most 50 versions per quote.
+* **Delete** only a quote that was never sent; the audit entry holds the quote number and who, never customer details;
+  numbers are not reused.
+* **Notes** on a quote: any status, up to 2,000 characters, never printed.
+* **Add customer without messaging**: the number is checked strictly, as for Meta leads (never guessed); the name is
+  required; the other Details fields are optional and checked exactly as in Details; no message is sent; the customer
+  starts as a New lead. An existing number is left exactly as it is and opened instead.
+* **Address**: optional, up to 300 characters, kept on the customer record only.
+* **Delete customer**: also erases every quote, version and stored quote PDF, and sweeps again at the end in case a send
+  was in flight. The audit entry adds the counts; nothing else about the erasure changed.
+
+**Tests:** 37, covering every row of the pipeline tables, corrections, Closed customers, several quotes per customer,
+expiry, versions, frozen prices, numbering, idempotency, "changed by someone else", erasure, staff-only access, the
+security rules and logs. The tests were themselves checked: six deliberately planted errors (Booked not moved on send,
+Closed moved without the tick, the customer-details check skipped, accept with a pending draft, expiry a day early,
+erasure keeping quotes) were each caught.
+
+**Order of the next milestones.** Sending needs the customer PDF, which M4 builds. M3 therefore builds every screen and
+dialog, with the Send button switched on in M4; M3's browser tests prepare sent quotes directly.
+
+Regression (2026-10-03, after M2): backend 196 of 196 (the 136 tests from before Phase 6 unchanged, the 23 calculator
+tests, the 37 new ones); browser suites `ui` 57/57 (it deletes customers and edits Details through the changed
+functions), `lead` 11/11 (first run, after the harness fix in its own commit), `crm` 14/14, `dnd` 13/13, `conversion`
+10/10, `appointments` 17/17, `theme` 10/10 (Chrome).
 
 ## Deploy and rollback (prepared in M5)
 

@@ -103,3 +103,22 @@ exports.calendarSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Eur
   const r = await calendarSync.sweep({ db: getFirestore(), ...calendarDeps() });
   console.log(JSON.stringify({ level: 'info', msg: 'calendar sweep', ...r }));
 });
+
+// ---- Phase 6: quotes, and customers added without a message (docs/QUOTES.md). Staff-only callables holding no WhatsApp or
+// Google secrets (least privilege). Apart from deleteCustomer (which now also erases the customer's quotes and stored quote
+// PDFs) and updateContact (which now also accepts an optional address), no existing function above is touched.
+const quoteDeps = () => ({ db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, bucket: getStorage().bucket(bucketName()) });
+exports.createCustomer = onCall({}, (req) => h.createCustomer(req.auth, req.data, quoteDeps()));
+exports.saveQuoteSettings = onCall({}, (req) => h.saveQuoteSettings(req.auth, req.data, quoteDeps()));
+exports.setQuoteNumbering = onCall({}, (req) => h.setQuoteNumbering(req.auth, req.data, quoteDeps()));
+exports.createQuote = onCall({}, (req) => h.createQuote(req.auth, req.data, quoteDeps()));
+exports.saveQuoteDraft = onCall({}, (req) => h.saveQuoteDraft(req.auth, req.data, quoteDeps()));
+exports.sendQuote = onCall({ timeoutSeconds: 120, memory: '512MiB' }, (req) => h.sendQuote(req.auth, req.data, quoteDeps()));
+exports.acceptQuote = onCall({}, (req) => h.acceptQuote(req.auth, req.data, quoteDeps()));
+exports.declineQuote = onCall({}, (req) => h.declineQuote(req.auth, req.data, quoteDeps()));
+exports.reopenQuote = onCall({}, (req) => h.reopenQuote(req.auth, req.data, quoteDeps()));
+exports.reviseQuote = onCall({}, (req) => h.reviseQuote(req.auth, req.data, quoteDeps()));
+exports.discardQuoteDraft = onCall({}, (req) => h.discardQuoteDraft(req.auth, req.data, quoteDeps()));
+exports.deleteQuoteDraft = onCall({}, (req) => h.deleteQuoteDraft(req.auth, req.data, quoteDeps()));
+exports.setQuoteNotes = onCall({}, (req) => h.setQuoteNotes(req.auth, req.data, quoteDeps()));
+exports.quotePdfUrl = onCall({}, (req) => h.quotePdfUrl(req.auth, req.data, quoteDeps()));

@@ -159,24 +159,52 @@ async function getMessage(db, phone, msgId) {
   return s.exists ? s.data() : null;
 }
 
-// Permanently erase one customer: conversation + every message + stored files + the customer record + their appointments.
-// Files go first and are swept again at the end so a media download that was in flight cannot leave anything behind.
+// Permanently erase one customer: conversation + every message + stored files + the customer record + their appointments
+// + (Phase 6) their quotes, every version and every stored quote PDF.
+// Files go first and are swept again at the end so a media download (or a quote being sent) that was in flight cannot
+// leave anything behind.
 async function deleteCustomerData(db, bucket, phone) {
   const convRef = db.collection('conversations').doc(phone);
   const contactRef = db.collection('contacts').doc(phone);
   const [conv, contact] = await Promise.all([convRef.get(), contactRef.get()]);
   if (!conv.exists && !contact.exists) return null;
   const messages = (await convRef.collection('messages').count().get()).data().count;
-  const prefix = `media/${phone}/`;
+  const prefix = `media/${phone}/`, quotePrefix = `quotes/${phone}/`;
   let files = (await bucket.getFiles({ prefix }))[0].length;
+  let quoteFiles = (await bucket.getFiles({ prefix: quotePrefix }))[0].length;
   await bucket.deleteFiles({ prefix, force: true });
+  await bucket.deleteFiles({ prefix: quotePrefix, force: true });
   const appts = await db.collection('appointments').where('phone', '==', phone).get();
   for (let i = 0; i < appts.size; i += 400) { const b = db.batch(); appts.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref)); await b.commit(); }
+  const quoteDocs = async () => (await db.collection('quotes').where('phone', '==', phone).get()).docs;
+  let quotes = 0;
+  for (const d of await quoteDocs()) { await db.recursiveDelete(d.ref); quotes++; }      // each quote and its versions
   await db.recursiveDelete(convRef);                 // the conversation document and all its subcollections
   await contactRef.delete();
+  for (const d of await quoteDocs()) { await db.recursiveDelete(d.ref); quotes++; }      // one created while this ran
   const late = (await bucket.getFiles({ prefix }))[0].length;
   if (late) { files += late; await bucket.deleteFiles({ prefix, force: true }); }
-  return { messages, files, appointments: appts.size };
+  const lateQuoteFiles = (await bucket.getFiles({ prefix: quotePrefix }))[0].length;
+  if (lateQuoteFiles) { quoteFiles += lateQuoteFiles; await bucket.deleteFiles({ prefix: quotePrefix, force: true }); }
+  return { messages, files, appointments: appts.size, quotes, quoteFiles };
+}
+
+// Phase 6: a customer added by staff WITHOUT any message (a phone, email or walk-in enquiry): a New lead with no stage, like a
+// Meta lead before its welcome. If the number is already a customer nothing is changed and { existing: true } is returned.
+// name / location / projectType are copied onto the conversation, as updateContact does, so the Inbox needs no joins.
+async function createCustomer(db, phone, fields, actor) {
+  const convRef = db.collection('conversations').doc(phone);
+  const contactRef = db.collection('contacts').doc(phone);
+  return db.runTransaction(async (tx) => {
+    const [conv, contact] = await Promise.all([tx.get(convRef), tx.get(contactRef)]);
+    if (conv.exists) return { phone, existing: true };
+    const now = FieldValue.serverTimestamp();
+    tx.set(contactRef, { phone, ...fields, ...(contact.exists ? {} : { createdAt: now }), createdBy: actor.id, updatedAt: now }, { merge: true });
+    const denorm = {};
+    for (const k of ['name', 'location', 'projectType']) if (fields[k] != null) denorm[k] = fields[k];
+    tx.set(convRef, { phone, ...denorm, createdAt: now, updatedAt: now });
+    return { phone, existing: false };
+  });
 }
 
 async function getConversation(db, phone) {
@@ -184,4 +212,4 @@ async function getConversation(db, phone) {
   return s.exists ? s.data() : null;
 }
 
-module.exports = { CORRECTION_WINDOW_MS, setConversationStatus, planStatusChange, deleteCustomerData, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };
+module.exports = { CORRECTION_WINDOW_MS, setConversationStatus, planStatusChange, deleteCustomerData, createCustomer, setMediaState, getMessage, updateContact, markRead, storeInbound, storeOutbound, storeFailedOutbound, ensureConversation, applyStatus, getConversation };

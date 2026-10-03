@@ -4,6 +4,8 @@ const store = require('./store');
 const mediaLib = require('./media');
 const appointments = require('./appointments');
 const calendarSync = require('./calendarSync');
+const quotes = require('./quotes');
+const { normalizeLeadPhone } = require('./phone');
 const { verifySignature, parseWebhook, normalizePhone } = require('./whatsapp');
 
 const WINDOW_MS = 24 * 3600 * 1000;
@@ -123,8 +125,8 @@ async function sendReply(auth, data, { db, wa, cfg }) {
   }
 }
 
-const CONTACT_FIELDS = { name: 100, email: 200, location: 100, projectType: 60, budget: 60, source: 60, notes: 5000 };
-const QUOTE_MAX = 1000000;   // whole euros: a manual record of what was quoted, never calculated
+const CONTACT_FIELDS = { name: 100, email: 200, address: 300, location: 100, projectType: 60, budget: 60, source: 60, notes: 5000 };   // address: Phase 6
+const QUOTE_MAX = 1000000;   // whole euros: what was quoted, typed by staff (or confirmed by them when a quote is sent or accepted), never calculated silently
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Whitelist + trim + length-limit. Empty string clears a field (stored as null). Unknown keys are rejected.
@@ -190,8 +192,9 @@ async function deleteCustomer(auth, data, deps) {
   if (!r) throw new HttpsError('not-found', 'Customer not found (already deleted?).');
   // Audit entry with NO personal content: a one-way hash (not reversible to the number), last 3 digits, counts, who, when.
   await db.collection('auditLog').add({ action: 'deleteCustomer', phoneHash: require('crypto').createHash('sha256').update(phone).digest('hex'),
-    phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, by: (auth.token && auth.token.email) || auth.uid, at: require('firebase-admin/firestore').Timestamp.now() });
-  log('info', 'customer deleted', { last3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments });
+    phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, quotes: r.quotes, quoteFiles: r.quoteFiles,
+    by: (auth.token && auth.token.email) || auth.uid, at: require('firebase-admin/firestore').Timestamp.now() });
+  log('info', 'customer deleted', { last3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, quotes: r.quotes });
   await calendarSync.removeEvents(deps, events);                  // never throws: anything Google refuses now is finished by the sweeper
   return { messages: r.messages, files: r.files };
 }
@@ -285,4 +288,37 @@ async function retryCalendarSync(auth, data, deps) {
   return { id: data.id, calendar };
 }
 
-module.exports = { createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
+// ---- Phase 6: customers added without a message, and quotes. The rules live in ./quotes, ./quotePipeline and ./quoteEngine;
+// these wrappers only check who is asking. ----
+// Add a customer (phone, email or walk-in enquiry) as a New lead WITHOUT sending them anything. An existing number is left
+// exactly as it is and opened instead. The number is checked strictly (never guessed), as for Meta leads.
+const NEW_CUSTOMER_FIELDS = ['phone', 'name', 'email', 'address', 'location', 'projectType', 'source', 'notes'];
+async function createCustomer(auth, data, { db, cfg }) {
+  assertStaff(auth, cfg);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpsError('invalid-argument', 'Missing details.');
+  for (const k of Object.keys(data)) if (!NEW_CUSTOMER_FIELDS.includes(k)) throw new HttpsError('invalid-argument', `Unknown field: ${k}`);
+  const { phone: raw, ...rest } = data;
+  const phone = normalizeLeadPhone(raw);
+  if (!phone) throw new HttpsError('invalid-argument', 'That phone number does not look right. Enter the full number, e.g. 085 123 4567 or +44 7911 123456.');
+  const fields = cleanContactFields({ name: null, ...rest });
+  if (!fields.name) throw new HttpsError('invalid-argument', "Enter the customer's name.");
+  return store.createCustomer(db, phone, fields, actorOf(auth));
+}
+const quoteAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps.cfg); return fn(deps, actorOf(auth), data, { uid: auth.uid }); };
+const saveQuoteSettings = quoteAction(quotes.saveSettings);
+const setQuoteNumbering = quoteAction(quotes.setNumbering);
+const createQuote = quoteAction(quotes.create);
+const saveQuoteDraft = quoteAction(quotes.saveDraft);
+const sendQuote = quoteAction(quotes.send);
+const acceptQuote = quoteAction(quotes.accept);
+const declineQuote = quoteAction(quotes.decline);
+const reopenQuote = quoteAction(quotes.reopen);
+const reviseQuote = quoteAction(quotes.revise);
+const discardQuoteDraft = quoteAction(quotes.discardDraft);
+const deleteQuoteDraft = quoteAction(quotes.deleteDraft);
+const setQuoteNotes = quoteAction(quotes.setNotes);
+async function quotePdfUrl(auth, data, deps) { assertStaff(auth, deps.cfg); return quotes.pdfLink(deps, actorOf(auth), data, { signedUrl: mediaLib.signedUrl }); }
+
+module.exports = { createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+  reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
+  createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
