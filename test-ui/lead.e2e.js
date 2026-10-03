@@ -79,7 +79,8 @@ const post = (body, key = KEY) => fetch(FN + '/leadIntake', { method: 'POST', he
   assert.equal(await page.locator('.conv').count(), 1);
   await page.fill('#text', 'Hi John, yes - when suits for a visit?'); await page.press('#text', 'Enter');
   await page.waitForFunction(() => /when suits for a visit/.test(document.getElementById('msgs').innerText));
-  for (let i = 0; i < 50 && graph.length < 2; i++) await sleep(100);
+  // Up to 30 s: on a cold emulator (e.g. straight after another suite) sendReply can start more than 5 s after the click.
+  for (let i = 0; i < 300 && graph.length < 2; i++) await sleep(100);
   assert.equal(graph.length, 2); assert.equal(graph[1].body.type, 'text'); ok('staff can reply normally from the Inbox');
 
   const bad = await (await post({ leadId: 'LEAD0000002', fields: { full_name: 'No Phone', phone_number: '12' } })).json();
