@@ -120,7 +120,7 @@ The order matters: the service account must exist (C) before the calendars can b
 This enables the Calendar, Cloud Scheduler and IAM Credentials APIs. It creates `ek-calendar@elite-kitchens-lead-os.iam.gserviceaccount.com` (no roles, no keys) and lets the functions' runtime account (`812360112616-compute@developer.gserviceaccount.com`) get tokens for it, and nothing else. It is safe to repeat. `./scripts/setup-calendar.sh --check` only shows what is in place.
 
 **D. Share both calendars** (each calendar's Settings > Share with specific people or groups)
-1. `ek-calendar@elite-kitchens-lead-os.iam.gserviceaccount.com`: **Make changes to events**. If that option is greyed out, setting A2 has not applied yet.
+1. `ek-calendar@elite-kitchens-lead-os.iam.gserviceaccount.com`: **Make changes to events**. If that option is greyed out, setting A2 has not applied yet. Afterwards check that it is actually listed under "Share with specific people": a missing share shows up later as "the calendar was not found".
 2. You, your dad and staff: **See all event details** (read-only), on the real calendar.
 
 **E. Each person's phone**
@@ -163,10 +163,10 @@ Optional afterwards: delete the TEST calendar once no appointment points at it.
 | What you see | Likely cause | Fix |
 |---|---|---|
 | Failed: "the calendar is not shared with Elite OS" | The calendar is not shared with `ek-calendar` with "Make changes to events", or Workspace setting A2 has not applied | Share it (D1), then **Retry now** |
-| Failed: "the calendar was not found" | Wrong calendar id | `sync on <correct id>`. Appointments already tried keep the wrong calendar, so cancel and rebook those |
+| Failed: "the calendar was not found" (log code `not_found`, 404) | Most often the calendar is **not shared with `ek-calendar` at all**: Google then answers "not found" rather than "forbidden" (this happened during the rollout). Less often, a wrong calendar id | Check the calendar's sharing (D1) and add `ek-calendar` if it is missing. If the id was wrong: `sync on <correct id>`. Appointments already tried keep the wrong calendar, so cancel and rebook those |
 | Failed: "Google sign-in failed" | The functions may not get tokens for `ek-calendar`, the IAM Credentials API is off, or `GCAL_SERVICE_ACCOUNT` is wrong | `./scripts/setup-calendar.sh`, then **Retry now** |
 | Failed: "Google rejected the event" | Not expected | Check the logs above and report it |
-| "Waiting to sync" for more than about 15 minutes | Google keeps refusing or is unreachable | Check the logs above. The code there matches one of the rows in this table |
+| "Waiting to sync" for more than about 15 minutes | Google keeps refusing or is unreachable | Check the logs above. The code there matches one of the rows in this table. After fixing the cause, a Reschedule or any small edit tries again straight away (Retry now only appears once an appointment is marked failed) |
 | "Calendar sync off" | `GCAL_SYNC=off` | `./scripts/deploy-appointments.sh sync on <id>` |
 | "In Google Calendar" in Elite OS, but missing on a phone | The share was not accepted, the calendar is hidden, or (iPhone) it is not ticked in syncselect | Step E |
 | The backend deploy warns "no sweeper run was logged", and the scheduler status shows code 7 or 16 | Cloud Scheduler may not call `calendarSweep` | Re-run `./scripts/setup-calendar.sh`, then `./scripts/deploy-appointments.sh backend` (it re-checks the sweeper's permissions) |
