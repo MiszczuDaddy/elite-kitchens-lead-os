@@ -1,7 +1,7 @@
 # Phase 6 — Quotes (agreed design)
 
-Status: **M0 (design), M1 (price calculator) and M2 (server side) done.** Nothing is deployed and no screen uses quotes
-yet. This document
+Status: **M0 (design), M1 (price calculator), M2 (server side) and M3 (screens) done.** Nothing is deployed. Sending
+(with the customer PDF) is switched on in M4. This document
 is the specification that the milestones below implement. A rule in it changes only with the owner's approval.
 
 Quotes become a native part of Elite OS: a Quotes section in the side rail, a Quotes block on every customer profile, a
@@ -305,12 +305,12 @@ Notes for running the browser suites on the owner's Windows PC (no test file was
 
 ### M1: the price calculator
 
-Built and tested on 2026-10-03. Nothing deployed and no page loads it yet.
+Built and tested on 2026-10-03. Nothing deployed (the page loads it from M3).
 
 | File | What |
 |---|---|
 | `functions/lib/quoteEngine.js` | The calculator "ek-packages" version 1, and the registry that finds a calculator by id and version |
-| `public/quote-engine.js` | An identical copy for the browser (a test fails if they differ: after changing the original, copy it over). M3 loads it and adds it to the no-cache list in `firebase.json` |
+| `public/quote-engine.js` | An identical copy for the browser (a test fails if they differ: after changing the original, copy it over). Loaded by the page and served with no-cache since M3 |
 | `functions/test/quote-engine.test.js` | 23 tests, part of `npm test` |
 | `functions/test/legacy-quote-app.js` | A frozen copy of the original app's PDF arithmetic and wording (commit `af45091` of its repository), used only as the reference in the tests |
 
@@ -403,6 +403,61 @@ Regression (2026-10-03, after M2): backend 196 of 196 (the 136 tests from before
 tests, the 37 new ones); browser suites `ui` 57/57 (it deletes customers and edits Details through the changed
 functions), `lead` 11/11 (first run, after the harness fix in its own commit), `crm` 14/14, `dnd` 13/13, `conversion`
 10/10, `appointments` 17/17, `theme` 10/10 (Chrome).
+
+### M3: the screens
+
+Built and tested on 2026-10-03. Nothing deployed. Sending stays switched off until M4 builds the customer PDF.
+
+| File | What |
+|---|---|
+| `public/quotes.js` | The Quotes screen (list, one quote, Quote Settings host), the Quotes block in the customer profile, and the accept / decline / reopen / confirm / new-quote dialogs |
+| `public/quote-builder.js` | The form for calculator "ek-packages" v1. It only collects answers and shows the problems the calculator finds; a future builder replaces this file |
+| `public/quote-settings.js` | Quote Settings: prices for new quotes, extras catalogue, VAT, validity, business details, the starting quote number |
+| `public/index.html`, `public/app.css`, `public/app.js` | Quotes in the side rail (and the phone header); the Quotes block and the Address field in Details; "Add the customer without sending a message" in New conversation; routing; the dialogs |
+| `firebase.json` | The four new scripts are served with no-cache, like the others |
+| `test-ui/quotes.e2e.js` | 19 browser checks, desktop and phone |
+
+What staff see:
+
+* **Quotes** (side rail; on a phone, the icon in the Inbox header): Open / Draft / Sent / Expired / Accepted / Declined / All,
+  with counts, and search by name, number or phone. Each row shows the number and version, the customer, the status, a
+  line such as "Sent 3 Oct · valid until 2 Nov" or "Expired", and the price (the accepted option, else "up to" the dearest).
+  **New quote** picks a customer, or adds a new one without messaging them.
+* **A quote**: a draft shows the builder with live totals (from the same calculator the server uses) and every problem
+  next to its field; Save draft is the only way anything is stored. A sent, accepted or declined quote shows what the
+  customer was sent (option cards, what is included and not included, the customer on the quote, the dates) and, folded
+  away, the internal figures for re-entering the job in the old app for its invoice. On the right: totals, actions,
+  customer (with their stage and pipeline value), sent versions with their PDFs, internal notes, and activity (what the quote
+  did to the pipeline, and who did what).
+* **Actions**: Save draft, Send (off until M4), Discard draft, Delete quote (never sent only), Mark accepted, Mark declined,
+  Revise, Send again (off until M4), Reopen.
+* **Accept** asks which option the customer chose and prefills the pipeline value with it (empty = leave it as it is). It
+  says exactly what will happen, e.g. "Quinn Quoted will move from Quoted to Won. Pipeline value set to €2,225." For a Closed
+  customer an unticked "Also move … to Won" box is shown; an expired quote is flagged but can still be accepted.
+* **Decline** takes an optional internal reason and says the stage and pipeline value do not change.
+* **Reopen** offers "Move … back from Won to …" and "Put the pipeline value back" only when they apply (this quote moved them
+  and nothing changed since); within 5 minutes the move back is a correction.
+* **The customer profile** gets a Quotes block under Appointments (number, status, price, a line about it) with Create
+  quote; and an Address field under Contact ("Printed on quotes").
+* **New conversation** gets "Add the customer without sending a message": phone, name, and optionally email, address,
+  location and source.
+* Leaving a quote or Quote Settings with unsaved changes asks first, also when closing the browser tab.
+* The dialogs read the customer's stage and pipeline value fresh when they open, so what they say is never out of date.
+
+Found and fixed while building M3 (each now has a test):
+
+* The calculator refused the price list it had saved itself when catalogue items had no key (an empty key is now the same
+  as none); creating a quote from such settings gave an internal error. Found by the browser test; a server test and a
+  calculator test were added.
+* Clicking Save straight after typing could be lost: the field's change event redrew the buttons mid-click. The buttons
+  are now built once per state.
+
+One existing browser check was updated on purpose: `appointments.e2e.js` asserted that "Quotes" was still listed under
+"Coming later" in the side rail. Quotes is now in the rail itself, so the check asserts "Projects" is still listed instead
+(as strict as before). No other existing test changed.
+
+Regression (2026-10-03, after M3): backend 197 of 197; browser suites `ui` 57/57, `lead` 11/11, `crm` 14/14, `dnd` 13/13,
+`conversion` 10/10, `appointments` 17/17, `quotes` 19/19 (new), `theme` 10/10 (Chrome). All on the first run.
 
 ## Deploy and rollback (prepared in M5)
 

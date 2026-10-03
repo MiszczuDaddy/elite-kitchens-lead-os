@@ -170,6 +170,7 @@ function stopListening() {
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
   if (window.PIPE) PIPE.stop();
   if (window.APPT) APPT.stop();
+  if (window.QUOTES) QUOTES.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
 }
@@ -294,6 +295,15 @@ function renderConversationStatus() {
 
 // ---------- routing ----------
 function routeFromHash() {
+  // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
+  if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
+  if (window.QUOTES && QUOTES.handles(location.hash)) {
+    if (S.selected) closeConversation(true);
+    if (window.PIPE && PIPE.active) PIPE.hide();
+    if (window.APPT && APPT.active) APPT.hide();
+    QUOTES.show(location.hash); return;
+  }
+  if (window.QUOTES && QUOTES.active) QUOTES.hide();
   if (location.hash === '#appointments' && window.APPT) { if (S.selected) closeConversation(true); if (window.PIPE && PIPE.active) PIPE.hide(); APPT.show(); return; }
   if (window.APPT && APPT.active) APPT.hide();
   if (location.hash === '#pipeline' && window.APPT) APPT.origin = false;
@@ -304,7 +314,7 @@ function routeFromHash() {
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
@@ -318,6 +328,7 @@ function closeConversation(fromHash) {
   setView(); renderList();
 }
 $('back').onclick = () => {
+  if (window.QUOTES && QUOTES.backTo) { const h = QUOTES.backTo; QUOTES.backTo = null; location.hash = h; return; }   // came from a quote: go back to it
   if (window.APPT && APPT.origin) { APPT.origin = false; location.hash = '#appointments'; return; }   // came from Appointments: go back to it
   if (window.PIPE && PIPE.origin) { PIPE.origin = false; location.hash = '#pipeline'; return; }   // came from the pipeline: go back to it
   closeConversation(false);
@@ -328,6 +339,7 @@ function openConversation(id, fromHash) {
   if (S.selected === id) { setView(); return; }
   if (!fromHash && window.PIPE) PIPE.origin = false;      // opened from the Inbox list, not from the pipeline
   if (!fromHash && window.APPT) APPT.origin = false;
+  if (!fromHash && window.QUOTES) QUOTES.backTo = null;
   rememberDrafts();
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
@@ -729,8 +741,38 @@ $('new-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- add a customer without messaging (Phase 6) ----------
+// Phone, email and walk-in enquiries: the customer is added as a New lead and nothing is sent to them. If the number is already
+// a customer they are opened instead. onDone(phone, existing) lets Quotes carry on, e.g. by creating their quote.
+const custDlg = $('cust-dlg');
+let custDone = null;
+function openAddCustomer(prefill = {}, onDone = null) {
+  custDone = onDone;
+  $('c-phone').value = prefill.phone || ''; $('c-name').value = prefill.name || '';
+  for (const k of ['email', 'address', 'location', 'source']) $('c-' + k).value = '';
+  $('c-err').textContent = ''; $('c-go').disabled = false;
+  if (typeof custDlg.showModal === 'function') custDlg.showModal(); else custDlg.setAttribute('open', '');
+  (prefill.phone ? (prefill.name ? $('c-email') : $('c-name')) : $('c-phone')).focus();
+}
+$('n-nomsg').onclick = () => { const phone = $('n-phone').value, name = $('n-name').value; dlg.close(); openAddCustomer({ phone, name }); };
+$('c-cancel').onclick = () => { custDlg.close(); custDone = null; };
+$('cust-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const data = { phone: $('c-phone').value, name: $('c-name').value };
+  for (const k of ['email', 'address', 'location', 'source']) if ($('c-' + k).value.trim()) data[k] = $('c-' + k).value;
+  $('c-err').textContent = ''; $('c-go').disabled = true;
+  try {
+    const r = (await call('createCustomer')(data)).data;
+    custDlg.close();
+    const done = custDone; custDone = null;
+    if (done) { done(r.phone, r.existing); return; }
+    if (r.existing) toast('That number is already a customer: opening them. Nothing was changed.');
+    openConversation(r.phone);
+  } catch (err) { $('c-err').textContent = errText(err); $('c-go').disabled = false; }
+});
+
 // ---------- customer details panel ----------
-const DETAIL_FIELDS = ['name', 'email', 'location', 'projectType', 'budget', 'quoteValue', 'source', 'notes'];
+const DETAIL_FIELDS = ['name', 'email', 'location', 'address', 'projectType', 'budget', 'quoteValue', 'source', 'notes'];
 const detailsEl = () => $('details');
 function detailsPref() { try { return localStorage.getItem('ek.details'); } catch (e) { return null; } }
 function setDetailsPref(v) { try { localStorage.setItem('ek.details', v); } catch (e) { /* private mode */ } }
@@ -754,6 +796,7 @@ $('details-close').onclick = () => setDetailsOpen(false, true);
 function watchContact(id) {
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
   if (window.APPT) APPT.watchCustomer(id);           // the customer's appointments, shown above the details form
+  if (window.QUOTES) QUOTES.watchCustomer(id);       // and their quotes (Phase 6)
   S.contact = null; S.dirty = false;
   setDetailMsg('');
   $('profile-body').scrollTop = 0;

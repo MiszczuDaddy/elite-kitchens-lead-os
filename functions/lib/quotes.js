@@ -164,7 +164,11 @@ async function create({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (!settings.exists) throw refused('Set up Quote Settings (prices and business details) before making quotes.');
     const s = settings.data();
     const engineRef = { ...QE.CURRENT };
-    const answers = data.answers === undefined ? QE.get(engineRef).newAnswers(s.priceList) : data.answers;
+    let answers = data.answers;
+    if (answers === undefined) {
+      try { answers = QE.get(engineRef).newAnswers(s.priceList); }
+      catch (e) { if (e.name === 'QuoteInputError') throw refused('Quote Settings are incomplete: check the prices in Quote Settings.'); throw e; }
+    }
     const p = priced(engineRef, answers, s.priceList, s.vatRate);
     const c = counter.exists ? counter.data() : {};
     let number = null, ref_, testNumber = null;

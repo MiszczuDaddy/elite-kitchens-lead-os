@@ -353,6 +353,12 @@ test('the price list: every price is required; catalogue items need a name; manu
     'drawerBoxes.cemux', 'drawerBoxes.blum', 'glazing.small', 'glazing.large']);
   assert.deepStrictEqual(fieldsOf(eng.validatePriceList({ ...PL, extras: [{ name: '', price: 5 }, { key: 'Bad Key!', name: 'X', price: 1 }, { name: 'Y' }] })), ['extras.0.name', 'extras.1.key', 'extras.2.price']);
   assert.deepStrictEqual(fieldsOf(eng.validatePriceList({ ...PL, vat: 13.5 })), ['vat']);
+  // What it returns is accepted again as it is: catalogue items without a key come back with key '' (found by the M3 browser test).
+  const noKeys = eng.validatePriceList({ ...PL, extras: [{ name: 'Bin', unit: 'per unit', price: 30 }, { name: 'Pocket door', manual: true }] });
+  assert.ok(noKeys.ok);
+  assert.deepStrictEqual(eng.validatePriceList(noKeys.priceList), noKeys);
+  assert.ok(eng.validatePriceList(r.priceList).ok);
+  assert.ok(eng.newAnswers(noKeys.priceList));
   throwsInput(() => eng.calculate(answers(), { ...PL, glazing: {} }, VAT), 'glazing.small');
 });
 

@@ -118,6 +118,14 @@ test('Quote Settings: every price, the VAT rate, validity and business name are 
   assert.equal(s.business.web, 'www.example.com');
 });
 
+test('a quote can be made from Quote Settings saved the way the settings screen saves them (catalogue items without keys)', async () => {
+  await seed();
+  await run(Q.saveSettings, { ...SETTINGS, priceList: { ...PRICE_LIST, extras: [{ name: 'Bin', unit: 'per unit', price: 30 }, { name: 'Pocket door', manual: true }] } });
+  const r = await run(Q.create, { phone: P, requestId: rid() });
+  assert.equal((await quote(r.id)).status, 'draft');
+  assert.deepEqual((await settingsDoc()).priceList.extras.map((e) => e.key), ['', '']);
+});
+
 test('a quote needs Quote Settings and an existing customer; nothing is created otherwise', async () => {
   await seed();
   await rejects(make(), 'failed-precondition', /Quote Settings/);

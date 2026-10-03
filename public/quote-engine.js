@@ -195,7 +195,7 @@
     else (p.extras || []).forEach((e, i) => {
       const f = `extras.${i}`;
       const x = c.onlyKeys(e, ['key', 'name', 'unit', 'price', 'manual', 'free'], f);
-      const key = x.key == null ? '' : (typeof x.key === 'string' && /^[a-z0-9_-]{1,40}$/.test(x.key) ? x.key : c.fail(`${f}.key`, 'Bad catalogue key.') ?? '');
+      const key = x.key == null || x.key === '' ? '' : (typeof x.key === 'string' && /^[a-z0-9_-]{1,40}$/.test(x.key) ? x.key : c.fail(`${f}.key`, 'Bad catalogue key.') ?? '');
       const name = c.text(x.name, LIMIT.name, `${f}.name`, 'Name');
       if (name === '') c.fail(`${f}.name`, 'Every catalogue item needs a name.');
       const manual = c.bool(x.manual, `${f}.manual`), free = c.bool(x.free, `${f}.free`);

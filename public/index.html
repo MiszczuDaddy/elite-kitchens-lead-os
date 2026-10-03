@@ -40,9 +40,13 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
       <span class="nav-label">Appointments</span>
     </a>
+    <a class="rail-item" href="#quotes" id="nav-quotes" title="Quotes">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8.5L19 7.5V21H6z"/><path d="M14 3v5h5M9.5 12.5h6M9.5 16.5h6"/></svg>
+      <span class="nav-label">Quotes</span>
+    </a>
     <details class="nav-future">
       <summary>Coming later <svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary>
-      <div class="planned-areas"><span>Leads</span><span>Quotes</span><span>Projects</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
+      <div class="planned-areas"><span>Leads</span><span>Projects</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
     </details>
     <div class="rail-spacer"></div>
     <button id="signout" class="rail-item rail-out" title="Sign out" aria-label="Sign out">
@@ -57,6 +61,7 @@
         <button id="new-btn" class="icon-btn new-conversation" aria-label="New conversation" title="New conversation"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
         <button id="to-pipeline" class="icon-btn only-mobile" aria-label="Open pipeline" title="Pipeline"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h4v14H4z"/><path d="M10 5h4v9h-4z"/><path d="M16 5h4v5h-4z"/></svg></button>
         <button id="to-appointments" class="icon-btn only-mobile" aria-label="Open appointments" title="Appointments"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
+        <button id="to-quotes" class="icon-btn only-mobile" aria-label="Open quotes" title="Quotes"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8.5L19 7.5V21H6z"/><path d="M14 3v5h5M9.5 12.5h6M9.5 16.5h6"/></svg></button>
         <button id="signout-m" class="icon-btn only-mobile" aria-label="Sign out" title="Sign out"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v16h5M9 12h12m-5-5 5 5-5 5"/></svg></button>
       </div>
     </header>
@@ -130,6 +135,34 @@
     </div>
   </main>
 
+  <main id="quotes" class="quotes-pane" aria-label="Quotes">
+    <header class="quotes-head">
+      <button id="q-back" class="icon-btn" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+      <div class="quotes-titles"><h1 id="q-title">Quotes</h1><div id="q-subtitle" class="q-subtitle"></div></div>
+      <div id="q-head-actions" class="quotes-actions">
+        <button id="q-new" type="button" class="btn btn-primary btn-sm">New quote</button>
+        <a id="q-settings-link" class="btn btn-ghost btn-sm" href="#quotes/settings">Quote Settings</a>
+      </div>
+    </header>
+    <div id="q-scroll" class="quotes-scroll">
+      <div id="q-toast" class="toast q-toast" role="status" hidden></div>
+      <div id="q-setup" class="q-setup" role="status" hidden></div>
+      <section id="q-list-view" aria-label="All quotes">
+        <div class="q-filters">
+          <div id="q-filter" class="seg q-filter" role="group" aria-label="Show quotes">
+            <button type="button" data-filter="open" aria-pressed="true">Open</button><button type="button" data-filter="draft" aria-pressed="false">Draft</button><button type="button" data-filter="sent" aria-pressed="false">Sent</button><button type="button" data-filter="expired" aria-pressed="false">Expired</button><button type="button" data-filter="accepted" aria-pressed="false">Accepted</button><button type="button" data-filter="declined" aria-pressed="false">Declined</button><button type="button" data-filter="all" aria-pressed="false">All</button>
+          </div>
+          <div class="search q-search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+            <input id="q-search" type="search" placeholder="Search quotes…" autocomplete="off" aria-label="Search quotes"></div>
+        </div>
+        <div id="q-list" class="q-list" role="list" aria-label="Quotes"></div>
+        <p id="q-list-note" class="appts-note" hidden></p>
+      </section>
+      <section id="q-quote-view" aria-label="Quote" hidden></section>
+      <section id="q-settings-view" aria-label="Quote Settings" hidden></section>
+    </div>
+  </main>
+
   <main class="thread-pane" aria-label="Conversation">
     <div id="thread-empty" class="thread-empty">
       <div>
@@ -187,12 +220,18 @@
       <div class="d-appts-head"><h3 id="d-appts-title">Appointments</h3><button id="d-appt-new" type="button" class="btn btn-ghost btn-sm">Book appointment</button></div>
       <div id="d-appts-list"></div>
       <div id="d-appts-msg" class="d-msg" role="status"></div>
+    </section><section id="d-quotes" class="d-appts d-quotes" aria-labelledby="d-quotes-title">
+      <div class="d-appts-head"><h3 id="d-quotes-title">Quotes</h3><button id="d-quote-new" type="button" class="btn btn-ghost btn-sm">Create quote</button></div>
+      <div id="d-quotes-list"></div>
+      <div id="d-quotes-msg" class="d-msg" role="status"></div>
     </section><form id="details-form" class="details-form" autocomplete="off" novalidate>
       <fieldset><legend>Contact</legend>
       <div class="d-phone"><span class="d-label">Phone</span><span id="d-phone" class="d-phone-val"></span></div>
       <label>Name<input id="d-name" name="name" maxlength="100"></label>
       <label>Email<input id="d-email" name="email" type="email" maxlength="200" inputmode="email"></label>
       <label>Location<input id="d-location" name="location" maxlength="100" placeholder="e.g. Swords"></label>
+      <label>Address<input id="d-address" name="address" maxlength="300" placeholder="e.g. 12 Main Street, Swords, K67 AB12" aria-describedby="d-address-help"></label>
+      <p class="hint field-hint" id="d-address-help">Printed on quotes.</p>
       </fieldset><fieldset><legend>Project</legend>
       <label>Project type
         <select id="d-projectType" name="projectType">
@@ -248,6 +287,7 @@
     <label>WhatsApp number<input id="n-phone" inputmode="tel" placeholder="+353 85 123 4567" required></label>
     <label>First name<input id="n-name" placeholder="Customer first name" required></label>
     <div id="n-err" class="dlg-err" role="alert"></div>
+    <p class="hint dlg-alt">Phone, email or walk-in enquiry? <button type="button" id="n-nomsg" class="linkbtn">Add the customer without sending a message</button></p>
     <div class="dlg-actions">
       <button type="button" id="n-cancel" class="btn btn-ghost">Cancel</button>
       <button type="submit" id="n-go" class="btn btn-primary">Send template</button>
@@ -292,6 +332,97 @@
   </form>
 </dialog>
 
+<dialog id="cust-dlg" class="dlg">
+  <form id="cust-form" autocomplete="off">
+    <h2>Add customer</h2>
+    <p class="hint">For phone, email and walk-in enquiries. They are added as a New lead and nothing is sent to them.</p>
+    <label>Phone number<input id="c-phone" inputmode="tel" placeholder="085 123 4567" required></label>
+    <label>Name<input id="c-name" maxlength="100" required></label>
+    <label>Email <span class="label-note">(optional)</span><input id="c-email" type="email" maxlength="200" inputmode="email"></label>
+    <label>Address <span class="label-note">(optional, printed on quotes)</span><input id="c-address" maxlength="300"></label>
+    <div class="appt-grid">
+      <label>Location <span class="label-note">(optional)</span><input id="c-location" maxlength="100" placeholder="e.g. Swords"></label>
+      <label>Source<select id="c-source"><option value="">—</option><option>WhatsApp</option><option>Meta Ads</option><option>Website</option><option>Referral</option><option>Other</option></select></label>
+    </div>
+    <div id="c-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="c-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="c-go" class="btn btn-primary">Add customer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="nq-dlg" class="dlg">
+  <form id="nq-form" autocomplete="off">
+    <h2>New quote</h2>
+    <p class="hint">Choose the customer. Their details are filled in from Elite OS.</p>
+    <label>Customer<input id="nq-search" type="search" placeholder="Name, number or location" aria-controls="nq-results"></label>
+    <div id="nq-results" class="nq-results" role="list" aria-label="Customers"></div>
+    <p class="hint dlg-alt">Not in Elite OS yet? <button type="button" id="nq-add" class="linkbtn">Add a new customer (no message sent)</button></p>
+    <div id="nq-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions"><button type="button" id="nq-cancel" class="btn btn-ghost">Cancel</button></div>
+  </form>
+</dialog>
+
+<dialog id="qa-dlg" class="dlg">
+  <form id="qa-form" autocomplete="off">
+    <h2>Mark quote accepted</h2>
+    <p id="qa-who" class="hint"></p>
+    <p id="qa-expired" class="q-warn" hidden></p>
+    <fieldset class="q-choice"><legend>Which option did the customer choose?</legend><div id="qa-options"></div></fieldset>
+    <label class="q-check" id="qa-closed-row" hidden><input type="checkbox" id="qa-move-closed"> <span id="qa-closed-text"></span></label>
+    <label>Pipeline value<input id="qa-value" inputmode="decimal" maxlength="12" aria-describedby="qa-value-help"></label>
+    <p class="hint field-hint" id="qa-value-help">Leave it empty to keep the current value.</p>
+    <p id="qa-effect" class="q-effect"></p>
+    <div id="qa-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="qa-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="qa-go" class="btn btn-primary">Mark accepted</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="qd-dlg" class="dlg">
+  <form id="qd-form" autocomplete="off">
+    <h2>Mark quote declined</h2>
+    <p id="qd-who" class="hint"></p>
+    <label>Reason <span class="label-note">(optional, internal)</span><input id="qd-reason" maxlength="300" placeholder="e.g. Went with another company"></label>
+    <p class="q-effect">The customer's stage and pipeline value do not change. If the whole project is lost, move them to Closed yourself. A declined quote can be reopened or revised later.</p>
+    <div id="qd-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="qd-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="qd-go" class="btn btn-primary">Mark declined</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="qr-dlg" class="dlg">
+  <form id="qr-form" autocomplete="off">
+    <h2>Reopen quote</h2>
+    <p id="qr-who" class="hint"></p>
+    <label class="q-check" id="qr-move-row" hidden><input type="checkbox" id="qr-move" checked> <span id="qr-move-text"></span></label>
+    <label class="q-check" id="qr-value-row" hidden><input type="checkbox" id="qr-value" checked> <span id="qr-value-text"></span></label>
+    <p id="qr-effect" class="q-effect"></p>
+    <div id="qr-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="qr-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="qr-go" class="btn btn-primary">Reopen quote</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="qc-dlg" class="dlg">
+  <form id="qc-form" autocomplete="off">
+    <h2 id="qc-title"></h2>
+    <p id="qc-text" class="hint"></p>
+    <div id="qc-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="qc-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="qc-go" class="btn btn-danger"></button>
+    </div>
+  </form>
+</dialog>
+
 <!-- Firebase config is served automatically by Firebase Hosting (public identifiers, not secrets). -->
 <script src="/__/firebase/10.14.1/firebase-app-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-auth-compat.js"></script>
@@ -303,5 +434,9 @@
 <script src="/app.js"></script>
 <script src="/pipeline.js"></script>
 <script src="/appointments.js"></script>
+<script src="/quote-engine.js"></script>
+<script src="/quote-builder.js"></script>
+<script src="/quote-settings.js"></script>
+<script src="/quotes.js"></script>
 </body>
 </html>
