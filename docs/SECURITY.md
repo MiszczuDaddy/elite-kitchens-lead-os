@@ -9,6 +9,9 @@
 | Receive WhatsApp events | Meta only | `X-Hub-Signature-256` HMAC with the app secret; verify token for the handshake; other phone numbers' events ignored |
 | Customer photos/files | Staff, via 10-minute signed links | Storage rules deny ALL browser reads/writes under `media/`; `mediaUrl` checks staff + that the path belongs to that conversation |
 | Uploads to send | Staff, own folder, create-only, <=100 MB | Storage rules; `sendMedia` re-validates type/size/path, checks the 24h window, then moves the file into private `media/` |
+| Appointments (Phase 5) | Staff | Read through the same staff-only rules (no browser writes); book/reschedule/cancel/retry through callables that run `assertStaff` and hold no WhatsApp secrets |
+| Write to the shared Google calendar (Phase 5) | Elite OS only, via `ek-calendar` | Keyless: the functions' runtime account gets 1-hour tokens for `ek-calendar` (Token Creator on that account only), `calendar.events` scope; `ek-calendar` has no project roles and no keys; the calendar is shared for editing with it alone, people get read-only |
+| Run the calendar sweeper (Phase 5) | Cloud Scheduler only | `calendarSweep` is not public; `deploy-appointments.sh backend` verifies it (`docs/APPOINTMENTS.md`) |
 
 ## Review results (2026-09-30)
 - Every function has an auth guard (checked programmatically: webhook = HMAC, claimAccess = allowlist, all 7 others = assertStaff).

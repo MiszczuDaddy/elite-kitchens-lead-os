@@ -1,7 +1,8 @@
 # Deployment notes (Firebase project `elite-kitchens-lead-os`)
 
 Deployed from Google Cloud Shell, from a clone of the GitHub repo (`cd ~/elite-kitchens-lead-os && git pull`), using the scripts in
-`scripts/` (`deploy-preview.sh`, `deploy-lead-intake.sh`, `deploy-crm.sh`; details below and in `docs/LEAD_INTAKE.md`, `docs/CRM_PIPELINE.md`).
+`scripts/` (`deploy-preview.sh`, `deploy-lead-intake.sh`, `deploy-crm.sh`, `deploy-appointments.sh`; details below and in `docs/LEAD_INTAKE.md`,
+`docs/CRM_PIPELINE.md`, `docs/APPOINTMENTS.md`).
 The scripts run `npm --prefix functions install --omit=dev` and `firebase deploy` themselves; Firebase sign-in in Cloud Shell is
 `firebase login --no-localhost`. Live at https://elite-kitchens-lead-os.web.app
 
@@ -26,7 +27,8 @@ The scripts run `npm --prefix functions install --omit=dev` and `firebase deploy
 - WhatsApp secrets (Secret Manager): WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN. All hold real values: the placeholder
   versions were destroyed and the app secret and verify token rotated on 2026-09-30 (`docs/SECRET_ROTATION.md`).
   Update a secret: `firebase functions:secrets:set NAME`, then redeploy functions.
-- `functions/.env.elite-kitchens-lead-os` (gitignored): ALLOWED_EMAILS, WHATSAPP_PHONE_NUMBER_ID.
+- `functions/.env.elite-kitchens-lead-os` (gitignored): ALLOWED_EMAILS, WHATSAPP_PHONE_NUMBER_ID, and from Phase 5 GCAL_SYNC,
+  GCAL_CALENDAR_ID, GCAL_SERVICE_ACCOUNT (written by `scripts/deploy-appointments.sh`).
 - Container image cleanup policy: 1 day (keeps Artifact Registry cost ~0).
 
 ## Webhook cutover (2026-09-30): DONE, Chatwoot no longer receives WhatsApp
@@ -59,3 +61,14 @@ Deploy from Cloud Shell, with the clone on `main` (the `phase-2-inbox` branch is
 - Secret versions: `node scripts/secret-cleanup.js` (plan) / `--apply`; it reads the Cloud Functions records and refuses to run if it cannot see what is in use.
 - Retention: `./scripts/apply-retention.sh` (24 months for media, 1 day for abandoned uploads).
 - Firebase Admin 14 is modular-only: use `getFirestore()/getAuth()/getStorage()`, not `admin.firestore()`.
+
+## Phase 5 deploys (`scripts/deploy-appointments.sh`)
+Full steps, one-time Google setup and troubleshooting: `docs/APPOINTMENTS.md`. Deploy from a clone on `phase-5-appointments` until it is merged.
+- One-time: `./scripts/setup-calendar.sh` (Calendar, Cloud Scheduler and IAM Credentials APIs; service account `ek-calendar` with no roles
+  and no keys; Token Creator on it for the functions' account only). The calendars are created and shared by hand.
+- Stages, in order: `backend` (sync off) → `preview` (channel `phase5`) → `sync on <TEST id>` → `sync on <real id>` → `live` after approval.
+  `sync off` is the kill switch. Each functions stage saves the revisions it replaces; `./scripts/rollback-appointments.sh` restores them.
+- The 4 new appointment callables get the `allUsers` invoker grant (see item 2 above). `calendarSweep` must stay private: the backend
+  stage checks it and test-runs it through Cloud Scheduler.
+- Do not use `deploy-preview.sh` for normal deploys from now on: it deploys every function and makes all of them public, including
+  `calendarSweep`. If it is ever needed (restoring an older tag), follow `docs/RESTORE.md`, which makes the sweeper private again.

@@ -2,6 +2,8 @@
 
 A simple pipeline on top of the existing customers and conversations. No new collections, no new indexes, no rule changes, no migration.
 
+> Phase 5 update: booking an appointment for a **New lead** moves them to **Booked** with exactly the same rules as a manual move (the Booked date is recorded and the 5-minute correction applies). Booked, Quoted, Won and Closed customers are left alone, and rescheduling or cancelling never changes the stage. See `docs/APPOINTMENTS.md`.
+
 ## The pipeline
 
 New lead → Booked → Quoted → Won → Closed.

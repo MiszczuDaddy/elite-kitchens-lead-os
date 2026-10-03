@@ -5,7 +5,7 @@ WhatsApp Cloud API**, with no Chatwoot in the loop.
 
     Customer WhatsApp <-> Meta Cloud API <-> Cloud Function (webhook) <-> Firestore <-> web UI
 
-Not in Phase 1 scope: quotes, appointments, AI agents. Added since: media downloads (Phase 2), Lead Ads via Make.com (Phase 3), pipeline / CRM (Phase 4).
+Not in Phase 1 scope: quotes, appointments, AI agents. Added since: media downloads (Phase 2), Lead Ads via Make.com (Phase 3), pipeline / CRM (Phase 4), appointments with a one-way Google Calendar copy (Phase 5).
 
 ## Stack (all Firebase, one project)
 | Piece | Firebase product |
@@ -15,6 +15,7 @@ Not in Phase 1 scope: quotes, appointments, AI agents. Added since: media downlo
 | Messages / contacts | Firestore |
 | Public Meta webhook + send actions | Cloud Functions (2nd gen, `europe-west1`) |
 | Meta credentials | Secret Manager (via `firebase functions:secrets:set`) |
+| Appointments on staff phones (Phase 5) | Google Calendar: a shared calendar Elite OS writes to with a keyless service account |
 
 `https://<project>.web.app/webhook` is the public webhook URL (a Hosting rewrite to the function).
 
@@ -34,6 +35,8 @@ Not in Phase 1 scope: quotes, appointments, AI agents. Added since: media downlo
     contacts/{phone}
     conversations/{phone}                  name, lastMessage, lastInboundAt, updatedAt
     conversations/{phone}/messages/{wamid} direction, type, body, media, status, error, createdAt
+    appointments/{id}                      phone, type, start, end, location, notes, status, history, sync.google (Phase 5)
+    calendarCleanup/{eventId}              calendar events still to remove after a customer was deleted (Phase 5)
 
 `type` and `media` are already in place for images / PDFs / video / voice notes in Phase 2.
 
@@ -43,11 +46,15 @@ Delivered on the branch: multi-customer inbox (search, unread counts, thread, re
 automatic download + display of incoming photos/documents/voice notes/video, sending attachments, delivery ticks, phone layout.
 See `docs/PHASE2_PROGRESS.md`, `docs/SECURITY.md`, `docs/DATA_CONTROLS.md`, `docs/SECRET_ROTATION.md`, `docs/RESTORE.md`, `DEPLOY.md`.
 Phase 3 (Meta lead intake): `docs/LEAD_INTAKE.md`. Phase 4 (pipeline / CRM): `docs/CRM_PIPELINE.md`.
+Phase 5 (appointments + Google Calendar, setup, rollout, rollback): `docs/APPOINTMENTS.md`.
 
 ## Tests
-    npm test          # 100 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules, lead intake, pipeline)
+    npm test          # 136 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules, lead intake,
+                      # pipeline, appointments, Google Calendar sync against a local fake Calendar)
     npm run test:ui   # 57-check full-stack test: real page in Chromium + real functions + Auth/Firestore emulators
                       # + mocked Meta API (needs Java and Playwright; set NODE_PATH if Playwright is installed globally)
+    bash test-ui/run.sh <suite>   # the other browser suites: lead.e2e.js (11 checks), crm.e2e.js (14), dnd.e2e.js (13),
+                                  # conversion.e2e.js (10), theme.e2e.js (10), appointments.e2e.js (17)
 
 Older notes:
     npm install && npm --prefix functions install
