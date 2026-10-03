@@ -1,7 +1,7 @@
 # Phase 6 — Quotes (agreed design)
 
-Status: **M0, design only.** Nothing described here is built yet. This document is the specification that the milestones
-below implement. A rule in it changes only with the owner's approval.
+Status: **M0 (design) and M1 (price calculator) done.** Nothing is deployed and no screen uses quotes yet. This document
+is the specification that the milestones below implement. A rule in it changes only with the owner's approval.
 
 Quotes become a native part of Elite OS: a Quotes section in the side rail, a Quotes block on every customer profile, a
 quote builder, a professional customer PDF, and explicit rules for how quotes move customers through the pipeline.
@@ -77,17 +77,20 @@ a new calculator that produces the same kind of price sheet. Each quote records 
 
 ### The price sheet
 
-What the calculator returns, and the only pricing information the rest of Elite OS reads:
+What the calculator returns, and the only pricing information the rest of Elite OS reads (built in M1):
 
-* the calculator's name and version, currency (EUR) and the VAT rate used;
-* one entry per offered option: key, name (Essential, Premium, Premium Plus), price excluding VAT, VAT, and price
-  including VAT in whole euros, exactly as printed on today's PDF (rounded to the nearest euro; a €0 price stays €0,
-  decision 11);
-* the dearest option;
-* the customer-facing wording for the document: the specification lines of each option, "In your kitchen", "Work
-  included" and "Not included". The calculator writes these because only it understands its answers.
+* `engine` (`{ id: 'ek-packages', version: 1 }`), `currency` (EUR) and `vatRate`;
+* `options`: one entry per offered option, in the order Essential, Premium, Premium Plus: `key`, `name`, `exVat` (to the
+  cent), `exVatWhole` and `incVat` (whole euros, exactly as printed on today's PDF: rounded to the nearest euro, half a
+  euro up; a €0 price stays €0, decision 11), `lines` (the option card's wording) and `breakdown` (amounts only, for
+  staff: cabinets, top box cabinets, drawer boxes, Premium Plus's own extras);
+* `dearest`: the key of the option with the highest total including VAT (`null` when no option is offered);
+* `shared`: the worktop, glazed doors and extras amounts, which every option includes;
+* `document`: the rest of the customer-facing wording: `facts`, `inKitchen`, `workIncluded`, `notIncluded`, `showExVat`.
+  The calculator writes this because only it understands its answers.
 
 It never contains door, top box or drawer counts, or any per-unit price, so they cannot leak onto a document.
+Money is worked out exactly (whole cents, quantities in hundredths), never with floating-point sums.
 
 ## Data
 
@@ -297,6 +300,57 @@ Notes for running the browser suites on the owner's Windows PC (no test file was
 * `lead.e2e.js` check 9 failed once and passed on the next run: the `sendReply` function started more than 5 seconds
   after the click on a cold emulator (the test waits 5 seconds), then ran in 11 ms. A timing sensitivity of the
   harness on this PC, not an Elite OS fault. Left unchanged.
+
+### M1: the price calculator
+
+Built and tested on 2026-10-03. Nothing deployed and no page loads it yet.
+
+| File | What |
+|---|---|
+| `functions/lib/quoteEngine.js` | The calculator "ek-packages" version 1, and the registry that finds a calculator by id and version |
+| `public/quote-engine.js` | An identical copy for the browser (a test fails if they differ: after changing the original, copy it over). M3 loads it and adds it to the no-cache list in `firebase.json` |
+| `functions/test/quote-engine.test.js` | 23 tests, part of `npm test` |
+| `functions/test/legacy-quote-app.js` | A frozen copy of the original app's PDF arithmetic and wording (commit `af45091` of its repository), used only as the reference in the tests |
+
+* **What it offers:** `validate` (cleans the builder's answers and lists any problem in plain words), `calculate`
+  (answers + price list + VAT rate → price sheet), `sendProblems` (what stops a quote being sent, e.g. no option),
+  `newAnswers` (a new quote from the price list) and `validatePriceList` (Quote Settings).
+* **Answers** (ek-packages v1): doors, top boxes and drawers; for each option whether it is offered, its price per door
+  and per top box, its drawer box (none, Cemux or Blum) and, for Premium and Premium Plus, a description; Premium Plus's
+  own extras (paid, or free); the worktop (on/off and a price); small and large glazed doors; shared extras (name, unit,
+  quantity, price); what is included (sink, extractor, removal, electrical, plumbing); and "show prices excluding VAT".
+* **Price list** (Quote Settings): default price per door and per top box for each option, the two drawer box prices,
+  the two glazed door prices, and the extras catalogue. The old Settings' "Laminate worktop (€/m)" rate is not carried
+  over: no calculation used it (a worktop is priced as one amount on each quote).
+
+**Parity with the original app.** The three quote shapes from its notes and 5,000 varied quotes (all options, €0 and
+decimal prices, decimal quantities, missing sections, quotes saved before prices were frozen, every description and
+inclusion combination) were compared with the original PDF's own arithmetic:
+
+* 4,732 quotes: identical totals including and excluding VAT, identical option cards and identical wording.
+* 268 had no option offered: the original refused to make a PDF; Elite OS can save such a quote but not send it.
+* 1 differed, by €1. Its exact total was exactly half a euro. The original added the amounts up in floating point, landed a
+  hair under the half and rounded down. Elite OS rounds up.
+* The comparison was itself checked: three deliberately planted errors (rounding down, a fifth description line, large
+  glazed doors priced as small) were each caught.
+
+**Deliberate differences from the original** (all in the direction of never printing a wrong price silently):
+
+* Exact money. Example: extras of €10.96, €72.52 and €16.52 make exactly €100.00, so €113.50 with VAT, rounded to
+  €114. The original printed €113.
+* An extra with a name but no price is refused ("Enter a price for Pocket door"). The original charged €0 without
+  saying so.
+* An extra with a price but no name is refused ("Give this extra a name, or remove it"). The original silently left it
+  out of the quote.
+* €0 stays €0 everywhere (the original's quote list, for Premium and Premium Plus, and its invoices used default per-door
+  prices instead).
+* Limits: counts 0–999, prices €0–€1,000,000, at most 2 decimals, at most 50 extras per list.
+
+Regression (2026-10-03, after M1): backend 159 of 159 (the 136 existing tests unchanged, plus the 23 new ones);
+browser suites `ui` 57/57, `crm` 14/14, `dnd` 13/13, `conversion` 10/10, `appointments` 17/17, `theme` 10/10 (Chrome),
+`lead` 11/11. `lead` check 9 again failed on the first run straight after `ui` (the same `sendReply` cold start as in the
+M0 baseline: the function began after the test's 5-second wait) and passed when run again. Nothing M1 changed runs in that
+suite.
 
 ## Deploy and rollback (prepared in M5)
 
