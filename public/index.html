@@ -423,6 +423,43 @@
   </form>
 </dialog>
 
+<dialog id="qsend-dlg" class="dlg dlg-wide">
+  <form id="qsend-form" autocomplete="off">
+    <h2 id="qsend-title">Send quote</h2>
+    <p id="qsend-who" class="hint"></p>
+    <dl id="qsend-facts" class="qb-figures qsend-facts"></dl>
+    <p id="qsend-warn" class="q-warn" hidden></p>
+    <label>Design renders <span class="label-note">(optional: up to 5 images, each on its own page)</span><input id="qsend-renders" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+    <div id="qsend-thumbs" class="qsend-thumbs"></div>
+    <label class="q-check" id="qsend-reopen-row" hidden><input type="checkbox" id="qsend-reopen"> <span id="qsend-reopen-text"></span></label>
+    <label>Pipeline value<input id="qsend-value" inputmode="decimal" maxlength="12" aria-describedby="qsend-value-help"></label>
+    <p class="hint field-hint" id="qsend-value-help">Prefilled with the dearest option. Leave it empty to keep the current value.</p>
+    <p id="qsend-effect" class="q-effect"></p>
+    <p id="qsend-progress" class="qsend-progress" role="status"></p>
+    <div id="qsend-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="qsend-preview" class="btn btn-ghost qsend-left">Preview</button>
+      <button type="button" id="qsend-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="qsend-go" class="btn btn-primary">Make PDF and mark sent</button>
+    </div>
+  </form>
+  <div id="qsend-done" hidden>
+    <h2>Quote sent</h2>
+    <p id="qsend-done-text" class="hint"></p>
+    <p class="hint">Send the PDF to the customer: download it, or open an email draft and attach it. Elite OS keeps this exact file with the quote.</p>
+    <div class="dlg-actions">
+      <a id="qsend-download" class="btn btn-ghost" href="#" download>Download PDF</a>
+      <button type="button" id="qsend-email" class="btn btn-ghost">Email draft</button>
+      <button type="button" id="qsend-close" class="btn btn-primary">Done</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="qdoc-dlg" class="qdoc-dlg" aria-labelledby="qdoc-title">
+  <div class="qdoc-bar"><span id="qdoc-title">Preview</span><button type="button" id="qdoc-close" class="icon-btn" aria-label="Close preview"><svg class="close-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+  <div id="qdoc-scroll" class="qdoc-scroll"><div id="qdoc-page" class="qdoc-page"></div></div>
+</dialog>
+
 <!-- Firebase config is served automatically by Firebase Hosting (public identifiers, not secrets). -->
 <script src="/__/firebase/10.14.1/firebase-app-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-auth-compat.js"></script>
@@ -435,6 +472,7 @@
 <script src="/pipeline.js"></script>
 <script src="/appointments.js"></script>
 <script src="/quote-engine.js"></script>
+<script src="/quote-document.js"></script>
 <script src="/quote-builder.js"></script>
 <script src="/quote-settings.js"></script>
 <script src="/quotes.js"></script>

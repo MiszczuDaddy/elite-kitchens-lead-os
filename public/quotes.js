@@ -2,12 +2,12 @@
 // Elite Kitchens Lead OS: quotes (Phase 6, docs/QUOTES.md). The Quotes screen (list, one quote, Quote Settings), the Quotes
 // block in the customer profile, and the accept / decline / reopen dialogs. Reads Firestore directly (staff-only rules); every
 // change goes through the quote callables. Prices shown while editing come from the calculator (quote-engine.js); the server
-// recalculates them on every save. The form itself is quote-builder.js. Sending (with the customer PDF) is switched on in M4.
+// recalculates them on every save. The form itself is quote-builder.js; the customer document is quote-document.js.
 // Loaded after app.js (shares its helpers).
 window.QUOTES = (() => {
   const LIMIT = 300;
   const STATUS = { draft: 'Draft', sent: 'Sent', accepted: 'Accepted', declined: 'Declined' };
-  const SEND_LATER = 'Sending, with the customer PDF, is switched on in the next step.';
+  const SEND_HINT = 'Send makes the customer PDF, keeps an exact copy with the quote and marks it sent.';
   const Q = {
     active: false, view: 'list', id: null, hash: '#quotes', cameFrom: null, backTo: null,
     list: [], listLoaded: false, hitLimit: false, unsubList: null, filter: 'open', query: '',
@@ -147,7 +147,7 @@ window.QUOTES = (() => {
   function hide() {
     Q.active = false; closeQuote(); stopList(); stopCommon(); QuoteSettings.stop(); setNav(false);
     Q.cameFrom = null; note('');
-    for (const id of ['qa-dlg', 'qd-dlg', 'qr-dlg', 'qc-dlg', 'nq-dlg']) closeDialog($(id));
+    for (const id of ['qa-dlg', 'qd-dlg', 'qr-dlg', 'qc-dlg', 'nq-dlg', 'qsend-dlg', 'qdoc-dlg']) closeDialog($(id));
   }
   function stop() {                      // sign-out: forget everything
     hide(); Q.backTo = null; Q.view = 'list'; Q.filter = 'open'; Q.query = ''; $('q-search').value = '';
@@ -371,21 +371,26 @@ window.QUOTES = (() => {
     if (host.dataset.key !== key) { buildActions(host, q); host.dataset.key = key; }
     const save = $('qv-save');
     if (save) { save.disabled = Q.saving || !Q.dirty; save.textContent = Q.saving ? 'Saving…' : 'Save draft'; }
+    const send = $('qv-send');
+    if (send) {
+      const why = Q.errors.length ? 'Fix the highlighted fields first.' : Q.problems.length ? Q.problems[0] : '';
+      send.disabled = Q.saving || !!why; send.title = why;
+    }
     const hint = host.querySelector('.qv-hint');
-    if (hint && q.draftVersion) hint.textContent = Q.dirty ? 'Unsaved changes.' : SEND_LATER;
+    if (hint && q.draftVersion) hint.textContent = Q.dirty ? 'Unsaved changes: Send saves them first.' : SEND_HINT;
   }
   function buildActions(host, q) {
     const nodes = [el('h3', null, 'Actions')], row = el('div', 'qv-buttons');
-    const disabled = (b, why) => { b.disabled = true; b.title = why; return b; };
     if (q.draftVersion) {
-      row.append(button('Save draft', 'btn-primary', () => saveDraft(false), 'qv-save'), disabled(button('Send…', 'btn-ghost', () => {}, 'qv-send'), SEND_LATER));
+      row.append(button('Save draft', 'btn-primary', () => saveDraft(false), 'qv-save'), button('Send…', 'btn-ghost', () => openSend('send'), 'qv-send'),
+        button('Preview', 'btn-ghost', openPreview, 'qv-preview'));
       if (q.sentVersion) row.append(button('Discard draft…', 'btn-ghost', confirmDiscard, 'qv-discard'));
       else row.append(button('Delete quote…', 'btn-ghost qv-danger', confirmDelete, 'qv-delete'));
-      nodes.push(row, el('p', 'qb-note qv-hint', SEND_LATER));
+      nodes.push(row, el('p', 'qb-note qv-hint', SEND_HINT));
     } else if (q.status === 'sent') {
       row.append(button('Mark accepted…', 'btn-primary', openAccept, 'qv-accept'), button('Mark declined…', 'btn-ghost', openDecline, 'qv-decline'),
-        button('Revise', 'btn-ghost', revise, 'qv-revise'), disabled(button('Send again…', 'btn-ghost', () => {}, 'qv-renew'), SEND_LATER));
-      nodes.push(row, el('p', 'qb-note', 'Revise starts a new version with the same prices. ' + SEND_LATER));
+        button('Revise', 'btn-ghost', revise, 'qv-revise'), button('Send again…', 'btn-ghost', () => openSend('renew'), 'qv-renew'));
+      nodes.push(row, el('p', 'qb-note', 'Revise starts a new version with the same prices to change. Send again sends the same quote with a new date and validity.'));
     } else if (q.status === 'accepted') {
       row.append(button('Reopen…', 'btn-ghost', openReopen, 'qv-reopen'));
       nodes.push(row);
@@ -546,7 +551,7 @@ window.QUOTES = (() => {
     const opts = $('qa-options'); opts.replaceChildren();
     for (const o of v.sheet.options) {
       const l = el('label', 'q-radio'), r = el('input'); r.type = 'radio'; r.name = 'qa-option'; r.value = o.key;
-      r.onchange = () => { $('qa-value').value = CRM.money(o.incVat); acceptEffect(); };
+      r.onchange = () => { $('qa-value').value = o.incVat >= 1 ? CRM.money(o.incVat) : ''; acceptEffect(); };
       l.append(r, el('span', null, `${o.name} · ${euros(o.incVat)}`)); opts.append(l);
     }
     $('qa-closed-row').hidden = stage !== 'closed';
@@ -644,6 +649,178 @@ window.QUOTES = (() => {
     } catch (err) { $('qr-err').textContent = errText(err); $('qr-go').disabled = false; }
   });
   $('qr-cancel').onclick = () => { closeDialog($('qr-dlg')); Q.dlg = null; };
+
+  // ---------- send (M4): the customer PDF, its exact stored copy, and the quote marked Sent ----------
+  // "Send" sends the draft. "Send again" (renew) starts the next version with the same content and prices, then sends it with a
+  // new date and validity. The PDF is made here from the frozen draft, the customer's details and the business details read
+  // fresh; the server refuses the send if any of them changed meanwhile, so the stored copy is always what the customer gets.
+  const addDays = (k, n) => { const [y, m, d] = k.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+  const MAX_RENDERS = 5;
+  async function sendContext(q) {
+    const f = db.collection('quotes').doc(q.id);
+    const [qs, settings, conv, contact] = await Promise.all([f.get(), db.collection('quoteSettings').doc('current').get(),
+      db.collection('conversations').doc(q.phone).get(), db.collection('contacts').doc(q.phone).get()]);
+    if (!qs.exists) throw new Error('This quote no longer exists.');
+    if (!settings.exists) throw new Error('Quote Settings are not set up.');
+    const ct = contact.exists ? contact.data() : {}, cv = conv.exists ? conv.data() : {};
+    return { quote: { id: q.id, ...qs.data() }, settings: settings.data(), stage: conv.exists ? inboxStatus(cv) : 'inbox',
+      value: typeof ct.quoteValue === 'number' ? ct.quoteValue : null,
+      customer: { name: ct.name || cv.name || null, email: ct.email || null, address: ct.address || null } };
+  }
+  const versionDoc = async (id, n) => { const d = await db.collection('quotes').doc(id).collection('versions').doc(String(n)).get(); return d.exists ? d.data() : null; };
+  function documentData(q, n, sheet, ctx, issueDate, renders, draft) {
+    return { ref: `${q.ref}-v${n}`, issueDate, validUntil: addDays(issueDate, ctx.settings.validityDays), customer: { ...ctx.customer, phone: q.phone },
+      business: ctx.settings.business, sheet, renders: renders || [], draft: !!draft };
+  }
+  async function openSend(mode) {
+    const q = Q.quote; if (!q || Q.busy) return;
+    if (mode === 'send') {
+      if (Q.dirty) { await saveDraft(false); if (Q.dirty) return; }                // send exactly what is saved
+      if (Q.errors.length || Q.problems.length) { note(Q.errors.length ? 'Fix the highlighted fields first.' : Q.problems[0], 'err'); return; }
+    }
+    Q.busy = true;
+    try {
+      const ctx = await sendContext(q);
+      const fq = ctx.quote;
+      const n = mode === 'send' ? fq.draftVersion : (fq.currentVersion || fq.sentVersion) + 1;
+      const base = await versionDoc(fq.id, mode === 'send' ? fq.draftVersion : fq.sentVersion);
+      if (!base) throw new Error('This quote changed. Please try again.');
+      const issueDate = today();
+      Q.dlg = { kind: 'send', mode, q: fq, ctx, n, sheet: base.sheet, issueDate, renders: [], requestId: newRequestId(), blobUrl: null };
+      $('qsend-title').textContent = mode === 'send' ? `Send ${fq.ref} v${n}` : `Send ${fq.ref} again (as v${n})`;
+      $('qsend-who').textContent = mode === 'send' ? 'Elite OS makes the customer PDF, keeps an exact copy with the quote and marks it sent.'
+        : 'The same options and prices as v' + fq.sentVersion + ', with a new date and validity. Elite OS keeps an exact copy of the PDF.';
+      const facts = $('qsend-facts'); facts.replaceChildren();
+      const fact = (k, v) => facts.append(el('dt', null, k), el('dd', null, v));
+      fact('Customer', ctx.customer.name || formatPhone(fq.phone));
+      fact('Address', ctx.customer.address || '— (none)');
+      fact('Email', ctx.customer.email || '— (none)');
+      fact('Date', fmtDate(issueDate));
+      fact('Valid until', fmtDate(addDays(issueDate, ctx.settings.validityDays)) + ` (${ctx.settings.validityDays} days)`);
+      fact('Options', base.sheet.options.map((o) => `${o.name} ${euros(o.incVat)}`).join(' · '));
+      const warn = [!ctx.customer.address && 'There is no address: the quote will show only the name. Add it in the customer\'s Details first if it should be printed.',
+        !ctx.customer.email && 'There is no email address: the email draft will have no recipient.'].filter(Boolean);
+      $('qsend-warn').hidden = !warn.length; $('qsend-warn').textContent = warn.join(' ');
+      $('qsend-renders').value = ''; $('qsend-thumbs').replaceChildren();
+      $('qsend-reopen-row').hidden = ctx.stage !== 'closed'; $('qsend-reopen').checked = false;
+      $('qsend-reopen-text').textContent = `Reopen: move ${ctx.customer.name || 'the customer'} from Closed to Quoted`;
+      const dearest = base.sheet.options.find((o) => o.key === base.sheet.dearest);
+      $('qsend-value').value = dearest && dearest.incVat >= 1 ? CRM.money(dearest.incVat) : '';      // a €0 quote proposes no value
+      $('qsend-progress').textContent = ''; $('qsend-err').textContent = '';
+      $('qsend-form').hidden = false; $('qsend-done').hidden = true;
+      for (const id of ['qsend-go', 'qsend-preview', 'qsend-cancel', 'qsend-renders']) $(id).disabled = false;
+      sendEffect();
+      showDialog($('qsend-dlg')); $('qsend-go').focus();
+    } catch (err) { note(errText(err), 'err'); }
+    finally { Q.busy = false; }
+  }
+  function sendEffect() {
+    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    const who = d.ctx.customer.name || 'The customer', s = d.ctx.stage;
+    const moves = s === 'inbox' || s === 'booked' || (s === 'closed' && $('qsend-reopen').checked);
+    const typed = CRM.parseMoney($('qsend-value').value);
+    $('qsend-effect').textContent = (moves ? `${who} will move from ${stageName(s)} to Quoted.` : `${who} stays in ${stageName(s)}.`) + ' ' + (Number.isNaN(typed) ? '' : valuePreview(d.ctx.value, typed));
+  }
+  $('qsend-reopen').onchange = sendEffect;
+  $('qsend-value').oninput = sendEffect;
+  $('qsend-renders').onchange = async (e) => {
+    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    const files = [...e.target.files].slice(0, MAX_RENDERS);
+    $('qsend-err').textContent = e.target.files.length > MAX_RENDERS ? `Only the first ${MAX_RENDERS} images are used.` : '';
+    $('qsend-progress').textContent = files.length ? 'Reading the images…' : '';
+    try {
+      d.renders = await Promise.all(files.map((f) => QuoteDocument.readRender(f)));
+      $('qsend-thumbs').replaceChildren(...d.renders.map((u, i) => { const img = el('img'); img.src = u; img.alt = 'Render ' + (i + 1); return img; }));
+      $('qsend-progress').textContent = d.renders.length ? `${d.renders.length} render${d.renders.length > 1 ? 's' : ''} added, each on its own page.` : '';
+    } catch (err) { d.renders = []; $('qsend-thumbs').replaceChildren(); $('qsend-progress').textContent = ''; $('qsend-err').textContent = errText(err); }
+  };
+  $('qsend-preview').onclick = () => {
+    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    showPreview(documentData(d.q, d.n, d.sheet, d.ctx, d.issueDate, d.renders, true), `Preview of ${d.q.ref} v${d.n} — not sent yet`);
+  };
+  $('qsend-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = Q.dlg; if (!d || d.kind !== 'send' || d.working) return;
+    const value = CRM.parseMoney($('qsend-value').value);
+    if (Number.isNaN(value) || (value !== null && (value < 1 || value > 1000000))) { $('qsend-err').textContent = 'The pipeline value should be a number of euros, e.g. 14500 or €14,500, or empty.'; return; }
+    d.working = true; $('qsend-err').textContent = '';
+    for (const id of ['qsend-go', 'qsend-preview', 'qsend-cancel', 'qsend-renders']) $(id).disabled = true;
+    const progress = (t) => { $('qsend-progress').textContent = t; };
+    let revised = false, expectedRev = d.q.rev, sheet = d.sheet, n = d.n;
+    try {
+      if (d.mode === 'renew') {                                         // the next version, a copy with the same prices
+        progress('Starting v' + n + '…');
+        const r = (await call('reviseQuote')({ id: d.q.id, expectedRev })).data;
+        revised = true; expectedRev = r.rev; n = r.draftVersion;
+        const v = await versionDoc(d.q.id, n); sheet = v.sheet;
+      }
+      progress('Making the PDF…');
+      const data = documentData(d.q, n, sheet, d.ctx, d.issueDate, d.renders, false);
+      const filename = `EliteKitchens-${d.q.ref}-v${n}.pdf`;
+      const blob = await QuoteDocument.toPdf(data, { filename });
+      progress('Uploading the PDF…');
+      const path = `uploads/${auth.currentUser.uid}/${Date.now()}-${d.q.ref}-v${n}.pdf`;
+      await firebase.storage().ref(path).put(blob, { contentType: 'application/pdf' });
+      progress('Marking the quote sent…');
+      const r = (await call('sendQuote')({ id: d.q.id, expectedRev, requestId: d.requestId, issueDate: d.issueDate, settingsRev: d.ctx.settings.rev,
+        customer: d.ctx.customer, pdfUploadPath: path, pipeline: { reopen: $('qsend-reopen').checked, value } })).data;
+      Q.dirty = false;
+      d.blobUrl = URL.createObjectURL(blob); d.filename = filename; d.sentN = n; d.sheetSent = sheet;
+      const who = d.ctx.customer.name || 'The customer';
+      $('qsend-done-text').textContent = [`${d.q.ref} v${n} is marked sent, valid until ${fmtDate(r.validUntil)}.`,
+        r.stage ? `${who} moved from ${stageName(r.stage.from)} to Quoted.` : `${who}'s stage did not change.`, r.value ? valueChange(r.value) : ''].filter(Boolean).join(' ');
+      $('qsend-download').href = d.blobUrl; $('qsend-download').download = filename;
+      $('qsend-email').disabled = false;
+      $('qsend-form').hidden = true; $('qsend-done').hidden = false; $('qsend-download').focus();
+    } catch (err) {
+      progress('');
+      $('qsend-err').textContent = 'Not sent: ' + errText(err) + (revised ? ` A draft v${n} was started: send it or discard it.` : '');
+      for (const id of ['qsend-go', 'qsend-preview', 'qsend-cancel', 'qsend-renders']) $(id).disabled = false;
+    } finally { if (Q.dlg === d) d.working = false; }
+  });
+  function closeSend() {
+    const d = Q.dlg;
+    if (d && d.kind === 'send') { if (d.working) return; if (d.blobUrl) setTimeout(() => URL.revokeObjectURL(d.blobUrl), 60000); }
+    closeDialog($('qsend-dlg')); if (Q.dlg === d) Q.dlg = null;
+  }
+  $('qsend-cancel').onclick = closeSend;
+  $('qsend-close').onclick = closeSend;
+  $('qsend-dlg').addEventListener('cancel', (e) => { const d = Q.dlg; if (d && d.kind === 'send' && d.working) e.preventDefault(); });
+  // The usual email, from Gmail (the customer's address, the subject and the wording filled in). The PDF is attached by hand.
+  $('qsend-email').onclick = () => {
+    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    const b = d.ctx.settings.business || {}, trading = b.tradingName || 'Elite Kitchens', c = d.ctx.customer;
+    const first = (c.name || '').trim().split(/\s+/)[0] || 'there', options = (d.sheetSent || d.sheet).options.length;
+    const subject = `${trading} — Kitchen Quote ${d.q.ref} v${d.sentN}`;
+    const body = [`Hi ${first},`, '', `Thank you for getting in touch with ${trading}. Please find attached your kitchen quote ${d.q.ref} v${d.sentN}.`, '',
+      `I've put together ${options > 1 ? options + ' options' : 'a proposal'} based on our conversation — all details are outlined in the attached PDF.`, '',
+      `The quote is valid for ${d.ctx.settings.validityDays} days. If you have any questions or would like to make any changes, please don't hesitate to get in touch.`, '',
+      'Looking forward to hearing from you.', '', 'Kind regards,', b.signatureName || '', trading, [b.phone, b.email].filter(Boolean).join(' | ')].join('\n');
+    const url = 'https://mail.google.com/mail/?view=cm&fs=1' + (c.email ? '&to=' + encodeURIComponent(c.email) : '') + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+    window.open(url, '_blank', 'noopener');
+  };
+
+  // ---------- preview (marked "Draft · not sent") ----------
+  async function showPreview(data, title) {
+    $('qdoc-title').textContent = title;
+    const page = $('qdoc-page'); page.replaceChildren(); page.style.transform = ''; page.style.height = '';
+    showDialog($('qdoc-dlg'));
+    const f = await QuoteDocument.show(page, data);
+    const avail = $('qdoc-scroll').clientWidth - 24, w = f.offsetWidth;
+    const scale = Math.min(1, avail / w);                                 // a phone shows the whole A4 width, smaller
+    page.style.transform = scale < 1 ? `scale(${scale})` : ''; page.style.height = (f.offsetHeight * scale) + 'px'; page.style.width = (w * scale) + 'px';
+    $('qdoc-close').focus();
+  }
+  async function openPreview() {
+    const q = Q.quote, dv = draftV(); if (!q || !dv) return;
+    if (!Q.sheet) { note('Fix the highlighted fields first.', 'err'); return; }
+    try {
+      const ctx = await sendContext(q);
+      showPreview(documentData(q, q.draftVersion, Q.sheet, ctx, today(), [], true), `Preview of ${q.ref} v${q.draftVersion}${Q.dirty ? ' (with unsaved changes)' : ''} — not sent`);
+    } catch (err) { note(errText(err), 'err'); }
+  }
+  $('qdoc-close').onclick = () => closeDialog($('qdoc-dlg'));
+  $('qdoc-dlg').addEventListener('close', () => $('qdoc-page').replaceChildren());
 
   // ---------- new quote ----------
   async function createFor(phone, report) {

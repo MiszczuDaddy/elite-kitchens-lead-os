@@ -142,10 +142,10 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   assert.equal(await field('options.ess.on').isChecked(), true);
   assert.equal(await field('options.ess.perDoor').inputValue(), '110');
   assert.equal(await field('options.prem.on').isChecked(), false);
-  assert.equal(await page.locator('#qv-send').isDisabled(), true);
-  assert.match(await page.getAttribute('#qv-send', 'title'), /switched on in the next step/);
+  assert.equal(await page.locator('#qv-send').isDisabled(), false);                         // (M4: Send is switched on)
+  assert.equal(await page.locator('#qv-preview').isVisible(), true);
   assert.match(await page.textContent('.qv-customer'), /No address yet/);
-  ok('Create quote in the profile opens a draft priced from Quote Settings (Essential on); Send is visible but off until M4');
+  ok('Create quote in the profile opens a draft priced from Quote Settings (Essential on); Send and Preview are offered');
 
   // ---- live totals from the calculator, and problems shown ----
   await field('doors').fill('10'); await field('drawers').fill('4');
@@ -162,6 +162,7 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   await field('doors').fill('-1');
   await page.waitForFunction(() => /Fix the highlighted fields/.test(document.querySelector('#q-quote-view .qv-totals').textContent));
   assert.equal(await field('doors').getAttribute('aria-invalid'), 'true');
+  assert.equal(await page.locator('#qv-send').isDisabled(), true);                          // nothing can be sent while a field is wrong
   await page.click('#qv-save');
   await toastSays(/Fix the highlighted fields first/);
   await field('doors').fill('10');
@@ -276,7 +277,7 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   assert.equal(await page.locator('#q-quote-view .qv-opt').count(), 2);
   assert.match(await page.textContent('#q-quote-view .qv-banner'), /valid until/);
   assert.match(await page.textContent('#q-quote-view .qv-sent'), /4 Coast Road, Malahide/);
-  assert.equal(await page.locator('#qv-renew').isDisabled(), true);
+  assert.equal(await page.locator('#qv-renew').isDisabled(), false);                        // (M4: Send again is switched on)
   await page.click('#qv-accept'); await page.waitForSelector('#qa-dlg[open]');
   assert.equal(await page.isVisible('#qa-closed-row'), false);
   await page.locator('#qa-options input[value="prem"]').check();

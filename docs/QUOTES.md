@@ -1,7 +1,7 @@
 # Phase 6 — Quotes (agreed design)
 
-Status: **M0 (design), M1 (price calculator), M2 (server side) and M3 (screens) done.** Nothing is deployed. Sending
-(with the customer PDF) is switched on in M4. This document
+Status: **M0 (design), M1 (price calculator), M2 (server side), M3 (screens) and M4 (customer PDF and sending) done.**
+Nothing is deployed. The customer PDF's design awaits the owner's review. This document
 is the specification that the milestones below implement. A rule in it changes only with the owner's approval.
 
 Quotes become a native part of Elite OS: a Quotes section in the side rail, a Quotes block on every customer profile, a
@@ -195,8 +195,8 @@ Money is worked out exactly (whole cents, quantities in hundredths), never with 
   * never add workmanship-warranty wording (the 6-month snagging line in the terms is a separate thing and stays);
   * the laminate-worktop water-damage note appears under Worktops only when a worktop is quoted;
   * paid items and free work are listed in separate groups.
-* The PDF is made in the browser, the same way as today. The PDF library and the fonts are served from Elite OS itself,
-  not from other websites.
+* The PDF is made in the browser, the same way as today (html2pdf.js). The PDF library and the fonts are served from
+  Elite OS itself, not from other websites (see M4 below).
 * **Sending** (decisions 8 and 9). "Send" freezes the version (issue date and validity), lets you add render images,
   makes the PDF, stores that exact file privately, marks the quote Sent and applies the pipeline rules. Then it offers
   **Download PDF** and **Email draft** (opens Gmail with the usual wording; you attach the file). The file you send is
@@ -458,6 +458,52 @@ One existing browser check was updated on purpose: `appointments.e2e.js` asserte
 
 Regression (2026-10-03, after M3): backend 197 of 197; browser suites `ui` 57/57, `lead` 11/11, `crm` 14/14, `dnd` 13/13,
 `conversion` 10/10, `appointments` 17/17, `quotes` 19/19 (new), `theme` 10/10 (Chrome). All on the first run.
+
+### M4: the customer PDF and sending
+
+Built and tested on 2026-10-04. Nothing deployed. **The document design is a faithful port awaiting the owner's review**:
+it may still be improved before it is approved for customers.
+
+| File | What |
+|---|---|
+| `public/quote-document.js` | The customer document: the original quoting app's PDF (its `genPDF`, commit `af45091`) ported faithfully. It is built as page elements from a frozen version's price sheet, the customer's details and the business details (text is always inserted as text), in its own frame so its styles never touch Elite OS, and turned into an A4 PDF in the browser |
+| `public/vendor/html2pdf/` | html2pdf.js **0.14.0** (MIT; bundles html2canvas and jsPDF 4), the same library family the original app used (it loaded 0.10.1 from a CDN). Taken unmodified from the npm package `html2pdf.js@0.14.0`; `html2pdf.bundle.min.js` SHA-256 `9563c45f032179c73454293a649929e60fc24c05a326e8ab2811cfa8f25c3607`. Loaded only when a PDF is made. Its licence files are next to it |
+| `public/fonts/` | Faustina and IBM Plex Sans (latin, weights 400 / 500 / 600, woff2), the original PDF's fonts, from `@fontsource/faustina@5.3.0` and `@fontsource/ibm-plex-sans@5.3.0` (SIL Open Font Licence; licence files included) |
+| `public/quotes.js`, `public/index.html`, `public/app.css` | Send, Send again, Preview, the Send dialog and the preview window |
+| `test-ui/quote-send.e2e.js` | 8 browser checks |
+
+How it works:
+
+* **Send** (a draft) and **Send again** (a sent quote, also an expired one: the next version with the same content and
+  prices, then sent) open the Send dialog. It shows the customer, address, email, the date, the validity and the options,
+  warns when there is no address or email, takes up to 5 design renders (each made at most 2,000 px and put on its own
+  page), proposes the pipeline value (the dearest option; a €0 quote proposes none) and, for a Closed customer, an unticked
+  "Reopen: move to Quoted". It says what will happen to the stage and the value.
+* **Make PDF and mark sent**: the PDF is made in the browser from the frozen draft and the customer's and business details
+  read fresh, uploaded to the sender's private upload folder, and `sendQuote` stores it and marks the quote Sent (or refuses,
+  if anything changed meanwhile). The dialog then offers **Download PDF** (the same file: tested byte for byte) and **Email
+  draft** (Gmail with the customer's address, the subject and the original wording; the PDF is attached by hand).
+* **Preview** shows the document as it would be sent, marked "Draft · not sent · prices and dates may still change"
+  (also with unsaved changes). It cannot be downloaded: the customer's file only ever comes from Send. On a phone the A4 page
+  is scaled to the screen.
+* A sent version's stored PDF opens from the quote's **Sent versions** (a 10-minute link).
+* Typical size: about 0.4–0.7 MB for one or two pages of quote, plus one page per render.
+
+Found and fixed while building M4: a PDF made inside the document's frame could not be uploaded as it was (the server
+rightly refused it as "not a PDF"); it is now copied into the page's own file first. A €0 quote proposed "€0" as the
+pipeline value, which is not a valid value.
+
+The M3 browser checks that expected Send and Send again to be switched off were updated on purpose: they now check that
+both are offered, and that Send is off while a field is wrong.
+
+**Design review (open).** The port is faithful, including its pagination, which the owner may want to change:
+a three-option quote spills about a third of a page onto page 2 (Not included, the terms and the sign-off); a one-option
+quote fits on page 1 except the sign-off, which ends up alone on page 2. The header uses the Elite Kitchens logo from
+Elite OS. The wording (introduction, "Your kitchen" text, terms 30% / 70% / 6-month snagging, sign-off) is the original's,
+fixed in the template. As in the original, the PDF pages are images (the text cannot be selected or searched).
+
+Regression (2026-10-04, after M4): backend 197 of 197; browser suites `ui` 57/57, `lead` 11/11, `crm` 14/14, `dnd` 13/13,
+`conversion` 10/10, `appointments` 17/17, `quotes` 19/19, `quote-send` 8/8 (new), `theme` 10/10 (Chrome). All on the first run.
 
 ## Deploy and rollback (prepared in M5)
 
