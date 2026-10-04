@@ -170,7 +170,8 @@ function savePages(buf, prefix) {
   // ---- the stored PDF can be opened again from the quote ----
   await page.locator('#q-quote-view .qv-versions button:has-text("PDF")').click();
   await page.waitForFunction((k) => true, null);
-  for (let i = 0; i < 50 && !opened.length; i++) await sleep(100);
+  // Up to 30 s: on a busy emulator (e.g. after the other suites) quotePdfUrl's first call can start more than 5 s after the click.
+  for (let i = 0; i < 300 && !opened.length; i++) await sleep(100);
   const link = opened.pop();
   assert.ok(link.startsWith('data:application/pdf;base64,'), 'the emulator answers with the file itself');
   assert.ok(Buffer.from(link.split(',')[1], 'base64').equals(stored));
