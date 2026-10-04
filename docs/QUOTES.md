@@ -565,14 +565,87 @@ which then answered normally; that wait is now up to 30 s in a separate test-onl
 Regression (2026-10-04, after M4): backend 197 of 197; browser suites `ui` 57/57, `lead` 11/11, `crm` 14/14, `dnd` 13/13,
 `conversion` 10/10, `appointments` 17/17, `quotes` 19/19, `quote-send` 8/8 (new), `theme` 10/10 (Chrome). All on the first run.
 
-## Deploy and rollback (prepared in M5)
+### M5: deploy and rollback
 
-* A Phase 6 deploy script modelled on Phase 5's: it saves the revisions it replaces, grants public invocation only to the
-  new callables (they check staff themselves) and deploys in stages. **Do not use `scripts/deploy-preview.sh`**: it
-  deploys every function and makes them all public, including the private `calendarSweep`.
-* Rollback: functions in seconds with the saved revisions (`deleteCustomer` and `updateContact` return to their Phase 5
-  versions); the screen through Hosting's release history or by redeploying tag `phase-5-appointments-complete`. Quote
-  data stays in Firestore and is simply not shown.
+Started 2026-10-04 (owner: "Start M5 ... do not deploy the Phase 6 UI to production, merge to main, tag, or perform the
+final cut-over without my explicit approval").
+
+| File | What |
+|---|---|
+| `scripts/deploy-quotes.sh` | `check`, `backend`, `preview`, `live`, as in "Rollout" below |
+| `scripts/rollback-quotes.sh` | the last backend deploy, `--before-phase6`, `--close` / `--open`, as in "Rollback" below |
+
+Before use, both scripts were run on the office PC against stand-ins for `gcloud`, `firebase`, `curl` and `npm` (nothing
+real contacted) in a throwaway copy of the repo, covering: check only reads; a deploy is refused when the settings file
+lacks the calendar settings or has a different allowlist (and never prints a setting's value), or when the functions' own
+storage access is missing; "no" cancels; a backend deploy saves the revisions it replaces, keeps the pre-Phase 6 ones
+once, deploys exactly the 16 functions in one go, opens only the 14 new ones, waits for new permissions and stops if a
+function never answers; the preview needs the backend first and refuses a test folder in `public/`; live needs "yes";
+each rollback option restores or closes exactly what it says.
+
+## Rollout (M5)
+
+Every step is run by the owner in Cloud Shell: it has `gcloud` and the settings file `functions/.env.elite-kitchens-lead-os`
+that Phase 5's rollout keeps up to date (the copy on the office PC is older). Steps marked **(approval)** need the owner's
+explicit go-ahead. `scripts/deploy-quotes.sh` asks for "yes" before any change, and every functions deploy first saves the
+revisions it replaces. **Do not use `scripts/deploy-preview.sh`**: it deploys every function and makes them all public,
+including the private `calendarSweep`.
+
+0. **Clone on the Phase 6 branch:** `cd ~/elite-kitchens-lead-os && git fetch && git checkout phase-6-quotes && git pull`.
+1. **Check** (changes nothing): `./scripts/deploy-quotes.sh check`. Every setting should say "same", then "storage: ok" and
+   "PDF links: ok". The script refuses to deploy if the settings file differs from what the live `deleteCustomer` runs with:
+   a setting missing from the file falls back to its default, which for Google Calendar would be "sync off".
+2. **Backend:** `./scripts/deploy-quotes.sh backend`. Deploys the 14 quote functions (`createCustomer`, `saveQuoteSettings`,
+   `setQuoteNumbering`, `createQuote`, `saveQuoteDraft`, `sendQuote`, `acceptQuote`, `declineQuote`, `reopenQuote`,
+   `reviseQuote`, `discardQuoteDraft`, `deleteQuoteDraft`, `setQuoteNotes`, `quotePdfUrl`) and the two existing functions
+   Phase 6 extended (`deleteCustomer` also erases quotes and quote PDFs; `updateContact` also takes an address). Only the 14
+   new ones are opened to browsers (each checks the signed-in staff account itself), and each must then answer a request
+   without sign-in with "Sign in first". Nothing else is deployed: no rules, indexes or secrets changed in Phase 6. The live
+   screen is unchanged: it never calls the quote functions, and the two extended ones behave as before for it.
+3. **Preview:** `./scripts/deploy-quotes.sh preview`. Open the printed address (channel `phase6`, 30 days). It uses live
+   data. Test as in "Testing the preview" below.
+4. **Live (approval):** `./scripts/deploy-quotes.sh live`. Publishes the Phase 6 screen to production Hosting; then reload
+   Elite OS. `firebase.json` serves the quote scripts with no-cache, so the old and new screens never mix.
+5. **Cut-over (approval):** the owner confirms the highest quote number the old app used. In Quotes > Quote Settings >
+   Quote numbers, set the next number to one more (asks first; it can only go up). From then on new quotes are made in
+   Elite OS only; the old app stays for invoices and for looking up old quotes.
+6. **Merge and tag (approval), after live is confirmed:** merge `phase-6-quotes` into `main` and tag
+   `phase-6-quotes-complete`. Then put the Cloud Shell clone back on main: `git checkout main && git pull`.
+
+### Testing the preview
+
+The preview is the new screen on live data, so what you do there is real. The normal Elite OS address is unchanged.
+
+1. Open the preview address and sign in as usual. Quotes is in the left rail (on a phone: the Quotes button at the top).
+2. **Quote Settings:** enter the real prices (per door and per top box for Essential, Premium and Premium Plus; Cemux and
+   Blum drawer boxes; small and large glazed doors; the extras list), VAT 13.5%, valid for 30 days, and the business
+   details printed on quotes (trading name, the name you sign with, phone, email, website, address, VAT number). Save.
+   Leave **Quote numbers** alone: that is the cut-over. Until then quotes are numbered TEST-0001, TEST-0002...
+3. **A test customer:** Inbox > New conversation (+) > "Add the customer without sending a message". Use a made-up
+   name such as "TEST Quote" and number such as 085 000 0001 (no message is sent), your own email address, an address,
+   Project type Kitchen.
+4. **A quote:** on the test customer, Create quote. Enter the doors, top boxes and drawers of a recent real quote from the
+   old app with the same options and extras, and check the totals match the old app.
+5. **Preview** the quote and check the PDF. Change the Project to Wardrobes, or to Other with a name, and preview again.
+6. **Send:** add a render image if you like, then "Make PDF and mark sent". Download the PDF and open it; "Email draft"
+   opens Gmail to your own address (send it to yourself to see what a customer gets). The test customer moves to Quoted
+   with the pipeline value you confirmed.
+7. Try **Accept** (to Won), **Reopen** within 5 minutes (back to Quoted), **Decline**, **Revise** and **Send again**, and
+   look at the Quotes list, its filters and search, and the Quotes block on the customer's profile. Try it on your phone.
+8. **Clean up:** open the test customer > Delete customer. That also deletes their quotes and quote PDFs, and their
+   pipeline value. (Test numbers are not reused, so the next test quote is TEST-0002, and so on.)
+
+Report anything that looks wrong; nothing goes live until you approve it.
+
+## Rollback
+
+* **Functions, in seconds** (`scripts/rollback-quotes.sh`): no option undoes the last backend deploy; `--before-phase6`
+  puts `deleteCustomer` and `updateContact` back to their Phase 5 versions; `--close` shuts the 14 quote functions (the
+  Quotes screen and "Add customer" then get errors; data stays) and `--open` reopens them. The quote functions did not
+  exist before Phase 6, so they have no older version to go back to; the old screen never calls them.
+* **The screen** (after live): Firebase console > Hosting > Release history > Rollback, or redeploy tag
+  `phase-5-appointments-complete`.
+* **Data:** quotes stay in Firestore and quote PDFs in Storage. The old screen simply does not show them.
 
 ## Open items
 
