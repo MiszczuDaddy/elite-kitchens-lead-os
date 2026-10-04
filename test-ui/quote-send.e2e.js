@@ -94,7 +94,7 @@ function savePages(buf, prefix) {
   await field('options.prem.on').check(); await field('options.prem.drawerBox').selectOption('blum');
   await field('worktop.on').check(); await field('worktop.price').fill('1450');
   await field('glazing.small').fill('2');
-  await page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-add-select').selectOption({ index: 1 });
+  await page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-chip', { hasText: 'Pull-out bin' }).click();   // the catalogue's one-click button
   await page.click('#qv-save');
   await page.waitForFunction(() => /Draft saved/.test(document.getElementById('q-toast').textContent));
   const q = (await quotesOf(ph.anna))[0];

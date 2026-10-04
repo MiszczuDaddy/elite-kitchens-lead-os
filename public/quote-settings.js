@@ -7,6 +7,14 @@ window.QuoteSettings = (() => {
   const OPTIONS = [['ess', 'Essential'], ['prem', 'Premium'], ['pp', 'Premium Plus']];
   const BUSINESS = [['tradingName', 'Business name', 100, 'Elite Kitchens'], ['signatureName', 'Signed by', 60, 'First name used to sign quotes'], ['phone', 'Phone', 40, ''],
     ['email', 'Email', 200, ''], ['web', 'Website', 200, ''], ['address', 'Address', 300, ''], ['vatNumber', 'VAT number', 40, '']];
+  // The extras the original quoting app came with (name, unit, how it is priced), offered as a starting point for the
+  // catalogue. No price is kept in the code: they are typed in here once. The catalogue stays fully editable.
+  const STANDARD_EXTRAS = [
+    ['Pocket door system', 'per opening', 'manual'], ['Bi-fold door system', 'per opening', 'fixed'], ['Oak cutlery tray', 'per drawer', 'fixed'],
+    ['Pull-out bin system', 'per unit', 'fixed'], ['Integrated pull-out bin', 'per unit', 'fixed'], ['Magic corner / Le Mans', 'per unit', 'fixed'],
+    ['Tall pull-out larder', 'per unit', 'fixed'], ['150mm base pull-out', 'per unit', 'fixed'], ['LED underpanel', 'per metre', 'fixed'],
+    ['LED inside larder', 'per unit', 'fixed'], ['LED kickboard', 'per metre', 'fixed'], ['Composite sink', 'included', 'free'],
+  ];
   const T = { host: null, form: null, settings: null, counter: null, dirty: false, saving: false, onLeaveOk: null };
   const pad4 = (n) => String(n).padStart(4, '0');
   const num = (input) => (input.value.trim() === '' ? null : Number(input.value));
@@ -29,7 +37,7 @@ window.QuoteSettings = (() => {
     const price = el('input'); price.type = 'number'; price.min = '0'; price.step = '0.01'; price.inputMode = 'decimal'; price.placeholder = 'Price'; price.dataset.k = 'price'; price.setAttribute('aria-label', 'Price');
     price.value = e.manual || e.free || e.price == null ? '' : String(e.price);
     const kind = el('select'); kind.dataset.k = 'kind'; kind.setAttribute('aria-label', 'Price type');
-    kind.append(new Option('Fixed price', 'fixed'), new Option('Price entered on each quote', 'manual'), new Option('Included free (Premium Plus)', 'free'));
+    kind.append(new Option('Fixed price', 'fixed'), new Option('Price entered on each quote', 'manual'), new Option('Included free', 'free'));
     kind.value = e.free ? 'free' : e.manual ? 'manual' : 'fixed';
     const sync = () => { price.disabled = kind.value !== 'fixed'; if (price.disabled) price.value = ''; };
     kind.onchange = sync; sync();
@@ -57,14 +65,27 @@ window.QuoteSettings = (() => {
     pt.append(moneyInput('priceList.drawerBoxes.cemux', 'Cemux Soft-Close drawer box'), moneyInput('priceList.drawerBoxes.blum', 'Blum Merivobox drawer box'),
       moneyInput('priceList.glazing.small', 'Small glazed door cabinet'), moneyInput('priceList.glazing.large', 'Large glazed larder door'));
     p.append(pt);
-    const c = sec('Extras catalogue', 'The extras offered when building a quote. On a quote each one can still be changed.');
+    const c = sec('Extras catalogue', 'Each item is a quick-select button in the quote builder (Extras and Premium Plus extras); adding, renaming or removing one here changes the buttons. On a quote the name, quantity and price can still be changed, and custom items can always be added.');
     const rows = el('div', 'qs-rows'); rows.id = 'qs-catalogue';
     const add = el('button', 'btn btn-ghost btn-sm', 'Add item'); add.type = 'button'; add.id = 'qs-add';
     add.onclick = () => { rows.append(catalogueRow({})); rows.lastChild.querySelector('input').focus(); markDirty(); };
-    c.append(rows, add);
-    const foot = el('div', 'qs-foot'); const msg = el('div', 'd-msg'); msg.id = 'qs-msg'; msg.setAttribute('role', 'status');
+    // Adds the original app's extras that are not in the list yet (matched by name), with their prices left to fill in.
+    const std = el('button', 'btn btn-ghost btn-sm', 'Add the standard extras'); std.type = 'button'; std.id = 'qs-standard';
+    std.onclick = () => {
+      const have = new Set([...rows.querySelectorAll('[data-k="name"]')].map((i) => i.value.trim().toLowerCase()));
+      const missing = STANDARD_EXTRAS.filter(([name]) => !have.has(name.toLowerCase()));
+      if (!missing.length) { msg('All the standard extras are already in the list.', ''); return; }
+      for (const [name, unit, kind] of missing) rows.append(catalogueRow({ name, unit, manual: kind === 'manual', free: kind === 'free' }));
+      markDirty();
+      const empty = [...rows.querySelectorAll('[data-k="price"]')].find((i) => !i.disabled && i.value === '');
+      if (empty) empty.focus();
+      msg(`Added ${missing.length} standard extra${missing.length > 1 ? 's' : ''}: enter their prices, then Save settings.`, '');
+    };
+    const btns = el('div', 'qs-cat-btns'); btns.append(add, std);
+    c.append(rows, btns);
+    const foot = el('div', 'qs-foot'); const msgBox = el('div', 'd-msg'); msgBox.id = 'qs-msg'; msgBox.setAttribute('role', 'status');
     const save = el('button', 'btn btn-primary', 'Save settings'); save.type = 'submit'; save.id = 'qs-save';
-    foot.append(msg, save); f.append(foot);
+    foot.append(msgBox, save); f.append(foot);
     f.addEventListener('input', markDirty);
     f.addEventListener('submit', (e) => { e.preventDefault(); saveSettings(); });
 

@@ -583,6 +583,42 @@ once, deploys exactly the 16 functions in one go, opens only the 14 new ones, wa
 function never answers; the preview needs the backend first and refuses a test folder in `public/`; live needs "yes";
 each rollback option restores or closes exactly what it says.
 
+**Builder: quick-select extras (owner's review of the preview, 2026-10-04).** The owner found that the old app's
+ready-to-select extras were missing: Elite OS had an extras catalogue in Quote Settings, but it started empty and the
+builder offered it only as a drop-down. Compared field by field with the old app (its `DEF_EXTRAS`, `renderCatBtns`,
+`renderPPCatBtns`, the Internal Summary), and restored, screen only (the calculator, prices and the customer PDF are
+unchanged):
+
+* **One-click buttons** in Extras and Premium Plus extras, one per catalogue item, showing its price ("enter price" for an
+  item priced on each quote, "Free" / €0 for a free one), then "+ Custom item" (and "+ Free item" for Premium Plus). A
+  click adds a row (quantity 1, price filled in, both editable); clicking again adds another row, as in the old app.
+* **Driven by Quote Settings, live:** the buttons follow the extras catalogue in Quote Settings as it is now, so adding,
+  renaming or removing an item there changes them, even in a draft that is open. The catalogue only fills in rows: each
+  row keeps its own price, so it never changes a quote's total by itself (a draft's frozen price list still prices it).
+* **"Add the standard extras"** in Quote Settings adds the old app's 12 extras that are not in the list yet (Pocket door
+  system, priced on each quote; Bi-fold door system; Oak cutlery tray; Pull-out bin system; Integrated pull-out bin; Magic
+  corner / Le Mans; Tall pull-out larder; 150mm base pull-out; LED underpanel; LED inside larder; LED kickboard; Composite
+  sink, free), with their units. Their prices are typed in once (no price is kept in the code); saving is refused until
+  they are. The list stays fully editable, unlike the old app's fixed one.
+* **A free item in the shared Extras** is added at €0, as in the old app (it asked for a price before).
+* **Cost breakdown (excl. VAT, staff only)** under Totals, like the old Internal Summary: doors, top boxes, drawer boxes,
+  Premium Plus extras, extras, worktop and glazed doors per option, and the total before VAT, all straight from the
+  calculator's price sheet. And each glazed-door count shows its line total.
+
+Matching or deliberately different, field by field: customer details (from the CRM customer, by design); doors, top boxes,
+drawers; the three packages (price per door and per top box, drawer boxes, descriptions); worktop; standard inclusions;
+"show prices excluding VAT"; internal notes; "update to today's prices" (all the same); statuses by action buttons with no
+"Follow-Up" (decision 4); invoices (old app, decision 1); the unused laminate €/m price (dropped in M1).
+
+Tests: `quotes.e2e.js` now 20 checks (the extras check is new; the builder and save checks use the buttons and check the
+breakdown and glazed-door totals); `quote-send.e2e.js` adds its extra with the button.
+
+Regression (2026-10-04/05): backend 201 of 201; browser suites `ui` 57/57, `lead` 11/11, `crm` 14/14, `dnd` 13/13,
+`conversion` 10/10, `quotes` 20/20, `quote-send` 9/9, `theme` 10/10 (Chrome), `appointments` 17/17. In the full run
+`appointments` failed once at its first booking check because the run crossed midnight (Dublin): the test works out
+"tomorrow" when it starts and the app when the dialog opens. Run again straight after, it passed 17/17. Unrelated to the
+quotes changes; a test that starts within a minute or two of midnight can hit it.
+
 ## Rollout (M5)
 
 Every step is run by the owner in Cloud Shell: it has `gcloud` and the settings file `functions/.env.elite-kitchens-lead-os`
@@ -618,14 +654,16 @@ The preview is the new screen on live data, so what you do there is real. The no
 
 1. Open the preview address and sign in as usual. Quotes is in the left rail (on a phone: the Quotes button at the top).
 2. **Quote Settings:** enter the real prices (per door and per top box for Essential, Premium and Premium Plus; Cemux and
-   Blum drawer boxes; small and large glazed doors; the extras list), VAT 13.5%, valid for 30 days, and the business
-   details printed on quotes (trading name, the name you sign with, phone, email, website, address, VAT number). Save.
+   Blum drawer boxes; small and large glazed doors), VAT 13.5%, valid for 30 days, and the business details printed on
+   quotes (trading name, the name you sign with, phone, email, website, address, VAT number). In the extras catalogue,
+   "Add the standard extras" adds the old app's extras: type their prices (as in the old app's Settings). Save.
    Leave **Quote numbers** alone: that is the cut-over. Until then quotes are numbered TEST-0001, TEST-0002...
 3. **A test customer:** Inbox > New conversation (+) > "Add the customer without sending a message". Use a made-up
    name such as "TEST Quote" and number such as 085 000 0001 (no message is sent), your own email address, an address,
    Project type Kitchen.
 4. **A quote:** on the test customer, Create quote. Enter the doors, top boxes and drawers of a recent real quote from the
-   old app with the same options and extras, and check the totals match the old app.
+   old app with the same options and extras (one click each), and check the totals, and the cost breakdown under them,
+   match the old app.
 5. **Preview** the quote and check the PDF. Change the Project to Wardrobes, or to Other with a name, and preview again.
 6. **Send:** add a render image if you like, then "Make PDF and mark sent". Download the PDF and open it; "Email draft"
    opens Gmail to your own address (send it to yourself to see what a customer gets). The test customer moves to Quoted

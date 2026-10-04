@@ -285,16 +285,23 @@ window.QUOTES = (() => {
         if (!QuoteBuilder.supports(dv.engine)) { body.replaceChildren(el('p', 'appts-empty', 'This quote was made with a calculator this screen cannot edit.')); return; }
         const host = el('div', 'qv-builder'); body.replaceChildren(host);
         Q.answers = dv.answers;
-        Q.builder = QuoteBuilder.mount(host, { answers: dv.answers, priceList: dv.priceList, onChange: (a) => { Q.answers = a; Q.dirty = true; Q.editSeq++; recalc(); renderActions(); } });
+        Q.builder = QuoteBuilder.mount(host, { answers: dv.answers, priceList: dv.priceList, catalogue: catalogueFor(dv), onChange: (a) => { Q.answers = a; Q.dirty = true; Q.editSeq++; recalc(); renderActions(); } });
         Q.builderKey = key;
       } else if (!Q.dirty && Q.builder && JSON.stringify(Q.answers) !== JSON.stringify(dv.answers)) {
         Q.answers = dv.answers; Q.builder.set(dv.answers);            // saved (here or elsewhere) and nothing typed since
       }
+      if (Q.builder) Q.builder.setCatalogue(catalogueFor(dv));        // Quote Settings changed: the buttons follow at once
       recalc();
       return;
     }
     if (Q.builder) { Q.builder.destroy(); Q.builder = null; Q.builderKey = null; Q.answers = null; Q.dirty = false; }
     body.replaceChildren(sv ? sentView(q, sv) : el('p', 'appts-empty', 'Loading…'));
+  }
+  // The extras offered as quick-select buttons: Quote Settings as they are now (they only fill in a row, which keeps its own
+  // price), or the draft's own list until the settings have loaded.
+  function catalogueFor(dv) {
+    const live = Q.settings && Q.settings.priceList && Q.settings.priceList.extras;
+    return Array.isArray(live) ? live : ((dv.priceList && dv.priceList.extras) || []);
   }
   // What the customer was sent: the option cards and the wording, from the frozen version.
   function sentView(q, v) {
@@ -358,9 +365,29 @@ window.QUOTES = (() => {
         nodes.push(r);
       }
       nodes.push(el('p', 'qb-note', `Including VAT at ${sheet.vatRate}%, rounded to the euro as on the quote.`));
+      if (sheet.options.length) nodes.push(costBreakdown(sheet));
       if (editing && Q.problems.length) { const p = el('p', 'qv-warn-line', 'Before sending: ' + Q.problems.join(' ')); nodes.push(p); }
     } else nodes.push(el('p', 'qb-note', 'Loading…'));
     host.replaceChildren(...nodes);
+  }
+  // What each option is made of, before VAT (staff only, never on the quote), as the original app's "Internal Summary": every
+  // figure comes from the calculator's price sheet. Rows that are €0 for every option are left out. It stays open or closed
+  // as staff left it while they type.
+  function costBreakdown(sheet) {
+    const opts = sheet.options, sh = sheet.shared || {};
+    const rows = [['Doors', (o) => o.breakdown.cabinets], ['Top boxes', (o) => o.breakdown.topBoxCabinets], ['Drawer boxes', (o) => o.breakdown.drawerBoxes],
+      ['Premium Plus extras', (o) => o.breakdown.ownExtras], ['Extras', () => sh.extras], ['Worktop', () => sh.worktop], ['Glazed doors', () => sh.glazing]]
+      .filter(([label, f]) => label === 'Doors' || opts.some((o) => f(o) > 0));
+    const line = (cls, label, cells) => { const tr = el('tr', cls); tr.append(el('th', null, label), ...cells); return tr; };
+    const head = el('thead'); head.append(line(null, '', opts.map((o) => el('th', null, o.name))));
+    const body = el('tbody');
+    for (const [label, f] of rows) body.append(line(null, label, opts.map((o) => el('td', null, euros2(f(o) || 0)))));
+    body.append(line('qv-cost-total', 'Total excl. VAT', opts.map((o) => el('td', null, euros2(o.exVat)))));
+    const t = el('table', 'qv-cost-t'); t.append(head, body);
+    const d = el('details', 'qv-cost'); d.open = !!Q.costOpen;
+    d.addEventListener('toggle', () => { Q.costOpen = d.open; });
+    d.append(el('summary', null, 'Cost breakdown (excl. VAT, staff only)'), t);
+    return d;
   }
   function button(label, cls, onClick, id) { const b = el('button', 'btn btn-sm ' + cls, label); b.type = 'button'; if (id) b.id = id; b.onclick = onClick; return b; }
   // The buttons are built once per state of the quote; while typing only Save's state changes. (Rebuilding them on every

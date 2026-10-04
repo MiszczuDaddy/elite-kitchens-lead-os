@@ -170,16 +170,21 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   await page.click('#qv-save');
   await toastSays(/Fix the highlighted fields first/);
   await field('doors').fill('10');
-  await page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-add-select').selectOption({ label: 'Pocket door (enter price)' });
+  // the extras catalogue (Quote Settings) as one-click buttons, then a custom item
+  const chipsOf = (list) => page.$$eval(`#q-quote-view .qb-extras[data-list="${list}"] .qb-chip`, (bs) => bs.map((b) => [...b.children].map((c) => c.textContent).join(' | ')));
+  const chip = (list, name) => page.locator(`#q-quote-view .qb-extras[data-list="${list}"] .qb-chip`, { hasText: name }).first();
+  assert.deepEqual(await chipsOf('extras'), ['Pull-out bin | €30 per unit', 'Pocket door | enter price', '+ Custom item']);
+  assert.equal(await page.$eval('#q-quote-view [data-field="glazing.small"]', (i) => i.closest('.qb-field').querySelector('.qb-hint').textContent), '€45 each · €90');
+  await chip('extras', 'Pocket door').click();
   await page.waitForFunction(() => /Enter a price for Pocket door/.test(document.getElementById('q-quote-view').textContent));
   await page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-row').last().locator('[data-k="unitPrice"]').fill('350');
-  await page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-add-select').selectOption({ label: 'Custom item' });
+  await chip('extras', '+ Custom item').click();
   await page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-row').last().locator('[data-k="unitPrice"]').fill('99');
   await page.waitForFunction(() => /Give this extra a name, or remove it/.test(document.getElementById('q-quote-view').textContent));
   await page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-row').last().locator('.qb-rm').click();
   await page.waitForFunction(() => !/Fix the highlighted/.test(document.querySelector('#q-quote-view .qv-totals').textContent));
   await page.screenshot({ path: path.join(SHOTS, 'quotes-builder.png'), fullPage: true });
-  ok('the builder shows live totals from the calculator (identical to it); bad counts, missing prices and nameless extras are marked and block saving');
+  ok('the builder shows live totals from the calculator (identical to it); extras are added with one click from the catalogue, or as custom items; glazed doors show their line total; bad counts, missing prices and nameless extras are marked and block saving');
 
   // ---- save the draft ----
   await page.click('#qv-save');
@@ -190,10 +195,21 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   assert.deepEqual(v1.answers, QE.current().validate(expected).answers);
   assert.deepEqual(v1.sheet, QE.current().calculate(expected, priceList(), { vatRate: 13.5 }));
   assert.deepEqual(v1.sheet.document.project, { type: 'other', name: 'utility room' });
+  // the staff-only cost breakdown: the calculator's own figures, before VAT; rows at €0 for every option are left out
+  await page.click('#q-quote-view .qv-cost summary');
+  const cost = await page.$$eval('#q-quote-view .qv-cost-t tr', (trs) => trs.map((tr) => [...tr.children].map((c) => c.textContent)));
+  const e2 = (x) => '€' + Number(x).toLocaleString('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  assert.deepEqual(cost[0], ['', 'Essential', 'Premium']);
+  assert.deepEqual(cost.find((r) => r[0] === 'Doors'), ['Doors', ...v1.sheet.options.map((o) => e2(o.breakdown.cabinets))]);
+  assert.deepEqual(cost.find((r) => r[0] === 'Drawer boxes'), ['Drawer boxes', ...v1.sheet.options.map((o) => e2(o.breakdown.drawerBoxes))]);
+  assert.deepEqual(cost.find((r) => r[0] === 'Extras'), ['Extras', e2(350), e2(350)]);
+  assert.deepEqual(cost.find((r) => r[0] === 'Glazed doors'), ['Glazed doors', e2(90), e2(90)]);
+  assert.deepEqual(cost.at(-1), ['Total excl. VAT', ...v1.sheet.options.map((o) => e2(o.exVat))]);
+  assert.ok(!cost.some((r) => r[0] === 'Worktop' || r[0] === 'Top boxes' || r[0] === 'Premium Plus extras'), 'rows at €0 for every option are left out');
   await page.waitForFunction(() => document.getElementById('qv-save').disabled);
   assert.equal(q1.ref, 'TEST-0001'); assert.equal(q1.status, 'draft');
   assert.equal((await conv(ph.lena)).inboxStatus, undefined);                                    // making a quote changes nothing in the pipeline
-  ok('Save draft: the server stores the same answers (with the project: Other, "utility room") and the same totals; nothing in the pipeline changes');
+  ok('Save draft: the server stores the same answers (with the project: Other, "utility room") and the same totals; the staff-only cost breakdown shows the calculator\'s figures; nothing in the pipeline changes');
 
   // ---- unsaved changes are not lost by accident ----
   await field('doors').fill('12');
@@ -379,6 +395,63 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   await toastSays(/TEST-0002 deleted/);
   assert.equal((await db.doc('quotes/' + walkQ.id).get()).exists, false);
   ok('a quote that was never sent can be deleted after a confirmation');
+
+  // ---- the quick-select extras follow Quote Settings, live; they never change a price by themselves ----
+  const qx = await makeQuote(ph.lena, { top: { doors: 8 }, options: { pp: { on: true } } });
+  await openQuote(qx);
+  await page.waitForSelector('#q-quote-view .qb-extras[data-list="options.pp.extras"] .qb-chip');
+  assert.deepEqual(await chipsOf('options.pp.extras'), ['Pull-out bin | €30 per unit', 'Pocket door | enter price', '+ Custom item', '+ Free item']);
+  const totalsBefore = await shown();
+  await page.evaluate(async () => {        // rename one item, remove one, add a free one, while the draft is open
+    const s = (await firebase.firestore().doc('quoteSettings/current').get()).data();
+    const extras = [{ name: 'Pull-out bin system', unit: 'per unit', price: 30 }, { name: 'Composite sink', unit: 'included', free: true }];
+    await firebase.app().functions('europe-west1').httpsCallable('saveQuoteSettings')({ expectedRev: s.rev, vatRate: s.vatRate, validityDays: s.validityDays, business: s.business, priceList: { ...s.priceList, extras } });
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll('#q-quote-view .qb-extras[data-list="extras"] .qb-chip')].map((b) => b.textContent).join('/') === 'Pull-out bin system€30 per unit/Composite sink€0/+ Custom item');
+  assert.deepEqual(await chipsOf('options.pp.extras'), ['Pull-out bin system | €30 per unit', 'Composite sink | Free', '+ Custom item', '+ Free item']);
+  assert.deepEqual(await shown(), totalsBefore, 'changing the catalogue changes no total');
+  await chip('extras', 'Composite sink').click();                                          // a free item: €0 in the shared extras
+  const sink = page.locator('#q-quote-view .qb-extras[data-list="extras"] .qb-row').last();
+  assert.deepEqual([await sink.locator('[data-k="name"]').inputValue(), await sink.locator('[data-k="qty"]').inputValue(), await sink.locator('[data-k="unitPrice"]').inputValue()], ['Composite sink', '1', '0']);
+  await chip('options.pp.extras', 'Composite sink').click();                               // and "included at no charge" for Premium Plus
+  assert.match(await page.locator('#q-quote-view .qb-extras[data-list="options.pp.extras"] .qb-row').last().textContent(), /Included at no charge/);
+  await chip('options.pp.extras', 'Pull-out bin system').click();
+  await chip('options.pp.extras', 'Pull-out bin system').click();                          // clicking again adds another row
+  await page.click('#qv-save'); await toastSays(/Draft saved/);
+  const vx = (await db.doc(`quotes/${qx}/versions/1`).get()).data();
+  assert.deepEqual(vx.answers.extras, [{ name: 'Composite sink', unit: 'included', qty: 1, unitPrice: 0 }]);
+  assert.deepEqual(vx.answers.options.pp.extras, [{ name: 'Composite sink', unit: 'included', qty: 1, unitPrice: 0, free: true },
+    { name: 'Pull-out bin system', unit: 'per unit', qty: 1, unitPrice: 30, free: false }, { name: 'Pull-out bin system', unit: 'per unit', qty: 1, unitPrice: 30, free: false }]);
+  assert.deepEqual(vx.sheet, QE.current().calculate(vx.answers, vx.priceList, { vatRate: vx.vatRate }), 'priced by the calculator exactly as before');
+  // "Add the standard extras" in Quote Settings: the original app's list, without duplicates, prices to be typed in
+  await page.evaluate(() => { location.hash = '#quotes/settings'; });
+  await page.waitForSelector('#q-settings-view form.qs #qs-standard');
+  await page.click('#qs-standard');
+  await page.waitForFunction(() => /^Added 10 standard extras: enter their prices, then Save settings\.$/.test(document.getElementById('qs-msg').textContent));
+  const names = await page.$$eval('#qs-catalogue [data-k="name"]', (is) => is.map((i) => i.value));
+  assert.deepEqual(names, ['Pull-out bin system', 'Composite sink', 'Pocket door system', 'Bi-fold door system', 'Oak cutlery tray', 'Integrated pull-out bin', 'Magic corner / Le Mans',
+    'Tall pull-out larder', '150mm base pull-out', 'LED underpanel', 'LED inside larder', 'LED kickboard']);
+  await page.click('#qs-standard');
+  await page.waitForFunction(() => document.getElementById('qs-msg').textContent === 'All the standard extras are already in the list.');
+  const revBefore = (await db.doc('quoteSettings/current').get()).data().rev;
+  await page.click('#qs-save');                                                             // prices not typed in yet: refused
+  await page.waitForFunction(() => document.querySelectorAll('#qs-catalogue [data-k="price"][aria-invalid="true"]').length === 9);
+  assert.equal((await db.doc('quoteSettings/current').get()).data().rev, revBefore);
+  const empties = page.locator('#qs-catalogue [data-k="price"]:not([disabled])');
+  for (let i = 0; i < await empties.count(); i++) if (!(await empties.nth(i).inputValue())) await empties.nth(i).fill(String(101 + i));
+  await page.click('#qs-save');
+  await page.waitForFunction(() => document.getElementById('qs-msg').textContent === 'Saved');
+  const cat = (await db.doc('quoteSettings/current').get()).data().priceList.extras;
+  assert.deepEqual(cat.map((e) => e.name), names);
+  assert.deepEqual(cat.filter((e) => e.manual).map((e) => e.name), ['Pocket door system']);
+  assert.deepEqual(cat.filter((e) => e.free).map((e) => e.name), ['Composite sink']);
+  assert.ok(cat.every((e) => e.manual || e.free || e.price > 0));
+  await openQuote(qx);
+  await page.waitForSelector('#q-quote-view .qb-extras[data-list="extras"] .qb-chip');
+  assert.equal((await chipsOf('extras')).length, 13);
+  assert.deepEqual((await chipsOf('options.pp.extras')).slice(-4), ['LED inside larder | €109 per unit', 'LED kickboard | €110 per metre', '+ Custom item', '+ Free item']);
+  await page.screenshot({ path: path.join(SHOTS, 'quotes-quick-extras.png'), fullPage: true });
+  ok('the extras catalogue in Quote Settings drives the one-click buttons in Extras and Premium Plus extras, live (rename, remove, add); a free item is €0 or "included"; "Add the standard extras" adds the original app\'s list without duplicates, prices to be typed in; totals never change by themselves');
 
   // ---- navigation stays consistent ----
   await page.click('#nav-appointments'); await page.waitForFunction(() => document.getElementById('app').dataset.view === 'appointments');

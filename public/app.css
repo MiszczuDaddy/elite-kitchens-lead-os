@@ -651,8 +651,20 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .qb-mini { display: block; min-width: 0; font-size: 11px; color: var(--muted); }
 .qb-mini span { display: block; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qb-rm { width: 36px; min-height: 36px; color: var(--muted); }
-.qb-add { margin-top: 8px; }
-.qb .qb-add-select { max-width: 340px; }
+.qb-add { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+.qb-chip { display: inline-flex; align-items: baseline; gap: 6px; min-height: 32px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.qb-chip:hover { background: var(--hover); }
+.qb-chip-price { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.qb-chip.free .qb-chip-price { color: var(--accent); }
+.qb-chip.custom { border-style: dashed; color: var(--muted); }
+.qs-cat-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.qv-cost { margin-top: 10px; font-size: 12px; }
+.qv-cost summary { color: var(--muted); cursor: pointer; }
+.qv-cost-t { width: 100%; margin-top: 6px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.qv-cost-t th, .qv-cost-t td { padding: 3px 0 3px 8px; text-align: right; font-weight: 400; white-space: nowrap; }
+.qv-cost-t th:first-child { padding-left: 0; text-align: left; color: var(--muted); white-space: normal; }
+.qv-cost-t thead th { font-weight: 600; color: var(--ink); }
+.qv-cost-total th, .qv-cost-total td { border-top: 1px solid var(--line); font-weight: 600; }
 .qb-figures { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0,1fr); gap: 4px 14px; margin: 8px 0 0; font-size: 13px; }
 .qb-figures dt { color: var(--muted); }
 .qb-figures dd { margin: 0; overflow-wrap: anywhere; }

@@ -34,10 +34,14 @@ window.QuoteBuilder = (() => {
   }
 
   // ---------- mount ----------
-  // host: an empty element. draft: { answers, priceList, vatRate }. onChange(answers) after every edit.
-  function mount(host, { answers, priceList, onChange }) {
+  // host: an empty element. answers and priceList: the draft's (the frozen price list prices the quote). catalogue: the extras
+  // offered as quick-select buttons, from Quote Settings as they are now (setCatalogue updates them while the draft is open);
+  // without it, the draft's own list. onChange(answers) after every edit.
+  function mount(host, { answers, priceList, catalogue, onChange }) {
     const root = mk('div', 'qb');
     const pl = priceList || {};
+    let cat = Array.isArray(catalogue) ? catalogue : (pl.extras || []);
+    const quick = [];                                                // the two groups of quick-select buttons
     const drawerHint = (k) => (k === 'none' ? DRAWERS.none : `${DRAWERS[k]} (${euro(pl.drawerBoxes && pl.drawerBoxes[k])} each)`);
 
     // Project: changes the wording of the quote only (e.g. "your new fitted wardrobes"), never a price.
@@ -80,7 +84,7 @@ window.QuoteBuilder = (() => {
       } else body.append(mk('p', 'qb-note', 'Essential always uses the standard wording: vinyl wrap or melamine doors, Blum soft-close hinges, installation.'));
       if (key === 'pp') {
         const ex = mk('div', 'qb-extras'); ex.dataset.list = 'options.pp.extras';
-        ex.append(mk('h4', 'qb-sub', 'Premium Plus extras'), mk('div', 'qb-rows'), addMenu(true));
+        ex.append(mk('h4', 'qb-sub', 'Premium Plus extras'), quickAdd(true), mk('div', 'qb-rows'));
         body.append(ex);
       }
       box.append(head, body);
@@ -98,7 +102,7 @@ window.QuoteBuilder = (() => {
     const g = pl.glazing || {};
     glaze.append(numberField('Small glazed door cabinets', 'glazing.small', { hint: euro(g.small) + ' each' }), numberField('Large glazed larder doors', 'glazing.large', { hint: euro(g.large) + ' each' }));
     const extras = mk('div', 'qb-extras'); extras.dataset.list = 'extras';
-    extras.append(mk('h4', 'qb-sub', 'Extras'), mk('div', 'qb-rows'), addMenu(false));
+    extras.append(mk('h4', 'qb-sub', 'Extras'), quickAdd(false), mk('div', 'qb-rows'));
     shared.append(wt, glaze, extras);
 
     // Included work / document
@@ -112,29 +116,45 @@ window.QuoteBuilder = (() => {
     root.append(project, kitchen, opts, shared, inc, doc);
     host.replaceChildren(root);
 
-    // ---------- extras rows ----------
-    function addMenu(forPP) {
-      const wrap = mk('div', 'qb-add');
-      const sel = mk('select', 'qb-add-select'); sel.setAttribute('aria-label', forPP ? 'Add a Premium Plus extra' : 'Add an extra');
-      sel.append(new Option(forPP ? 'Add a Premium Plus extra…' : 'Add an extra…', ''));
-      (pl.extras || []).forEach((e, i) => sel.append(new Option(e.name + (e.free ? (forPP ? ' (included free)' : '') : e.manual ? ' (enter price)' : ' (' + euro(e.price) + (e.unit ? ' ' + e.unit : '') + ')'), String(i))));
-      sel.append(new Option('Custom item', 'custom'));
-      if (forPP) sel.append(new Option('Free item (included at no charge)', 'free'));
-      sel.onchange = () => {
-        const v = sel.value; sel.value = '';
-        if (!v) return;
-        const list = wrap.closest('.qb-extras');
-        let row;
-        if (v === 'custom') row = { name: '', unit: '', qty: 1, unitPrice: null };
-        else if (v === 'free') row = { name: '', free: true };
-        else { const e = pl.extras[Number(v)]; row = e.free && forPP ? { name: e.name, unit: e.unit, free: true } : { name: e.name, unit: e.unit || '', qty: 1, unitPrice: e.manual || e.free ? null : e.price }; }
-        const node = extraRow(row, forPP);
-        list.querySelector('.qb-rows').append(node);
-        (node.querySelector(row.name ? (row.unitPrice == null && !row.free ? '[data-k="unitPrice"]' : '[data-k="qty"]') : '[data-k="name"]') || node.querySelector('input')).focus();
-        changed();
-      };
-      wrap.append(sel);
+    // ---------- extras: quick-select buttons and rows ----------
+    // One button per item of the extras catalogue (Quote Settings), then "+ Custom item" (and, for Premium Plus, "+ Free
+    // item"), as in the original app. A button only fills in a new row (name, unit, quantity 1, price), which stays editable:
+    // the catalogue never changes a quote's price by itself. Clicking again adds another row.
+    function quickAdd(forPP) {
+      const wrap = mk('div', 'qb-add'); wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-label', forPP ? 'Add a Premium Plus extra' : 'Add an extra');
+      quick.push({ wrap, forPP });
       return wrap;
+    }
+    function renderQuick() {
+      for (const { wrap, forPP } of quick) {
+        const btn = (cls, label, price, row, title) => {
+          const b = mk('button', 'qb-chip' + (cls ? ' ' + cls : '')); b.type = 'button';
+          b.append(mk('span', 'qb-chip-name', label)); if (price) b.append(mk('span', 'qb-chip-price', price));
+          if (title) b.title = title;
+          b.onclick = () => addRow(wrap, row(), forPP);
+          return b;
+        };
+        const items = cat.filter((e) => e && e.name).map((e) => {
+          const unit = e.unit && e.unit !== 'included' ? ' ' + e.unit : '';
+          if (e.free) return btn('free', e.name, forPP ? 'Free' : '€0', () => (forPP ? { name: e.name, unit: e.unit || '', free: true } : { name: e.name, unit: e.unit || '', qty: 1, unitPrice: 0 }));
+          if (e.manual) return btn('manual', e.name, 'enter price', () => ({ name: e.name, unit: e.unit || '', qty: 1, unitPrice: null }), 'The price is entered on each quote' + unit);
+          return btn('', e.name, euro(e.price) + unit, () => ({ name: e.name, unit: e.unit || '', qty: 1, unitPrice: e.price }));
+        });
+        items.push(btn('custom', '+ Custom item', '', () => ({ name: '', unit: '', qty: 1, unitPrice: null })));
+        if (forPP) items.push(btn('custom', '+ Free item', '', () => ({ name: '', free: true }), 'Included at no charge'));
+        wrap.replaceChildren(...items);
+      }
+    }
+    function addRow(wrap, row, forPP) {
+      const node = extraRow(row, forPP);
+      wrap.closest('.qb-extras').querySelector('.qb-rows').append(node);
+      (node.querySelector(row.name ? (row.unitPrice == null && !row.free ? '[data-k="unitPrice"]' : '[data-k="qty"]') : '[data-k="name"]') || node.querySelector('input')).focus();
+      changed();
+    }
+    function setCatalogue(list) {
+      const next = Array.isArray(list) ? list : [];
+      if (JSON.stringify(next) === JSON.stringify(cat)) return;
+      cat = next; renderQuick();
     }
     function extraRow(e, forPP) {
       const row = mk('div', 'qb-row' + (e.free ? ' free' : ''));
@@ -212,6 +232,12 @@ window.QuoteBuilder = (() => {
       }
       wtPrice.hidden = !field('worktop.on').checked;
       pName.hidden = field('project').value !== 'other';
+      // the glazed doors' line totals next to their counts (shown only; the calculator prices the quote)
+      for (const k of ['small', 'large']) {
+        const input = field('glazing.' + k), price = g[k], n = valueOf(input);
+        const line = Number.isInteger(n) && n > 0 && typeof price === 'number' ? ' · ' + euro(Math.round(n * price * 100) / 100) : '';
+        input.closest('.qb-field').querySelector('.qb-hint').textContent = euro(price) + ' each' + line;
+      }
     }
     // Problems found by the calculator: the field goes red, and the message is shown next to it.
     function showErrors(errors) {
@@ -229,9 +255,10 @@ window.QuoteBuilder = (() => {
     }
     function changed() { layout(); if (onChange) onChange(read()); }
     root.addEventListener('input', changed);
-    root.addEventListener('change', (e) => { if (!e.target.classList.contains('qb-add-select')) changed(); });
+    root.addEventListener('change', changed);
+    renderQuick();
     set(answers);
-    return { read, set, showErrors, focus: () => field('doors').focus(), destroy: () => host.replaceChildren() };
+    return { read, set, showErrors, setCatalogue, focus: () => field('doors').focus(), destroy: () => host.replaceChildren() };
   }
 
   // ---------- the internal figures of a sent version (read-only, never printed) ----------
