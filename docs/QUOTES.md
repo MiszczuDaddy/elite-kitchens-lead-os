@@ -471,7 +471,8 @@ Regression (2026-10-03, after M3): backend 197 of 197; browser suites `ui` 57/57
 ### M4: the customer PDF and sending
 
 Built and tested on 2026-10-04. Nothing deployed. The faithful port was reviewed by the owner and revised (pages and
-wording by project, below); **the revised design and wording await the owner's approval** before M4 is final.
+wording by project, below). **Approved by the owner on 2026-10-04**: the PDF layout, the wording by project and the
+reworded terms (below); the VAT treatment stays as it is until the accountant confirms it.
 
 | File | What |
 |---|---|
@@ -511,7 +512,7 @@ Elite Kitchens logo in the header; make the wording follow the project instead o
 sounding generic; keep the image-based PDF for Phase 6 (a PDF with selectable text can replace it later); show the revised
 pages and the exact wording and terms before M4 is approved.
 
-**Design revision (2026-10-04, awaiting the owner's approval).**
+**Design revision (2026-10-04, approved by the owner the same day).**
 
 * **Pages.** Elite OS measures the sections and decides the page breaks before html2pdf makes the PDF (see "The customer
   PDF"). Checked with nine sample quotes: every one-option quote (a plain kitchen; a full kitchen with worktop, sink,
@@ -542,8 +543,19 @@ pages and the exact wording and terms before M4 is approved.
   kitchen" box now reads "Removal of the existing units" and its "Kitchen" box (the counts) "Doors and boxes".
 * **Calculator.** The answers gain `project` and `projectName` (missing = kitchen, so the 5,000-quote comparison with
   the original app still matches exactly), and the price sheet's `inKitchen` is now `items`. No price changes.
-* **Not changed:** the terms (30% deposit to secure your installation date; 70% on completion; 6-month snagging after
-  completion; valid until), the facts, the option descriptions, the render pages and the image-based PDF.
+* **Terms** (owner's wording, 2026-10-04), printed exactly:
+  * **30%** deposit to secure your installation date
+  * **70%** due on completion of installation (was: "70% on completion")
+  * **6-month** snagging period: we will return to address any snags reported within 6 months of completion. (was:
+    "6-month snagging after completion")
+  * This quotation is valid until (date).
+* **Not changed:** the VAT treatment ("including VAT at 13.5%", optional "excluding VAT" line; the rate awaits the
+  accountant), the facts, the option descriptions, the render pages and the image-based PDF.
+
+Regression (2026-10-04, final M4 with the owner's terms): backend 201 of 201; browser suites `ui` 57/57, `lead` 11/11,
+`crm` 14/14, `dnd` 13/13, `conversion` 10/10, `appointments` 17/17, `quotes` 19/19, `quote-send` 9/9 (it now checks the
+three terms lines exactly), `theme` 10/10 (Chrome). All on the first run. Every page count of the nine sample quotes is
+unchanged by the longer terms (the snagging line takes two lines in the terms panel).
 
 Regression (2026-10-04, after the design revision): backend 201 of 201 (4 new tests); browser suites `ui` 57/57, `lead`
 11/11, `crm` 14/14, `dnd` 13/13, `conversion` 10/10, `appointments` 17/17, `quotes` 19/19, `theme` 10/10 (Chrome),

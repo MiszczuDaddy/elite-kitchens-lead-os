@@ -221,8 +221,8 @@ window.QuoteDocument = (() => {
     Object.assign(n1.style, { width: '47%', verticalAlign: 'top', paddingRight: '14px' }); n1.firstChild.style.marginBottom = '7px';
     const terms = h('div', 'terms', h('div', 'eyebrow', 'Terms'),
       h('div', 'terms-row', h('b', null, '30%'), ' deposit to secure your installation date'),
-      h('div', 'terms-row', h('b', null, '70%'), ' on completion'),
-      h('div', 'terms-row', h('b', null, '6-month'), ' snagging after completion'),
+      h('div', 'terms-row', h('b', null, '70%'), ' due on completion of installation'),
+      h('div', 'terms-row', h('b', null, '6-month'), ' snagging period: we will return to address any snags reported within 6 months of completion.'),
       h('div', 'terms-row terms-valid', `This quotation is valid until ${longDate(data.validUntil)}.`));
     terms.firstChild.style.marginBottom = '7px';
     const n2 = h('td', null, terms); Object.assign(n2.style, { width: '53%', verticalAlign: 'top' });

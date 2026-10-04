@@ -110,7 +110,9 @@ function savePages(buf, prefix) {
   for (const o of v1draft.sheet.options) assert.ok(docText.includes(o.name) && docText.includes('€' + o.incVat.toLocaleString('en-IE')), `${o.name} and its price`);
   assert.match(docText, /Every option includes/); assert.match(docText, /2 small glazed door cabinets/); assert.match(docText, /Pull-out bin/);
   assert.match(docText, /Laminate worktops are not covered against water damage/);
-  assert.match(docText, /30%[\s\S]*deposit[\s\S]*70%[\s\S]*on completion[\s\S]*6-month[\s\S]*snagging/);
+  // the terms exactly as the owner approved them (2026-10-04)
+  for (const t of ['30% deposit to secure your installation date', '70% due on completion of installation',
+    '6-month snagging period: we will return to address any snags reported within 6 months of completion.']) assert.ok(docText.includes(t), `terms: "${t}"`);
   assert.match(docText, new RegExp(`valid until ${longDate(addDays(dublin(Date.now()), 30))}`));
   for (const secret of ['313.37', '171.17', '323.41', '181.19', '19.19', '29.29', '43.43', '77.71']) assert.ok(!docText.includes(secret), 'per-unit price ' + secret + ' printed');
   const issue = dublin(Date.now()), noDates = docText.replace(/EK-0034-v1/g, '').split(longDate(issue)).join('').split(longDate(addDays(issue, 30))).join('');
