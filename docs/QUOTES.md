@@ -619,6 +619,20 @@ Regression (2026-10-04/05): backend 201 of 201; browser suites `ui` 57/57, `lead
 "tomorrow" when it starts and the app when the dialog opens. Run again straight after, it passed 17/17. Unrelated to the
 quotes changes; a test that starts within a minute or two of midnight can hit it.
 
+**Rollout record.**
+* **Backend:** deployed by the owner from Cloud Shell (`check`, then `backend`). The Firebase CLI there first needed
+  `firebase login --reauth --no-localhost`. All 14 quote functions answered "Sign in first". The revisions saved for
+  rollback were `deletecustomer-00007-por` and `updatecontact-00010-siq`.
+* **Preview:** channel `phase6`, https://elite-kitchens-lead-os--phase6-hcsuwuww.web.app (until 2026-11-03). The first
+  publish hit an upload network error and the retry worked. It was republished after the quick-select extras. The owner
+  reviewed it and approved.
+* **Live:** 2026-10-05, the owner's approval ("i approve"), then `./scripts/deploy-quotes.sh live` from Cloud Shell. The
+  live site was checked to serve the Phase 6 files (Quotes menu, quick-select extras, the approved terms, no-cache).
+* **Cut-over:** the old app's highest number was EK-0103, so the next number is 104 (EK-0104), set by the owner in Quote
+  Settings > Quote numbers. From then on, new quotes are made in Elite OS only.
+* **Merge and tag:** with the owner's approval on 2026-10-05, `phase-6-quotes` fast-forwarded into `main`, tagged
+  `phase-6-quotes-complete`.
+
 ## Rollout (M5)
 
 Every step is run by the owner in Cloud Shell: it has `gcloud` and the settings file `functions/.env.elite-kitchens-lead-os`
@@ -687,7 +701,7 @@ Report anything that looks wrong; nothing goes live until you approve it.
 
 ## Open items
 
-* The highest EK number used by the old app, confirmed at cut-over.
+* ~~The highest EK number used by the old app~~: EK-0103 (owner, 2026-10-05), so the cut-over sets the next number to 104.
 * The VAT rate (13.5%), to be confirmed with the accountant.
 * The old app's own database security rules were never confirmed (its notes ask the owner to check them).
 * Both GitHub repositories are public. Prices and business details are kept out of this repository for that reason.
