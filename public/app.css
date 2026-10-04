@@ -750,6 +750,6 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .qdoc-dlg::backdrop { background: #242a224f; }
 .qdoc-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; }
 .qdoc-scroll { flex: 1; min-height: 0; overflow: auto; padding: 24px 12px; }
-.qdoc-page { margin: 0 auto; transform-origin: top left; box-shadow: 0 2px 12px #20271c1f; background: #fff; }
+.qdoc-page { margin: 0 auto; transform-origin: top left; }
 .qdoc-page iframe { display: block; }
 @media (max-width: 899px) { .qsend-left { margin-right: 0; } .dlg-wide .dlg-actions { flex-wrap: wrap; } .qdoc-scroll { padding: 12px 8px; } }

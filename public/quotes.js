@@ -312,7 +312,7 @@ window.QUOTES = (() => {
     box.append(cards);
     const d = v.sheet.document, lists = el('div', 'qv-lists');
     const list = (title, items, cls) => { const s = el('div', 'qv-list ' + (cls || '')); s.append(el('h3', null, title)); const ul = el('ul'); items.forEach((t) => ul.append(el('li', null, t))); s.append(ul); return s; };
-    if (d.inKitchen.length) lists.append(list('In your kitchen', d.inKitchen));
+    if (d.items.length) lists.append(list(QuoteDocument.wording(d.project).items, d.items));
     lists.append(list('Work included', d.workIncluded), list('Not included', d.notIncluded, 'not'));
     box.append(lists);
     const facts = el('dl', 'qb-figures qv-facts'); d.facts.forEach((f) => facts.append(el('dt', null, f.label), el('dd', null, f.value + (f.note ? ' (' + f.note + ')' : ''))));
@@ -786,13 +786,15 @@ window.QUOTES = (() => {
   $('qsend-cancel').onclick = closeSend;
   $('qsend-close').onclick = closeSend;
   $('qsend-dlg').addEventListener('cancel', (e) => { const d = Q.dlg; if (d && d.kind === 'send' && d.working) e.preventDefault(); });
-  // The usual email, from Gmail (the customer's address, the subject and the wording filled in). The PDF is attached by hand.
+  // The usual email, from Gmail (the customer's address, the subject and the wording filled in, naming what the quote is
+  // for). The PDF is attached by hand.
   $('qsend-email').onclick = () => {
     const d = Q.dlg; if (!d || d.kind !== 'send') return;
     const b = d.ctx.settings.business || {}, trading = b.tradingName || 'Elite Kitchens', c = d.ctx.customer;
-    const first = (c.name || '').trim().split(/\s+/)[0] || 'there', options = (d.sheetSent || d.sheet).options.length;
-    const subject = `${trading} — Kitchen Quote ${d.q.ref} v${d.sentN}`;
-    const body = [`Hi ${first},`, '', `Thank you for getting in touch with ${trading}. Please find attached your kitchen quote ${d.q.ref} v${d.sentN}.`, '',
+    const sheet = d.sheetSent || d.sheet, w = QuoteDocument.wording(sheet.document.project);
+    const first = (c.name || '').trim().split(/\s+/)[0] || 'there', options = sheet.options.length;
+    const subject = `${trading} — ${w.subject} ${d.q.ref} v${d.sentN}`;
+    const body = [`Hi ${first},`, '', `Thank you for getting in touch with ${trading}. Please find attached your ${w.quote} ${d.q.ref} v${d.sentN}.`, '',
       `I've put together ${options > 1 ? options + ' options' : 'a proposal'} based on our conversation — all details are outlined in the attached PDF.`, '',
       `The quote is valid for ${d.ctx.settings.validityDays} days. If you have any questions or would like to make any changes, please don't hesitate to get in touch.`, '',
       'Looking forward to hearing from you.', '', 'Kind regards,', b.signatureName || '', trading, [b.phone, b.email].filter(Boolean).join(' | ')].join('\n');
@@ -806,6 +808,8 @@ window.QUOTES = (() => {
     const page = $('qdoc-page'); page.replaceChildren(); page.style.transform = ''; page.style.height = '';
     showDialog($('qdoc-dlg'));
     const f = await QuoteDocument.show(page, data);
+    const pages = Number(f.dataset.pages) || 1;
+    $('qdoc-title').textContent = `${title} · ${pages} page${pages > 1 ? 's' : ''}`;
     const avail = $('qdoc-scroll').clientWidth - 24, w = f.offsetWidth;
     const scale = Math.min(1, avail / w);                                 // a phone shows the whole A4 width, smaller
     page.style.transform = scale < 1 ? `scale(${scale})` : ''; page.style.height = (f.offsetHeight * scale) + 'px'; page.style.width = (w * scale) + 'px';

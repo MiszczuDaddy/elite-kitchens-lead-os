@@ -120,7 +120,9 @@ function compare(q, label, stats) {
   });
   const dearest = sheet.options.reduce((m, o) => (o.incVat > m.incVat ? o : m));
   assert.strictEqual(sheet.dearest, dearest.key, `${label}: dearest`);
-  for (const k of ['facts', 'inKitchen', 'workIncluded', 'notIncluded', 'showExVat']) assert.deepStrictEqual(sheet.document[k], old[k], `${label}: ${k}`);
+  // the original only made kitchen quotes: its lists are the kitchen wording (its "inKitchen" are Elite OS's "items")
+  assert.deepStrictEqual(sheet.document.project, { type: 'kitchen', name: '' }, `${label}: project`);
+  for (const [k, oldK] of [['facts', 'facts'], ['items', 'inKitchen'], ['workIncluded', 'workIncluded'], ['notIncluded', 'notIncluded'], ['showExVat', 'showExVat']]) assert.deepStrictEqual(sheet.document[k], old[oldK], `${label}: ${k}`);
   stats.compared++;
 }
 
@@ -243,15 +245,61 @@ test('document wording: worktop only when priced, glazed doors, extras, work inc
     includes: { sink: true, extractor: false, removal: true, electrical: false, plumbing: true } });
   let d = eng.calculate(a, PL, VAT).document;
   assert.ok(!d.facts.some((f) => f.label === 'Worktops'), 'a €0 worktop is not mentioned (as in the original)');
-  assert.deepStrictEqual(d.inKitchen, ['Sink', '1 small glazed door cabinet', '3 large glazed larder doors', 'Bin ×2', 'Tray']);
+  assert.deepStrictEqual(d.items, ['Sink', '1 small glazed door cabinet', '3 large glazed larder doors', 'Bin ×2', 'Tray']);
   assert.deepStrictEqual(d.workIncluded, ['Kitchen cabinetry — supply and installation', 'Removal of your existing kitchen', 'Plumbing']);
   assert.deepStrictEqual(d.notIncluded.slice(0, 2), ['Appliances', 'Electrical work']);
   assert.ok(!d.notIncluded.includes('Plumbing'));
   a.worktop.price = 900;
   d = eng.calculate(a, PL, VAT).document;
   assert.deepStrictEqual(d.facts.at(-1), { label: 'Worktops', value: 'Supplied and fitted', note: 'Laminate worktops are not covered against water damage.' });
-  assert.strictEqual(d.inKitchen[1], 'Worktops');
+  assert.strictEqual(d.items[1], 'Worktops');
   assert.ok(!JSON.stringify(d).match(/warrant|guarantee/i), 'no workmanship-warranty wording');
+});
+
+test('the project changes only the wording: kitchen as the original, wardrobes without appliances, gas or plumbing, and others', () => {
+  const base = answers({ doors: 8, topBoxes: 2, drawers: 2, worktop: { on: true, price: 500 }, includes: { sink: true, extractor: false, removal: true, electrical: false, plumbing: false } });
+  const sheetFor = (project, projectName) => eng.calculate({ ...structuredClone(base), project, projectName }, PL, VAT);
+  const kitchen = sheetFor('kitchen');
+  const docs = Object.fromEntries(['kitchen', 'wardrobes', 'kitchen-wardrobes', 'other'].map((p) => [p, sheetFor(p, 'utility room').document]));
+  for (const p of Object.keys(docs)) assert.deepStrictEqual(sheetFor(p).options, kitchen.options, `${p}: the prices are the same`);
+  assert.deepStrictEqual(docs.kitchen.project, { type: 'kitchen', name: '' }, 'a name is kept only for Other');
+  assert.deepStrictEqual(docs.other.project, { type: 'other', name: 'utility room' });
+  assert.deepStrictEqual(docs.kitchen.workIncluded, ['Kitchen cabinetry — supply and installation', 'Removal of your existing kitchen']);
+  assert.deepStrictEqual(docs.kitchen.notIncluded, ['Appliances', 'Electrical work', 'Plumbing', 'Gas disconnection and reconnection — arranged by you with a registered RGI installer',
+    'Tiling & flooring', 'Painting and decorating — best done once the kitchen is fitted', 'Skip and waste removal — arranged by you']);
+  assert.deepStrictEqual(docs.wardrobes.workIncluded, ['Fitted wardrobes — supply and installation', 'Removal of your existing wardrobes']);
+  assert.deepStrictEqual(docs.wardrobes.notIncluded, ['Electrical work', 'Painting and decorating — best done once the wardrobes are fitted', 'Skip and waste removal — arranged by you']);
+  assert.deepStrictEqual(docs['kitchen-wardrobes'].workIncluded, ['Kitchen cabinetry and fitted wardrobes — supply and installation', 'Removal of your existing kitchen and wardrobes']);
+  assert.deepStrictEqual(docs['kitchen-wardrobes'].notIncluded, ['Appliances', 'Electrical work', 'Plumbing', 'Gas disconnection and reconnection — arranged by you with a registered RGI installer',
+    'Tiling & flooring', 'Painting and decorating — best done once everything is fitted', 'Skip and waste removal — arranged by you']);
+  assert.deepStrictEqual(docs.other.workIncluded, ['Cabinetry — supply and installation', 'Removal of your existing units']);
+  assert.deepStrictEqual(docs.other.notIncluded, ['Appliances', 'Electrical work', 'Plumbing', 'Tiling & flooring', 'Painting and decorating — best done once everything is fitted', 'Skip and waste removal — arranged by you']);
+  for (const p of Object.keys(docs)) {
+    assert.deepStrictEqual([docs[p].facts, docs[p].items], [kitchen.document.facts, kitchen.document.items], `${p}: the same facts and items`);
+    if (p !== 'kitchen' && p !== 'kitchen-wardrobes') assert.ok(!/kitchen/i.test(JSON.stringify(docs[p])), `${p}: no kitchen wording`);
+  }
+  const plumbed = sheetFor('wardrobes'); assert.ok(!plumbed.document.notIncluded.includes('Plumbing'));
+  const withPlumbing = eng.calculate({ ...structuredClone(base), project: 'wardrobes', includes: { ...base.includes, plumbing: true } }, PL, VAT).document;
+  assert.ok(withPlumbing.workIncluded.includes('Plumbing'), 'work that is ticked is always listed');
+});
+
+test('project: missing means a kitchen; unknown is refused; the name is tidied and limited to 40 characters', () => {
+  assert.strictEqual(eng.validate({}).answers.project, 'kitchen');
+  assert.strictEqual(eng.validate({}).answers.projectName, '');
+  assert.deepStrictEqual(fieldsOf(eng.validate({ project: 'bathroom' })), ['project']);
+  assert.deepStrictEqual(fieldsOf(eng.validate({ project: 'other', projectName: 'x'.repeat(41) })), ['projectName']);
+  assert.deepStrictEqual(fieldsOf(eng.validate({ project: 'other', projectName: 5 })), ['projectName']);
+  assert.strictEqual(eng.validate({ project: 'other', projectName: '  home \n  office ' }).answers.projectName, 'home office');
+  assert.deepStrictEqual(eng.PROJECTS, ['kitchen', 'wardrobes', 'kitchen-wardrobes', 'other']);
+});
+
+test('a new quote\'s project comes from the customer\'s Project type (a kitchen when there is none)', () => {
+  const p = (projectType) => eng.newAnswers(PL, { projectType }).project;
+  assert.deepStrictEqual([p('Kitchen'), p('Wardrobes'), p('Kitchen & wardrobes'), p('Other'), p(null), p(''), p(undefined)],
+    ['kitchen', 'wardrobes', 'kitchen-wardrobes', 'other', 'kitchen', 'kitchen', 'kitchen']);
+  assert.deepStrictEqual([p('Fitted bedroom'), p('New kitchen and bedroom wardrobes'), p('Home office')], ['wardrobes', 'kitchen-wardrobes', 'other']);
+  assert.strictEqual(eng.newAnswers(PL).project, 'kitchen');
+  assert.strictEqual(eng.newAnswers(PL, { projectType: 'Home office' }).projectName, '', 'free text is never printed by itself');
 });
 
 test('the dearest option is the one with the highest total including VAT', () => {
@@ -364,6 +412,7 @@ test('the price list: every price is required; catalogue items need a name; manu
 
 test('a new quote starts with Essential on, the others off, and the price list\'s defaults', () => {
   const a = eng.newAnswers(PL);
+  assert.deepStrictEqual([a.project, a.projectName], ['kitchen', '']);
   assert.deepStrictEqual(a.options.ess, { on: true, perDoor: 110, perTopBox: 60, drawerBox: 'none' });
   assert.deepStrictEqual(a.options.prem, { on: false, perDoor: 140, perTopBox: 65, drawerBox: 'none', description: '' });
   assert.deepStrictEqual(a.options.pp.extras, []);

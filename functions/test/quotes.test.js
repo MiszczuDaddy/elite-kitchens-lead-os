@@ -174,6 +174,16 @@ test('create: a draft v1 priced by the server with the price list, linked by pho
   assert.equal(r.id, Q.quoteId(P, 'same-request-1'));
 });
 
+test('create: the quote\'s project (the wording of its PDF) starts as the customer\'s Project type', async () => {
+  const P2 = '353862222222', P3 = '353873333333';
+  await seed(P, {}, 'Anna', { projectType: 'Wardrobes' }); await seed(P2, { projectType: 'Kitchen & wardrobes' }, 'Brian'); await seed(P3, {}, 'Ciara'); await setup();
+  const projectOf = async (p) => (await version((await run(Q.create, { phone: p, requestId: rid() })).id, 1)).answers.project;
+  assert.deepEqual([await projectOf(P), await projectOf(P2), await projectOf(P3)], ['wardrobes', 'kitchen-wardrobes', 'kitchen']);
+  const { id } = await run(Q.create, { phone: P, requestId: rid() });
+  assert.deepEqual((await version(id, 1)).sheet.document.project, { type: 'wardrobes', name: '' });
+  assert.ok(!(await version(id, 1)).sheet.document.notIncluded.includes('Appliances'));
+});
+
 test('saving a draft: the server recalculates; invalid answers are refused with every problem listed; stale saves are refused', async () => {
   await seed(); await setup();
   const { id } = await make();

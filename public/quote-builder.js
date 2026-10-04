@@ -5,7 +5,8 @@
 // calculator is a new file with the same small API (supports, mount, figures), and nothing else has to change.
 window.QuoteBuilder = (() => {
   const OPTIONS = [['ess', 'Essential'], ['prem', 'Premium'], ['pp', 'Premium Plus']];
-  const INCLUDES = [['sink', 'Sink'], ['extractor', 'Extractor'], ['removal', 'Removal of the existing kitchen'], ['electrical', 'Electrical work'], ['plumbing', 'Plumbing']];
+  const PROJECTS = [['kitchen', 'Kitchen'], ['wardrobes', 'Wardrobes'], ['kitchen-wardrobes', 'Kitchen & wardrobes'], ['other', 'Other']];
+  const INCLUDES = [['sink', 'Sink'], ['extractor', 'Extractor'], ['removal', 'Removal of the existing units'], ['electrical', 'Electrical work'], ['plumbing', 'Plumbing']];
   const DRAWERS = { none: 'No drawer boxes', cemux: 'Cemux Soft-Close', blum: 'Blum Merivobox' };
   const supports = (ref) => !!ref && ref.id === 'ek-packages' && ref.version === 1;
   const euro = (n) => (n == null ? '' : '€' + Number(n).toLocaleString('en-IE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }));
@@ -39,8 +40,19 @@ window.QuoteBuilder = (() => {
     const pl = priceList || {};
     const drawerHint = (k) => (k === 'none' ? DRAWERS.none : `${DRAWERS[k]} (${euro(pl.drawerBoxes && pl.drawerBoxes[k])} each)`);
 
-    // Kitchen
-    const kitchen = mk('fieldset', 'qb-sec'); kitchen.append(mk('legend', null, 'Kitchen'));
+    // Project: changes the wording of the quote only (e.g. "your new fitted wardrobes"), never a price.
+    const project = mk('fieldset', 'qb-sec'); project.append(mk('legend', null, 'Project'));
+    const pGrid = mk('div', 'qb-grid');
+    const pType = mk('label', 'qb-field'), pSel = mk('select'); pSel.dataset.field = 'project';
+    for (const [k, label] of PROJECTS) pSel.append(new Option(label, k));
+    pType.append(mk('span', 'qb-label', 'The quote is for'), pSel);
+    const pName = mk('label', 'qb-field'), pInput = mk('input'); pInput.maxLength = 40; pInput.dataset.field = 'projectName'; pInput.placeholder = 'e.g. utility room';
+    pName.append(mk('span', 'qb-label', 'What is it?'), pInput, mk('span', 'qb-hint', 'Printed as "your new …". Empty: "your new fitted furniture".'));
+    pGrid.append(pType, pName);
+    project.append(pGrid, mk('p', 'qb-note', 'Sets the wording of the quote (what is included and not included). Prices are not affected.'));
+
+    // Counts
+    const kitchen = mk('fieldset', 'qb-sec'); kitchen.append(mk('legend', null, 'Doors and boxes'));
     const kGrid = mk('div', 'qb-grid');
     kGrid.append(numberField('Doors', 'doors'), numberField('Top boxes', 'topBoxes'), numberField('Drawers', 'drawers'));
     kitchen.append(kGrid, mk('p', 'qb-note', 'Counts stay internal: they are never printed on the quote.'));
@@ -97,7 +109,7 @@ window.QuoteBuilder = (() => {
     const doc = mk('fieldset', 'qb-sec'); doc.append(mk('legend', null, 'On the quote'));
     doc.append(check('Also show prices excluding VAT', 'showExVat'));
 
-    root.append(kitchen, opts, shared, inc, doc);
+    root.append(project, kitchen, opts, shared, inc, doc);
     host.replaceChildren(root);
 
     // ---------- extras rows ----------
@@ -164,6 +176,7 @@ window.QuoteBuilder = (() => {
         options[key] = o;
       }
       return {
+        project: field('project').value, projectName: field('projectName').value,
         doors: valueOf(field('doors')), topBoxes: valueOf(field('topBoxes')), drawers: valueOf(field('drawers')), options,
         worktop: { on: field('worktop.on').checked, price: valueOf(field('worktop.price')) },
         glazing: { small: valueOf(field('glazing.small')), large: valueOf(field('glazing.large')) },
@@ -174,6 +187,7 @@ window.QuoteBuilder = (() => {
     }
     function set(a) {
       a = a || {};
+      field('project').value = a.project || 'kitchen'; field('projectName').value = a.projectName || '';
       for (const f of ['doors', 'topBoxes', 'drawers']) setNum(field(f), a[f]);
       for (const [key] of OPTIONS) {
         const o = (a.options && a.options[key]) || {};
@@ -197,6 +211,7 @@ window.QuoteBuilder = (() => {
         optionNodes[key].body.hidden = !on; optionNodes[key].box.classList.toggle('on', on);
       }
       wtPrice.hidden = !field('worktop.on').checked;
+      pName.hidden = field('project').value !== 'other';
     }
     // Problems found by the calculator: the field goes red, and the message is shown next to it.
     function showErrors(errors) {
@@ -224,6 +239,8 @@ window.QuoteBuilder = (() => {
   function figures(answers, priceList) {
     const a = answers || {}, pl = priceList || {}, rows = [];
     const add = (k, v) => rows.push([k, v]);
+    const pr = PROJECTS.find(([k]) => k === (a.project || 'kitchen'));
+    add('Project', (pr ? pr[1] : a.project) + (a.project === 'other' && a.projectName ? ' (' + a.projectName + ')' : ''));
     add('Doors · top boxes · drawers', [a.doors || 0, a.topBoxes || 0, a.drawers || 0].join(' · '));
     for (const [key, name] of OPTIONS) {
       const o = (a.options && a.options[key]) || {};

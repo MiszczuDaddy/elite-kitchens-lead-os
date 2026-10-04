@@ -145,6 +145,8 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   assert.equal(await page.locator('#qv-send').isDisabled(), false);                         // (M4: Send is switched on)
   assert.equal(await page.locator('#qv-preview').isVisible(), true);
   assert.match(await page.textContent('.qv-customer'), /No address yet/);
+  assert.equal(await field('project').inputValue(), 'kitchen', 'no Project type on the customer: a kitchen');
+  assert.equal(await field('projectName').isVisible(), false);
   ok('Create quote in the profile opens a draft priced from Quote Settings (Essential on); Send and Preview are offered');
 
   // ---- live totals from the calculator, and problems shown ----
@@ -153,7 +155,9 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   await field('options.prem.on').check();
   await field('options.prem.drawerBox').selectOption('blum');
   await field('glazing.small').fill('2');
-  const answers1 = { ...QE.current().newAnswers(priceList()), doors: 10, drawers: 4, glazing: { small: 2, large: 0 } };
+  await field('project').selectOption('other');                                                  // the wording only: prices stay the same
+  await field('projectName').fill('utility room');
+  const answers1 = { ...QE.current().newAnswers(priceList()), project: 'other', projectName: 'utility room', doors: 10, drawers: 4, glazing: { small: 2, large: 0 } };
   answers1.options.ess.drawerBox = 'cemux'; answers1.options.prem = { ...answers1.options.prem, on: true, drawerBox: 'blum' };
   const sheet1 = QE.current().calculate(answers1, priceList(), { vatRate: 13.5 });
   const shown = async () => page.$$eval('#q-quote-view .qv-total', (rs) => rs.map((r) => [r.dataset.key, r.querySelector('.qv-total-amt').textContent]));
@@ -185,10 +189,11 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   const expected = { ...answers1, extras: [{ name: 'Pocket door', unit: 'per opening', qty: 1, unitPrice: 350 }] };
   assert.deepEqual(v1.answers, QE.current().validate(expected).answers);
   assert.deepEqual(v1.sheet, QE.current().calculate(expected, priceList(), { vatRate: 13.5 }));
+  assert.deepEqual(v1.sheet.document.project, { type: 'other', name: 'utility room' });
   await page.waitForFunction(() => document.getElementById('qv-save').disabled);
   assert.equal(q1.ref, 'TEST-0001'); assert.equal(q1.status, 'draft');
   assert.equal((await conv(ph.lena)).inboxStatus, undefined);                                    // making a quote changes nothing in the pipeline
-  ok('Save draft: the server stores the same answers and the same totals; nothing in the pipeline changes');
+  ok('Save draft: the server stores the same answers (with the project: Other, "utility room") and the same totals; nothing in the pipeline changes');
 
   // ---- unsaved changes are not lost by accident ----
   await field('doors').fill('12');

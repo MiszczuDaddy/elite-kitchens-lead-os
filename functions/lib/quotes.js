@@ -166,7 +166,9 @@ async function create({ db }, actor, data, { nowMs = Date.now() } = {}) {
     const engineRef = { ...QE.CURRENT };
     let answers = data.answers;
     if (answers === undefined) {
-      try { answers = QE.get(engineRef).newAnswers(s.priceList); }
+      // The project (kitchen, wardrobes...) starts as the customer's Project type; staff can change it on the quote.
+      const projectType = (contact.exists && contact.data().projectType) || conv.data().projectType || null;
+      try { answers = QE.get(engineRef).newAnswers(s.priceList, { projectType }); }
       catch (e) { if (e.name === 'QuoteInputError') throw refused('Quote Settings are incomplete: check the prices in Quote Settings.'); throw e; }
     }
     const p = priced(engineRef, answers, s.priceList, s.vatRate);

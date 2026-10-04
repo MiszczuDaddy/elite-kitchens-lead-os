@@ -57,7 +57,7 @@ function savePages(buf, prefix) {
     await db.doc('contacts/' + id).set({ phone: id, createdAt: ago(10), ...contact });
   };
   await seed(ph.anna, {}, { name: 'Anna Murphy', email: 'anna@example.com', address: '12 Main Street, Swords, K67 AB12', location: 'Swords' });
-  await seed(ph.cathal, { inboxStatus: 'closed', stageDates: { closed: ago(6) } }, { name: 'Cathal Closed', address: '3 Hill Road' });
+  await seed(ph.cathal, { inboxStatus: 'closed', stageDates: { closed: ago(6) } }, { name: 'Cathal Closed', address: '3 Hill Road', projectType: 'Wardrobes' });
   const quotesOf = async (p) => (await db.collection('quotes').where('phone', '==', p).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
   const conv = async (p) => (await db.doc('conversations/' + p).get()).data();
   const contact = async (p) => (await db.doc('contacts/' + p).get()).data();
@@ -102,7 +102,8 @@ function savePages(buf, prefix) {
   const v1draft = await version(q.id, 1);
   await page.click('#qv-preview');
   await page.waitForSelector('#qdoc-dlg[open] #qdoc-page iframe');
-  await page.waitForFunction(() => { const f = document.querySelector('#qdoc-page iframe'); return f && f.contentDocument && /Your options/.test(f.contentDocument.body.innerText); });
+  // the preview is complete once it has been put into pages (it then knows how many)
+  await page.waitForFunction(() => { const f = document.querySelector('#qdoc-page iframe'); return f && f.dataset.pages && /Your options/.test(f.contentDocument.body.innerText); });
   const docText = await page.evaluate(() => document.querySelector('#qdoc-page iframe').contentDocument.body.innerText);
   assert.match(docText, /Draft · not sent/i);
   assert.match(docText, /EK-0034-v1/); assert.match(docText, /Dear Anna,/); assert.match(docText, /12 Main Street, Swords, K67 AB12/);
@@ -115,6 +116,11 @@ function savePages(buf, prefix) {
   const issue = dublin(Date.now()), noDates = docText.replace(/EK-0034-v1/g, '').split(longDate(issue)).join('').split(longDate(addDays(issue, 30))).join('');
   for (const count of ['37', '11', '13']) assert.ok(!new RegExp(`(^|[^\\d,.])${count}([^\\d,.]|$)`).test(noDates), 'count ' + count + ' printed');
   assert.ok(!/warrant|guarantee/i.test(docText), 'no workmanship-warranty wording');
+  assert.ok(!/\bnull\b|\bundefined\b|NaN/.test(docText), 'no "null", "undefined" or "NaN" in the document');
+  assert.match(docText, /quote for your new kitchen\.[\s\S]*Your kitchen[\s\S]*In your kitchen[\s\S]*Kitchen cabinetry — supply and installation/i);   // (labels print in capitals)
+  const previewPages = await page.evaluate(() => Number(document.querySelector('#qdoc-page iframe').dataset.pages));
+  assert.match(await page.textContent('#qdoc-title'), new RegExp(`· ${previewPages} pages?$`));
+  assert.equal(await page.evaluate(() => document.querySelector('#qdoc-page iframe').contentDocument.querySelectorAll('.sheet').length), previewPages, 'one sheet per page');
   await page.screenshot({ path: path.join(SHOTS, 'quote-preview.png') });
   await page.click('#qdoc-close');
   ok('Preview shows the customer document, marked "Draft · not sent": options and prices, wording, terms and validity, with no counts or per-unit prices');
@@ -141,7 +147,7 @@ function savePages(buf, prefix) {
   const downloaded = Buffer.from(await page.evaluate(async () => { const r = await fetch(document.getElementById('qsend-download').href); return Array.from(new Uint8Array(await r.arrayBuffer())); }));
   assert.ok(downloaded.equals(stored), 'the downloaded PDF is byte-for-byte the stored copy');
   assert.equal(await page.getAttribute('#qsend-download', 'download'), 'EliteKitchens-EK-0034-v1.pdf');
-  assert.ok(pagesOf(stored) >= 2, 'the quote plus a page for the render');
+  assert.equal(pagesOf(stored), previewPages + 1, 'the pages of the preview, plus a page for the render');
   savePages(stored, 'quote-pdf-sent-page');
   assert.equal((await conv(ph.anna)).inboxStatus, 'quoted');
   assert.equal((await contact(ph.anna)).quoteValue, dearest.incVat);
@@ -190,10 +196,18 @@ function savePages(buf, prefix) {
   await page.waitForFunction(() => !/Expired/.test(document.querySelector('#q-quote-view .qv-banner').textContent));
   ok('Send again on an expired quote sends v2 with the same prices and a new 30-day validity; the stage and value are left as they are');
 
-  // ---- a Closed customer stays Closed unless "Reopen" is ticked ----
+  // ---- a Closed customer stays Closed unless "Reopen" is ticked; their quote is for wardrobes (their Project type) ----
   const qc = await page.evaluate(async (phone) => (await firebase.app().functions('europe-west1').httpsCallable('createQuote')({ phone, requestId: 'e2e-' + Date.now() + '-closed' })).data.id, ph.cathal);
   await page.evaluate((id) => { location.hash = '#quotes/' + id; }, qc);
   await page.waitForSelector('#qv-send:not([disabled])');
+  assert.equal(await field('project').inputValue(), 'wardrobes');
+  assert.equal(await field('projectName').isVisible(), false, '"What is it?" is only for Other');
+  await page.click('#qv-preview');
+  await page.waitForFunction(() => { const f = document.querySelector('#qdoc-page iframe'); return f && f.dataset.pages && /Your quotation/.test(f.contentDocument.body.innerText); });
+  const wText = await page.evaluate(() => document.querySelector('#qdoc-page iframe').contentDocument.body.innerText);
+  assert.match(wText, /quote for your new fitted wardrobes\.[\s\S]*Your wardrobes[\s\S]*Every wardrobe is made to fit your room[\s\S]*Fitted wardrobes — supply and installation/);
+  assert.ok(!/kitchen|appliances|RGI|plumbing/i.test(wText.split('Elite Kitchens').join('')), 'nothing about kitchens, appliances, gas or plumbing on a wardrobe quote');
+  await page.click('#qdoc-close');
   await page.click('#qv-send'); await page.waitForSelector('#qsend-dlg[open]');
   assert.equal(await page.isVisible('#qsend-reopen-row'), true);
   assert.equal(await page.isChecked('#qsend-reopen'), false);
@@ -205,9 +219,43 @@ function savePages(buf, prefix) {
   assert.equal((await conv(ph.cathal)).inboxStatus, 'closed');
   await page.click('#qsend-email');
   for (let i = 0; i < 30 && !opened.length; i++) await sleep(100);
-  assert.equal(new URL(opened.pop()).searchParams.get('to'), null, 'no recipient when there is no email');
+  const wMail = new URL(opened.pop());
+  assert.equal(wMail.searchParams.get('to'), null, 'no recipient when there is no email');
+  assert.equal(wMail.searchParams.get('su'), 'Elite Kitchens — Wardrobe Quote EK-0035 v1');
+  assert.match(wMail.searchParams.get('body'), /your wardrobe quote EK-0035 v1/);
+  assert.deepEqual((await version(qc, 1)).sheet.document.project, { type: 'wardrobes', name: '' });
   await page.click('#qsend-close');
-  ok('sending to a Closed customer offers an unticked "Reopen"; left unticked they stay Closed; with no email the draft has no recipient');
+  ok('a wardrobe customer\'s quote is worded for wardrobes (preview and email); sending to a Closed customer offers an unticked "Reopen"; left unticked they stay Closed; with no email the draft has no recipient');
+
+  // ---- pages: one page when it fits; sections never cut; the sign-off never alone ----
+  const pg = await page.evaluate(async (pl) => {
+    const e = QuoteEngine.current(), host = document.createElement('div');
+    Object.assign(host.style, { position: 'fixed', left: '-5000px', top: '0' }); document.body.append(host);
+    const sheetOf = (patch, opts) => { const a = e.newAnswers(pl); Object.assign(a, { doors: 24, topBoxes: 6, drawers: 9 }, patch); for (const [k, v] of Object.entries(opts || {})) Object.assign(a.options[k], v); return e.calculate(a, pl, { vatRate: 13.5 }); };
+    const layout = async (sheet) => {
+      const f = await QuoteDocument.show(host, { ref: 'EK-9999-v1', issueDate: '2026-10-04', validUntil: '2026-11-03', customer: { name: 'Pat Example', address: '1 Long Road, Swords, Co. Dublin, K67 AB12' },
+        business: { tradingName: 'Elite Kitchens', signatureName: 'Test Signer', phone: '01 000 0000', email: 'quotes@example.com', web: 'www.example.com', address: 'Test Street, Dublin', vatNumber: 'IE0000000X' }, sheet, renders: [], draft: true });
+      const r = { pages: Number(f.dataset.pages), sheets: [...f.contentDocument.querySelectorAll('.sheet')].map((s) => [...s.querySelectorAll(':scope > .blk')].map((b) => (b.classList.contains('closing') ? 'closing' : 'section'))) };
+      f.remove(); return r;
+    };
+    const full = { worktop: { on: true, price: 1450 }, glazing: { small: 2, large: 1 }, includes: { sink: true, extractor: true, removal: true, electrical: true, plumbing: false },
+      extras: [{ name: 'Pull-out bin', unit: 'per unit', qty: 1, unitPrice: 240 }, { name: 'Magic corner', unit: 'per unit', qty: 2, unitPrice: 310 }] };
+    return {
+      one: await layout(sheetOf(full)),
+      three: await layout(sheetOf(full, { prem: { on: true }, pp: { on: true, extras: [{ name: 'Composite sink', free: true }, { name: 'LED lighting', qty: 2, unitPrice: 280 }] } })),
+      pagePx: QuoteDocument.PAGE_PX,
+      plans: [[300, 200, 200], [300, 200, 200, 200, 200], [400, 300, 300, 300], [300, 900, 900, 300], [300, 600, 800]].map((hs) => QuoteDocument.plan(hs)),
+    };
+  }, SETTINGS.priceList);
+  assert.equal(pg.one.pages, 1, 'a one-option quote with worktop, sink, extractor, glazed doors and extras fits on one page');
+  assert.ok(pg.three.pages >= 2, 'three options take more than one page');
+  assert.equal(pg.three.sheets.flat().filter((b) => b === 'closing').length, 1);
+  assert.ok(pg.three.sheets.every((s) => s.length >= 1) && pg.three.sheets.at(-1).length >= 2 && pg.three.sheets.at(-1).at(-1) === 'closing', `the closing section shares its page: ${JSON.stringify(pg.three.sheets)}`);
+  assert.equal(pg.pagePx, 1025, 'A4 less 12 mm margins, in CSS pixels (as html2pdf rounds), less 6 px of safety');
+  // section heights in, "break before section i" out; the last section is the closing one
+  assert.deepEqual(pg.plans, [[], [3], [2], [1, 2, 3], [2]],
+    'fits: no break; the closing section takes the one before it along; not when that one already starts a page, or both would not fit on one');
+  ok('pages: a full one-option quote is one page; with more, sections are never cut and the closing section (terms and sign-off) shares its page with the section before it');
 
   // ---- phone ----
   const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
@@ -222,6 +270,9 @@ function savePages(buf, prefix) {
   await mp.waitForSelector('#qdoc-dlg[open] #qdoc-page iframe');
   await mp.waitForFunction(() => document.getElementById('qdoc-page').style.transform.startsWith('scale('));
   assert.equal(await mp.evaluate(() => document.getElementById('qdoc-scroll').scrollWidth <= document.getElementById('qdoc-scroll').clientWidth + 1), true, 'the A4 page is scaled to the phone width');
+  const pf = await mp.evaluate(() => { const f = document.querySelector('#qdoc-page iframe'); return { w: f.offsetWidth, inner: f.contentDocument.documentElement.scrollWidth, shown: f.getBoundingClientRect().width, screen: innerWidth }; });
+  assert.ok(Math.abs(pf.w - 794) <= 1 && pf.inner <= pf.w + 1, `the whole A4 width is laid out and nothing is cut off (${JSON.stringify(pf)})`);
+  assert.ok(pf.shown < pf.screen, 'and it is shown smaller than the screen');
   await mp.screenshot({ path: path.join(SHOTS, 'quote-preview-phone.png') });
   await mp.tap('#qdoc-close');
   await mp.tap('#qv-send'); await mp.waitForSelector('#qsend-dlg[open]');

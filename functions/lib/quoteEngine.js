@@ -10,9 +10,11 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(); else root.QuoteEngine = factory();
 })(this, function () {
-  const LIMIT = { count: 999, money: 1000000, qty: 10000, lines: 50, name: 120, unit: 40, description: 600, catalogue: 100 };
+  const LIMIT = { count: 999, money: 1000000, qty: 10000, lines: 50, name: 120, unit: 40, description: 600, catalogue: 100, projectName: 40 };
   const DRAWER_BOXES = ['none', 'cemux', 'blum'];
   const INCLUDES = ['sink', 'extractor', 'removal', 'electrical', 'plumbing'];
+  // What the quote is for. It changes only the wording of the document, never a price.
+  const PROJECTS = ['kitchen', 'wardrobes', 'kitchen-wardrobes', 'other'];
 
   // ---- exact money ----
   // Amounts are BigInt "units" of 1/10,000 euro: a price in cents times a quantity in hundredths is always a whole number.
@@ -96,8 +98,12 @@
   // messages. Missing sections mean "none"; a missing price for an option that is switched on is an error, never guessed.
   function validate(input) {
     const c = checker();
-    const a = c.onlyKeys(input, ['doors', 'topBoxes', 'drawers', 'options', 'worktop', 'glazing', 'extras', 'includes', 'showExVat'], '');
+    const a = c.onlyKeys(input, ['project', 'projectName', 'doors', 'topBoxes', 'drawers', 'options', 'worktop', 'glazing', 'extras', 'includes', 'showExVat'], '');
     const out = {
+      // No project means a kitchen (the original app's only wording). The name is used only for "Other" (e.g. "utility room").
+      project: a.project == null ? 'kitchen' : PROJECTS.includes(a.project) ? a.project
+        : c.fail('project', 'Choose Kitchen, Wardrobes, Kitchen & wardrobes or Other.') ?? 'kitchen',
+      projectName: (c.text(a.projectName, LIMIT.projectName, 'projectName', 'The project name') ?? '').replace(/\s+/g, ' '),
       doors: c.count(a.doors, 'doors', 'Doors'),
       topBoxes: c.count(a.topBoxes, 'topBoxes', 'Top boxes'),
       drawers: c.count(a.drawers, 'drawers', 'Drawers'),
@@ -205,12 +211,20 @@
     return { ok: c.errors.length === 0, priceList: out, errors: c.errors };
   }
 
+  // The project of a new quote, from the customer's "Project type" (a dropdown in Elite OS, or the text of a Meta lead form).
+  // Nothing recognisable means a kitchen; anything else is "Other" with no name, for staff to describe on the quote.
+  function projectOf(projectType) {
+    const t = String(projectType || '').trim().toLowerCase();
+    const k = /kitchen/.test(t), w = /wardrobe|bedroom/.test(t);
+    return k && w ? 'kitchen-wardrobes' : k ? 'kitchen' : w ? 'wardrobes' : t ? 'other' : 'kitchen';
+  }
   // A new quote's answers: Essential on, the other options off, prices from the price list.
-  function newAnswers(priceList) {
+  function newAnswers(priceList, { projectType } = {}) {
     const pl = validatePriceList(priceList);
     if (!pl.ok) throw inputError('The price list is incomplete.', pl.errors);
     const opt = (key, on) => ({ on, perDoor: pl.priceList.options[key].perDoor, perTopBox: pl.priceList.options[key].perTopBox, drawerBox: 'none' });
     return {
+      project: projectOf(projectType), projectName: '',
       doors: 0, topBoxes: 0, drawers: 0,
       options: { ess: opt('ess', true), prem: { ...opt('prem', false), description: '' }, pp: { ...opt('pp', false), description: '', extras: [] } },
       worktop: { on: false, price: 0 }, glazing: { small: 0, large: 0 }, extras: [],
@@ -290,36 +304,51 @@
     return lines;
   }
 
-  // The rest of the PDF's wording that depends on the answers. Paid items in the kitchen are kept apart from work included.
+  // The lists of the PDF that depend on the answers. Paid items (sink, worktops, extras...) are kept apart from the work
+  // included. A kitchen reads exactly as the original app's PDF; wardrobes and other projects leave out what cannot apply
+  // (appliances, gas, plumbing for wardrobes) and name the right thing.
+  const PROJECT_LISTS = {
+    kitchen: { work: 'Kitchen cabinetry — supply and installation', removal: 'Removal of your existing kitchen',
+      appliances: true, plumbing: true, gas: true, tiling: true, painting: 'Painting and decorating — best done once the kitchen is fitted' },
+    wardrobes: { work: 'Fitted wardrobes — supply and installation', removal: 'Removal of your existing wardrobes',
+      appliances: false, plumbing: false, gas: false, tiling: false, painting: 'Painting and decorating — best done once the wardrobes are fitted' },
+    'kitchen-wardrobes': { work: 'Kitchen cabinetry and fitted wardrobes — supply and installation', removal: 'Removal of your existing kitchen and wardrobes',
+      appliances: true, plumbing: true, gas: true, tiling: true, painting: 'Painting and decorating — best done once everything is fitted' },
+    other: { work: 'Cabinetry — supply and installation', removal: 'Removal of your existing units',
+      appliances: true, plumbing: true, gas: false, tiling: true, painting: 'Painting and decorating — best done once everything is fitted' },
+  };
   function documentWording(a, hasWorktop) {
+    const p = PROJECT_LISTS[a.project];
     const facts = [
       { label: 'Hinges & runners', value: 'Blum soft-close throughout' },
       { label: 'Panels & gables', value: 'Finished to match your door colour' },
       { label: 'Handles', value: 'From our standard range' },
     ];
     if (hasWorktop) facts.push({ label: 'Worktops', value: 'Supplied and fitted', note: WORKTOP_NOTE });
-    const inKitchen = [];
-    if (a.includes.sink) inKitchen.push('Sink');
-    if (a.includes.extractor) inKitchen.push('Extractor');
-    if (hasWorktop) inKitchen.push('Worktops');
+    const items = [];
+    if (a.includes.sink) items.push('Sink');
+    if (a.includes.extractor) items.push('Extractor');
+    if (hasWorktop) items.push('Worktops');
     const s = a.glazing.small, l = a.glazing.large;
-    if (s > 0) inKitchen.push(s + ' small glazed door cabinet' + (s > 1 ? 's' : ''));
-    if (l > 0) inKitchen.push(l + ' large glazed larder door' + (l > 1 ? 's' : ''));
-    a.extras.forEach((e) => inKitchen.push(e.name + (e.qty > 1 ? ' ×' + e.qty : '')));
-    const workIncluded = ['Kitchen cabinetry — supply and installation'];
-    if (a.includes.removal) workIncluded.push('Removal of your existing kitchen');
+    if (s > 0) items.push(s + ' small glazed door cabinet' + (s > 1 ? 's' : ''));
+    if (l > 0) items.push(l + ' large glazed larder door' + (l > 1 ? 's' : ''));
+    a.extras.forEach((e) => items.push(e.name + (e.qty > 1 ? ' ×' + e.qty : '')));
+    const workIncluded = [p.work];
+    if (a.includes.removal) workIncluded.push(p.removal);
     if (a.includes.electrical) workIncluded.push('Electrical work');
     if (a.includes.plumbing) workIncluded.push('Plumbing');
-    const notIncluded = ['Appliances'];
+    const notIncluded = [];
+    if (p.appliances) notIncluded.push('Appliances');
     if (!a.includes.electrical) notIncluded.push('Electrical work');
-    if (!a.includes.plumbing) notIncluded.push('Plumbing');
-    notIncluded.push('Gas disconnection and reconnection — arranged by you with a registered RGI installer', 'Tiling & flooring',
-      'Painting and decorating — best done once the kitchen is fitted', 'Skip and waste removal — arranged by you');
-    return { facts, inKitchen, workIncluded, notIncluded, showExVat: a.showExVat };
+    if (!a.includes.plumbing && p.plumbing) notIncluded.push('Plumbing');
+    if (p.gas) notIncluded.push('Gas disconnection and reconnection — arranged by you with a registered RGI installer');
+    if (p.tiling) notIncluded.push('Tiling & flooring');
+    notIncluded.push(p.painting, 'Skip and waste removal — arranged by you');
+    return { project: { type: a.project, name: a.project === 'other' ? a.projectName : '' }, facts, items, workIncluded, notIncluded, showExVat: a.showExVat };
   }
 
   const ID = 'ek-packages', VERSION = 1;
-  const EK_PACKAGES_V1 = Object.freeze({ id: ID, version: VERSION, OPTION_KEYS, OPTION_NAMES, validate, validatePriceList, newAnswers, sendProblems, calculate });
+  const EK_PACKAGES_V1 = Object.freeze({ id: ID, version: VERSION, OPTION_KEYS, OPTION_NAMES, PROJECTS, validate, validatePriceList, newAnswers, sendProblems, calculate });
 
   // ---- registry ----
   function inputError(message, errors) { const e = new Error(message); e.name = 'QuoteInputError'; e.errors = errors; return e; }

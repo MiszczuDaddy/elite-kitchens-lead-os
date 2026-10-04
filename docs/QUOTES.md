@@ -87,8 +87,9 @@ What the calculator returns, and the only pricing information the rest of Elite 
   staff: cabinets, top box cabinets, drawer boxes, Premium Plus's own extras);
 * `dearest`: the key of the option with the highest total including VAT (`null` when no option is offered);
 * `shared`: the worktop, glazed doors and extras amounts, which every option includes;
-* `document`: the rest of the customer-facing wording: `facts`, `inKitchen`, `workIncluded`, `notIncluded`, `showExVat`.
-  The calculator writes this because only it understands its answers.
+* `document`: the rest of the customer-facing wording: `project` (`{ type, name }`: what the quote is for, see "The
+  customer PDF"), `facts`, `items` (paid items supplied: sink, worktops, glazed doors, extras), `workIncluded`,
+  `notIncluded`, `showExVat`. The calculator writes this because only it understands its answers.
 
 It never contains door, top box or drawer counts, or any per-unit price, so they cannot leak onto a document.
 Money is worked out exactly (whole cents, quantities in hundredths), never with floating-point sums.
@@ -190,6 +191,14 @@ Money is worked out exactly (whole cents, quantities in hundredths), never with 
 
 * The current design, ported: editorial layout, option cards, "Your kitchen", "In your kitchen" / "Work included", "Not
   included", the terms panel, the validity date, the sign-off, and up to 5 render images on their own pages.
+* **What the quote is for** (owner's review of M4): each quote has a project, Kitchen, Wardrobes, Kitchen & wardrobes or
+  Other (with a short name such as "utility room"), set in the builder and starting from the customer's Project type. It
+  changes only the wording, never a price, and it is frozen with the version like everything else. A kitchen reads exactly
+  as the original PDF. The words that change are listed under M4 below.
+* **Pages** (owner's review of M4): a quote that fits on one A4 page is one page, set slightly closer together if that is
+  what it takes; otherwise sections are never cut in half, and the closing section (not included, the terms and the
+  sign-off) always shares its page with the section before it, so the sign-off is never alone. Every page has the same
+  12 mm top and bottom margin.
 * Content rules carried over unchanged:
   * never print door, top box or drawer counts, or any per-unit price;
   * never add workmanship-warranty wording (the 6-month snagging line in the terms is a separate thing and stays);
@@ -461,8 +470,8 @@ Regression (2026-10-03, after M3): backend 197 of 197; browser suites `ui` 57/57
 
 ### M4: the customer PDF and sending
 
-Built and tested on 2026-10-04. Nothing deployed. **The document design is a faithful port awaiting the owner's review**:
-it may still be improved before it is approved for customers.
+Built and tested on 2026-10-04. Nothing deployed. The faithful port was reviewed by the owner and revised (pages and
+wording by project, below); **the revised design and wording await the owner's approval** before M4 is final.
 
 | File | What |
 |---|---|
@@ -470,7 +479,7 @@ it may still be improved before it is approved for customers.
 | `public/vendor/html2pdf/` | html2pdf.js **0.14.0** (MIT; bundles html2canvas and jsPDF 4), the same library family the original app used (it loaded 0.10.1 from a CDN). Taken unmodified from the npm package `html2pdf.js@0.14.0`; `html2pdf.bundle.min.js` SHA-256 `9563c45f032179c73454293a649929e60fc24c05a326e8ab2811cfa8f25c3607`. Loaded only when a PDF is made. Its licence files are next to it |
 | `public/fonts/` | Faustina and IBM Plex Sans (latin, weights 400 / 500 / 600, woff2), the original PDF's fonts, from `@fontsource/faustina@5.3.0` and `@fontsource/ibm-plex-sans@5.3.0` (SIL Open Font Licence; licence files included) |
 | `public/quotes.js`, `public/index.html`, `public/app.css` | Send, Send again, Preview, the Send dialog and the preview window |
-| `test-ui/quote-send.e2e.js` | 8 browser checks |
+| `test-ui/quote-send.e2e.js` | 9 browser checks (the pages check was added in the design revision) |
 
 How it works:
 
@@ -496,11 +505,50 @@ pipeline value, which is not a valid value.
 The M3 browser checks that expected Send and Send again to be switched off were updated on purpose: they now check that
 both are offered, and that Send is off while a field is wrong.
 
-**Design review (open).** The port is faithful, including its pagination, which the owner may want to change:
-a three-option quote spills about a third of a page onto page 2 (Not included, the terms and the sign-off); a one-option
-quote fits on page 1 except the sign-off, which ends up alone on page 2. The header uses the Elite Kitchens logo from
-Elite OS. The wording (introduction, "Your kitchen" text, terms 30% / 70% / 6-month snagging, sign-off) is the original's,
-fixed in the template. As in the original, the PDF pages are images (the text cannot be selected or searched).
+**Design review.** The faithful port's pagination left a one-option quote's sign-off alone on page 2 and spilled a
+three-option quote a third of a page onto page 2. The owner's decisions (2026-10-04): change the pagination; keep the
+Elite Kitchens logo in the header; make the wording follow the project instead of always saying "kitchen", without
+sounding generic; keep the image-based PDF for Phase 6 (a PDF with selectable text can replace it later); show the revised
+pages and the exact wording and terms before M4 is approved.
+
+**Design revision (2026-10-04, awaiting the owner's approval).**
+
+* **Pages.** Elite OS measures the sections and decides the page breaks before html2pdf makes the PDF (see "The customer
+  PDF"). Checked with nine sample quotes: every one-option quote (a plain kitchen; a full kitchen with worktop, sink,
+  extractor, glazed doors and extras; wardrobes; a utility room) and a two-option wardrobe quote are one page; two-option
+  kitchens are two pages (introduction, specification and options; then what is included, the terms and the sign-off); a
+  three-option kitchen is the same two pages plus its render page. To make this work the business's contact details in
+  the header are three lines (phone · email; address; web · VAT number) instead of five, so they are no taller than the
+  logo, and a single option is one wide card with its price on the right.
+* **Preview** shows the same pages as sheets of A4 paper, with the draft label in the top margin (so it moves nothing),
+  and says how many pages the PDF will have. Fixed: on a phone the preview cut off the right-hand side of the page instead
+  of shrinking it (the M4 check only looked at the window, not the page; it now checks both).
+* **Fixed:** with two or three options, each price card printed the word "null" under the price. The send check now
+  fails on "null", "undefined" or "NaN" anywhere in the document.
+* **Wording by project.** Everything else is the same for every project.
+
+| Where | Kitchen (unchanged) | Wardrobes | Kitchen & wardrobes | Other, e.g. "utility room" (no name: "fitted furniture") |
+|---|---|---|---|---|
+| Introduction | …quote for your new kitchen. | …your new fitted wardrobes. | …your new kitchen and fitted wardrobes. | …your new utility room. |
+| Section heading | Your kitchen | Your wardrobes | Your kitchen & wardrobes | Your utility room |
+| Description | Every cabinet is made to fit your room… | Every wardrobe is made to fit your room… | Every cabinet and wardrobe is made to fit your home… | Every unit is made to fit your space… |
+| Items heading | In your kitchen | In your wardrobes | In your kitchen & wardrobes | In your utility room (no name: Supplied & fitted) |
+| Work included | Kitchen cabinetry — supply and installation; Removal of your existing kitchen | Fitted wardrobes — …; Removal of your existing wardrobes | Kitchen cabinetry and fitted wardrobes — …; Removal of your existing kitchen and wardrobes | Cabinetry — …; Removal of your existing units |
+| Not included | Appliances, Electrical work, Plumbing, Gas (RGI), Tiling & flooring, Painting ("once the kitchen is fitted"), Skip | Electrical work, Painting ("once the wardrobes are fitted"), Skip | as Kitchen, Painting "once everything is fitted" | as Kitchen without Gas, Painting "once everything is fitted" |
+| Sign-off | …would look in your room. | …in your room. | …in your home. | …in your home. |
+| Email draft | Kitchen Quote / your kitchen quote | Wardrobe Quote / your wardrobe quote | Kitchen & Wardrobe Quote | Utility Room Quote (no name: Quote) |
+
+  Electrical work and Plumbing move to "Work included" when ticked, as before. The builder's "Removal of the existing
+  kitchen" box now reads "Removal of the existing units" and its "Kitchen" box (the counts) "Doors and boxes".
+* **Calculator.** The answers gain `project` and `projectName` (missing = kitchen, so the 5,000-quote comparison with
+  the original app still matches exactly), and the price sheet's `inKitchen` is now `items`. No price changes.
+* **Not changed:** the terms (30% deposit to secure your installation date; 70% on completion; 6-month snagging after
+  completion; valid until), the facts, the option descriptions, the render pages and the image-based PDF.
+
+Regression (2026-10-04, after the design revision): backend 201 of 201 (4 new tests); browser suites `ui` 57/57, `lead`
+11/11, `crm` 14/14, `dnd` 13/13, `conversion` 10/10, `appointments` 17/17, `quotes` 19/19, `theme` 10/10 (Chrome),
+`quote-send` 9/9. In the full run `quote-send` check 4 gave up after 5 s waiting for the first (cold) `quotePdfUrl` call,
+which then answered normally; that wait is now up to 30 s in a separate test-only commit, and the suite passes 9/9.
 
 Regression (2026-10-04, after M4): backend 197 of 197; browser suites `ui` 57/57, `lead` 11/11, `crm` 14/14, `dnd` 13/13,
 `conversion` 10/10, `appointments` 17/17, `quotes` 19/19, `quote-send` 8/8 (new), `theme` 10/10 (Chrome). All on the first run.
