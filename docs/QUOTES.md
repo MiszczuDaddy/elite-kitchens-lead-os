@@ -695,5 +695,10 @@ Report anything that looks wrong; nothing goes live until you approve it.
 
 ## Not in this phase
 
-Invoices, deposits and payments; sending quotes on WhatsApp; reminders for quotes going cold; duplicate quote; kitchen
-templates, options and upgrades; importing the old app's quotes; online acceptance or e-signature by the customer; AI.
+Invoices, deposits and payments; sending quotes directly by WhatsApp or email; reminders for quotes going cold; duplicate
+quote; kitchen templates, options and upgrades; importing the old app's quotes; online acceptance or e-signature by the
+customer; AI.
+
+**Planned follow-up: Phase 6.1, direct quote sending (WhatsApp and email) and "Reopen conversation" on WhatsApp.** Recorded
+in [PHASE6_1_PLAN.md](PHASE6_1_PLAN.md) (2026-10-05). Not started, and not part of Phase 6. It may start only after Phase 6
+is live, verified, merged and tagged `phase-6-quotes-complete`, and only when the owner chooses it as the next task.

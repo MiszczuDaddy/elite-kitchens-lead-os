@@ -47,6 +47,8 @@ automatic download + display of incoming photos/documents/voice notes/video, sen
 See `docs/PHASE2_PROGRESS.md`, `docs/SECURITY.md`, `docs/DATA_CONTROLS.md`, `docs/SECRET_ROTATION.md`, `docs/RESTORE.md`, `DEPLOY.md`.
 Phase 3 (Meta lead intake): `docs/LEAD_INTAKE.md`. Phase 4 (pipeline / CRM): `docs/CRM_PIPELINE.md`.
 Phase 5 (appointments + Google Calendar, setup, rollout, rollback): `docs/APPOINTMENTS.md`.
+Phase 6 (quotes: builder, customer PDF, sending, rollout, rollback): `docs/QUOTES.md`.
+Planned, not started: Phase 6.1 (direct quote sending by WhatsApp and email, "Reopen conversation"): `docs/PHASE6_1_PLAN.md`.
 
 ## Tests
     npm test          # 136 backend tests against the Firestore + Storage emulators (media, dedup, unread, auth, rules, lead intake,
