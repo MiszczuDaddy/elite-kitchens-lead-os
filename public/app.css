@@ -139,6 +139,7 @@ h1, h2, p { overflow-wrap: anywhere; }
 .banner { padding: 10px 20px; background: #f9eae6; color: var(--err); font-size: 14px; }
 .window-note { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 20px; background: #f7f0dc; color: #655420; font-size: 13px; }
 .window-note .btn { flex: none; }
+.reopen-text { margin: 10px 0 12px; padding: 10px 12px; border-left: 3px solid var(--line); background: var(--bg); font-size: 14px; line-height: 1.45; }
 .thread-empty { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
 .empty-mark { color: #727d69; margin-bottom: 18px; }
 .empty-mark svg { width: 34px; height: 34px; stroke-width: 1.1; }

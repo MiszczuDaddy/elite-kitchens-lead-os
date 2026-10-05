@@ -5,10 +5,11 @@ const mediaLib = require('./media');
 const appointments = require('./appointments');
 const calendarSync = require('./calendarSync');
 const quotes = require('./quotes');
+const reopenLib = require('./reopen');
+const { WINDOW_MS } = require('./windowState');          // 24 hours; the same rule the screen uses (Phase 6.1)
 const { normalizeLeadPhone } = require('./phone');
 const { verifySignature, parseWebhook, normalizePhone } = require('./whatsapp');
 
-const WINDOW_MS = 24 * 3600 * 1000;
 const log = (level, msg, extra) =>
   console[level === 'error' ? 'error' : 'log'](JSON.stringify({ level, msg, ...extra }));
 
@@ -319,6 +320,10 @@ const deleteQuoteDraft = quoteAction(quotes.deleteDraft);
 const setQuoteNotes = quoteAction(quotes.setNotes);
 async function quotePdfUrl(auth, data, deps) { assertStaff(auth, deps.cfg); return quotes.pdfLink(deps, actorOf(auth), data, { signedUrl: mediaLib.signedUrl }); }
 
-module.exports = { createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+// ---- Phase 6.1: Reopen conversation (a general WhatsApp capability, not tied to quotes). The rules live in ./reopen and
+// ./windowState; this wrapper only checks who is asking. ----
+async function reopenConversation(auth, data, deps) { assertStaff(auth, deps.cfg); return reopenLib.reopen(deps, actorOf(auth), data); }
+
+module.exports = { reopenConversation, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

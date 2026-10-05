@@ -17,7 +17,7 @@
     ],
     "headers": [
       {
-        "source": "/@(index.html|app.js|app.css|crm.js|pipeline.js|appointments.js|quote-engine.js|quote-document.js|quote-builder.js|quote-settings.js|quotes.js)",
+        "source": "/@(index.html|app.js|app.css|crm.js|window-state.js|pipeline.js|appointments.js|quote-engine.js|quote-document.js|quote-builder.js|quote-settings.js|quotes.js)",
         "headers": [
           {
             "key": "Cache-Control",

@@ -323,6 +323,80 @@ any code change. All emulator-only: nothing touched the live project, nothing re
 Every suite passed on the first run. Run as in the owner's PC notes: `NODE_PATH` set to the global npm folder, `CHROMIUM` set to
 Playwright's headless shell (Google Chrome for `theme`), one suite at a time. No test file was changed.
 
+## Built so far
+
+### M1: Reopen conversation
+
+Built and tested on 2026-10-05. Nothing deployed; nothing real was sent. The existing screen and every existing function behave as
+before, apart from the closed-window band (below).
+
+| File | What |
+|---|---|
+| `functions/lib/windowState.js` | The 24-hour rule and the Reopen state (open / awaiting / closed), the first-name rule and the Reopen wording. Pure functions. `public/window-state.js` is an identical copy for the browser (a test fails if they differ: after changing the original, copy it over) |
+| `functions/lib/reopen.js` | The action: claim, send, record. Knows nothing about quotes |
+| `functions/lib/whatsapp.js` | A failed send now says whether it was **definite** (not configured, or Meta answered 4xx: nothing was sent) or **ambiguous** (5xx, no message id, network failure, timeout); an optional time limit; `sendTemplateByName`. Existing methods behave exactly as before |
+| `functions/lib/handlers.js`, `functions/index.js` | The staff-only wrapper and the callable `reopenConversation`. It binds **only the WhatsApp access token** (not the app secret or verify token). Two plain settings, not secrets: `WHATSAPP_REOPEN_TEMPLATE_NAME` (default `elite_kitchens_reopen`) and `WHATSAPP_REOPEN_TEMPLATE_LANG` (default `en`). `handlers.js` now takes its 24-hour constant from the shared module (same value) |
+| `public/index.html`, `app.js`, `app.css`, `firebase.json` | The band under the chat, the composer states, the confirmation dialog; the new script is served with no-cache |
+| `functions/test/reopen.test.js`, `test-ui/reopen.e2e.js` | 20 backend tests and 14 browser checks |
+
+What staff see: **open** (nothing changes); **closed**: "More than 24 hours since {name} last messaged (or "{name} hasn't messaged yet").
+WhatsApp only allows an approved template until they reply." with **Reopen conversation**; the button opens a confirmation showing the
+exact wording ("Hi Anna, it's Elite Kitchens…") and saying messaging stays off until the customer replies; after sending, **awaiting**:
+"Template sent 14:02 (delivered). Waiting for {name} to reply. You can't send normal messages until they do." (no button, composer off,
+the placeholder says "Waiting for {name} to reply…"); when the customer replies, even by tapping a button, the band disappears and the
+composer unlocks by itself. A template Meta refused shows the reason in plain words and Reopen is offered again.
+
+How it behaves, beyond the plan:
+
+* **One request number per dialog**, so a double click sends once (tested through the screen and through the function). After an
+  error the dialog offers only Close; the chat then shows what happened and offers Reopen again only when it is allowed.
+* **The 24-hour allowance** counts a template that is in progress, sent (delivered or not yet), or not confirmed. It does **not** count a
+  template Meta refused (nothing was sent: for example the template was not approved yet) or one Meta reports as never delivered (for
+  example it expired). **Exception:** Meta's own "wait 24 hours" (131049) and "customer opted out" (131050) answers still count, and the
+  band says when to try again. *This follows the owner-confirmation proposal in "Open items": say if the cap should be stricter.*
+* **Not confirmed** (Meta 5xx, no message id, network failure, a send with no answer after 20 seconds): recorded as "not confirmed",
+  counted, never retried by itself, with a message in the chat telling staff to check before trying again. A send still in progress
+  after 3 minutes is treated the same way.
+* **The customer is erased while a template is in flight:** nothing is recreated.
+* **Failures in plain English** for the Meta errors most likely to be met (template unknown or not approved, paused, disabled, number not on
+  WhatsApp, held back, opted out, too many messages), always with Meta's code.
+* The screen re-checks every minute and whenever a delivery status arrives, so a window that closes, or a "waiting" that runs out its
+  day, is shown without reloading.
+* Customers added without messaging, or who never wrote, get the same band ("hasn't messaged yet") and Reopen. The old welcome template
+  stays in **New conversation** for brand-new numbers.
+* The one existing browser check about the 24-hour band (`ui.e2e.js`) is unchanged and passes: the band keeps its id and the composer
+  stays disabled; only the button's label changed.
+
+**Tests.** 20 backend tests (the state table including the 24-hour edge, the cap table, idempotency including five calls at once, two
+members of staff at once, refusals, every "not confirmed" kind including a hung call, delivery statuses through the existing webhook
+code, a delivery status that arrives before our own record, erasure mid-send, logs and stored errors free of names, numbers and message
+text, staff-only access, the browser copy). 14 browser checks, desktop and phone, with screenshots. **Nine planted errors** were each
+caught: a sent template treated as opening the window; the cap skipped; no claim before sending; a refused template recorded as sent;
+a "not confirmed" send treated as refused; the full name sent instead of the first name; a log leaking numbers; the staff check
+skipped; a delivery notice's reason overwritten by our own record.
+
+**Found and fixed while building M1.** The full regression run caught a race that the new browser check missed when run alone: the
+screen shows "waiting for the customer" the moment the Reopen is recorded, and Meta's delivery status can arrive within milliseconds. M1
+first recorded the Reopen and then, separately, wrote the chat message; the existing message-saving code (`storeOutbound`) writes
+`error: null` over a status that beat it, so a "not delivered" notice arriving in that gap lost its reason (131049) and the screen
+wrongly offered Reopen again. Now the Reopen and the chat message are recorded in **one transaction** (`recordSent` in `reopen.js`), a
+status that arrived first keeps its status and its reason, and a test proves it (and fails if the old behaviour returns). The existing
+`storeOutbound` is unchanged: the same gap can in principle affect any outbound message whose "not delivered" notice beats its own
+record, which needs a status to arrive within milliseconds of the send; left alone, noted here.
+
+**Regression (2026-10-05, after M1):** backend 221 of 221 (the 201 from the baseline unchanged, plus the 20 new ones); browser suites `ui`
+57/57, `lead` 11/11, `crm` 14/14, `dnd` 13/13, `conversion` 10/10, `appointments` 17/17, `quotes` 20/20, `quote-send` 9/9, `reopen` 14/14
+(new), `theme` 10/10 (Chrome). No existing test file was changed. Two things happened on the way, both reported plainly: (1) the first
+full run showed the race described above (the new browser check failed there; fixed, then everything passed); (2) in that same first
+full run the Phase 5 test "the immediate push, the sweeper and Retry now all at once still produce exactly one event"
+(`calendar.test.js`) failed once (it counted two lookups of the fake Google where it expects one). Nothing M1 changed touches the
+calendar code; that test deliberately slows the fake Google by 250 ms so that attempts overlap, so its count can vary on a heavily
+loaded run. It then passed 5 of 5 on its own and in the next full run. Treated as a timing flake of the harness, not an M1 fault.
+
+**To check at the preview, with the real Meta (cannot be checked with a fake):** that the template, sent with only the first-name
+parameter, is accepted with its quick-reply buttons; that the wording in `windowState.js` still matches the approved template; and
+how the chat bubble reads. It shows the existing `[template: name]` prefix, as for the welcome template; it can be tidied later.
+
 ## Open items
 
 * The Reopen template's name and language (owner creates it; needed before the M1 preview).

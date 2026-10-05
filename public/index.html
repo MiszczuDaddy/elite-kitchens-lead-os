@@ -189,9 +189,9 @@
       <div id="status-feedback" class="status-feedback" role="status" hidden></div>
       <div id="banner" class="banner" role="alert" hidden></div>
       <div id="msgs" class="msgs" aria-live="polite"></div>
-      <div id="window-note" class="window-note" hidden>
-        <span>It's been more than 24 hours since this customer last messaged, so WhatsApp only allows an approved template message.</span>
-        <button id="tpl-btn" class="btn btn-primary btn-sm">Send template</button>
+      <div id="window-note" class="window-note" role="status" aria-live="polite" hidden>
+        <span id="window-text"></span>
+        <button id="tpl-btn" class="btn btn-primary btn-sm" type="button">Reopen conversation</button>
       </div>
       <div id="attach-bar" class="attach-bar" hidden>
         <div id="attach-thumb" class="attach-thumb"></div>
@@ -276,6 +276,20 @@
     <div class="dlg-actions">
       <button type="button" id="del-cancel" class="btn btn-ghost">Cancel</button>
       <button type="submit" id="del-go" class="btn btn-danger">Delete permanently</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="reopen-dlg" class="dlg">
+  <form id="reopen-form" autocomplete="off">
+    <h2>Reopen conversation</h2>
+    <p id="reopen-who" class="hint"></p>
+    <blockquote id="reopen-text" class="reopen-text"></blockquote>
+    <p id="reopen-note" class="hint"></p>
+    <div id="reopen-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="reopen-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="reopen-go" class="btn btn-primary">Send template</button>
     </div>
   </form>
 </dialog>
@@ -468,6 +482,7 @@
 <script src="/__/firebase/10.14.1/firebase-storage-compat.js"></script>
 <script src="/__/firebase/init.js"></script>
 <script src="/crm.js"></script>
+<script src="/window-state.js"></script>
 <script src="/app.js"></script>
 <script src="/pipeline.js"></script>
 <script src="/appointments.js"></script>

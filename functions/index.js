@@ -122,3 +122,16 @@ exports.discardQuoteDraft = onCall({}, (req) => h.discardQuoteDraft(req.auth, re
 exports.deleteQuoteDraft = onCall({}, (req) => h.deleteQuoteDraft(req.auth, req.data, quoteDeps()));
 exports.setQuoteNotes = onCall({}, (req) => h.setQuoteNotes(req.auth, req.data, quoteDeps()));
 exports.quotePdfUrl = onCall({}, (req) => h.quotePdfUrl(req.auth, req.data, quoteDeps()));
+
+// ---- Phase 6.1: Reopen conversation (docs/PHASE6_1_PLAN.md). A general WhatsApp capability for any customer chat: it sends the
+// approved Reopen template when the 24-hour window is closed. Staff-only. Needs only the WhatsApp access token (least
+// privilege: not the app secret or verify token). The template's name and language are plain settings, not secrets. Nothing
+// above is touched.
+const REOPEN_TEMPLATE = defineString('WHATSAPP_REOPEN_TEMPLATE_NAME', { default: 'elite_kitchens_reopen' });
+const REOPEN_LANG = defineString('WHATSAPP_REOPEN_TEMPLATE_LANG', { default: 'en' });
+const reopenDeps = () => ({
+  db: getFirestore(),
+  cfg: { allowedEmails: ALLOWED_EMAILS.value(), reopenTemplate: REOPEN_TEMPLATE.value().trim(), reopenLang: REOPEN_LANG.value().trim() },
+  wa: createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim() }),
+});
+exports.reopenConversation = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 60 }, (req) => h.reopenConversation(req.auth, req.data, reopenDeps()));

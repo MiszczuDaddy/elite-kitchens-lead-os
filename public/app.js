@@ -9,7 +9,6 @@ const fns = firebase.app().functions('europe-west1');
 const call = (name) => fns.httpsCallable(name);
 
 const TZ = 'Europe/Dublin';
-const WINDOW_MS = 24 * 3600 * 1000;
 const INBOX_STATUSES = { inbox: 'New lead', booked: 'Booked', quoted: 'Quoted', won: 'Won', closed: 'Closed' };
 const inboxStatus = (c) => Object.hasOwn(INBOX_STATUSES, c.inboxStatus) ? c.inboxStatus : 'inbox';
 const statusRequests = new Map();
@@ -76,10 +75,7 @@ const isUnread = (c) => {
   const read = ms(c.lastReadAt);
   return !read || inb > read;
 };
-const windowOpen = (c) => {
-  const inb = ms(c && c.lastInboundAt);
-  return !!inb && Date.now() - inb < WINDOW_MS;
-};
+const windowOpen = (c) => WindowState.isOpen(c, Date.now());      // the 24-hour rule is shared with the server (window-state.js)
 
 const dayKey = (d) => d.toLocaleDateString('en-CA', { timeZone: TZ });
 const hhmm = (d) => d.toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ });
@@ -359,6 +355,7 @@ function openConversation(id, fromHash) {
     S.pending = S.pending.filter((p) => !p.done);
     renderMessages();
     renderAssets();
+    updateComposer();               // a Reopen template's delivery status arrives as a message update
     maybeMarkRead();
   }, (e) => banner('Cannot load messages: ' + errText(e)));
   maybeMarkRead();
@@ -568,15 +565,39 @@ function renderMessages() {
   S.firstRender = false;
 }
 
+// The 24-hour window and Reopen conversation (Phase 6.1 M1). open: normal messages. awaiting: a Reopen template was sent and the
+// customer has not replied, so messaging stays OFF. closed: Reopen (once per 24 hours). The state comes from window-state.js, the
+// same rule the server enforces; the screen never implies the chat is open before the customer's reply.
+function windowInfo(c) {
+  const w = c && c.reopen && c.reopen.wamid ? S.msgs.find((m) => m.id === c.reopen.wamid) : null;    // its delivery status
+  return WindowState.windowStatus(c, Date.now(), w || null);
+}
+const whenText = (t) => { const d = new Date(t); return dayKey(d) === dayKey(new Date()) ? hhmm(d) : dayLabel(d) + ' at ' + hhmm(d); };
+const DELIVERY = { sending: 'sending…', sent: 'sent', delivered: 'delivered', read: 'read', unsure: 'not confirmed: check this chat before trying again' };
+function windowNote(c, w) {
+  const name = c.name || 'the customer', r = w.reopen;
+  if (w.state === 'awaiting') return `Template sent ${whenText(r.at)} (${DELIVERY[r.kind]}). Waiting for ${name} to reply. You can't send normal messages until they do.`;
+  let t = `${ms(c.lastInboundAt) ? `More than 24 hours since ${name} last messaged.` : `${name} hasn't messaged yet.`} WhatsApp only allows an approved template until they reply.`;
+  if (r && r.kind === 'refused') t += ` The last attempt did not go through: ${r.error || 'WhatsApp refused it.'}`;
+  else if (r && r.kind === 'undelivered') t += ` WhatsApp could not deliver the template sent ${whenText(r.at)}${r.error ? ` (${r.error})` : ''}.${w.canReopen ? '' : ` You can try again after ${whenText(w.nextReopenAt)}.`}`;
+  else if (r) t += ` The template sent ${whenText(r.at)} got no reply.`;
+  return t;
+}
 function updateComposer() {
   if (!S.selected) return;
   const c = selectedConv();
-  const open = c ? windowOpen(c) : false;
+  const w = c ? windowInfo(c) : null;
+  const open = !!w && w.state === 'open';
   $('composer').classList.toggle('disabled', !open);
   $('text').disabled = !open; $('send').disabled = !open; $('attach-btn').disabled = !open;
   $('window-note').hidden = open || !c;
-  $('text').placeholder = open ? 'Type a message…' : 'Replies are disabled until the customer messages again';
+  if (c && !open) {
+    $('window-text').textContent = windowNote(c, w);
+    $('tpl-btn').hidden = !(w.state === 'closed' && w.canReopen);
+  }
+  $('text').placeholder = open ? 'Type a message…' : w && w.state === 'awaiting' ? `Waiting for ${c.name || 'the customer'} to reply…` : 'Replies are disabled until the customer messages again';
 }
+setInterval(() => { if (S.selected) updateComposer(); }, 60000);          // a window closing, or a Reopen's day running out, while the chat is open
 
 // composer: Enter sends, Shift+Enter = new line
 const ta = $('text');
@@ -723,7 +744,39 @@ function openNewDialog(phone, name) {
   (phone && name ? $('n-go') : (phone ? $('n-name') : $('n-phone'))).focus();
 }
 $('new-btn').onclick = () => openNewDialog();
-$('tpl-btn').onclick = () => { const c = selectedConv(); openNewDialog(c ? c.id : '', c && c.name ? c.name : ''); };
+// ---------- Reopen conversation (Phase 6.1 M1): a confirmation that shows exactly what will be sent ----------
+const rdlg = $('reopen-dlg');
+let reopenDlg = null;                                           // { phone, requestId, working } while the dialog is open
+const reopenRequestId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
+function openReopen() {
+  const c = selectedConv(); if (!c) return;
+  const w = windowInfo(c);
+  if (w.state !== 'closed' || !w.canReopen) { updateComposer(); return; }
+  reopenDlg = { phone: c.id, requestId: reopenRequestId(), working: false };      // one request id per dialog: a double click sends once
+  const who = c.name || formatPhone(c.id);
+  $('reopen-who').textContent = `This sends WhatsApp's approved template to ${who}:`;
+  $('reopen-text').textContent = WindowState.reopenText(WindowState.firstName(c.name));
+  $('reopen-note').textContent = `Sending it does not reopen normal messaging. You can message ${c.name || 'them'} normally only after they reply.`;
+  $('reopen-err').textContent = ''; $('reopen-go').disabled = false; $('reopen-cancel').disabled = false; $('reopen-cancel').textContent = 'Cancel';
+  if (typeof rdlg.showModal === 'function') rdlg.showModal(); else rdlg.setAttribute('open', '');
+  $('reopen-go').focus();
+}
+$('tpl-btn').onclick = openReopen;
+$('reopen-cancel').onclick = () => { if (!reopenDlg || !reopenDlg.working) rdlg.close(); };
+rdlg.addEventListener('cancel', (e) => { if (reopenDlg && reopenDlg.working) e.preventDefault(); });
+rdlg.addEventListener('close', () => { reopenDlg = null; });
+$('reopen-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const d = reopenDlg; if (!d || d.working) return;
+  d.working = true; $('reopen-go').disabled = true; $('reopen-cancel').disabled = true; $('reopen-err').textContent = '';
+  try {
+    await call('reopenConversation')({ phone: d.phone, requestId: d.requestId });
+    rdlg.close();                                               // the chat now shows "waiting for the customer to reply"
+  } catch (err) {
+    $('reopen-err').textContent = errText(err);                 // no retry from here: the chat shows what happened and offers Reopen again only when it is allowed
+    $('reopen-cancel').textContent = 'Close';
+  } finally { d.working = false; $('reopen-cancel').disabled = false; }
+});
 $('n-cancel').onclick = () => dlg.close();
 $('new-form').addEventListener('submit', async (e) => {
   e.preventDefault();

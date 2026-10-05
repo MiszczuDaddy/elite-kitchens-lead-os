@@ -12,6 +12,7 @@
 | Appointments (Phase 5) | Staff | Read through the same staff-only rules (no browser writes); book/reschedule/cancel/retry through callables that run `assertStaff` and hold no WhatsApp secrets |
 | Write to the shared Google calendar (Phase 5) | Elite OS only, via `ek-calendar` | Keyless: the functions' runtime account gets 1-hour tokens for `ek-calendar` (Token Creator on that account only), `calendar.events` scope; `ek-calendar` has no project roles and no keys; the calendar is shared for editing with it alone, people get read-only |
 | Run the calendar sweeper (Phase 5) | Cloud Scheduler only | `calendarSweep` is not public; `deploy-appointments.sh backend` verifies it (`docs/APPOINTMENTS.md`) |
+| Reopen a closed WhatsApp conversation (Phase 6.1) | Staff | `reopenConversation` runs `assertStaff`, holds only the WhatsApp access token (not the app secret or verify token), claims the send before contacting Meta, allows one template per customer per 24 hours, and logs codes only (`docs/PHASE6_1_PLAN.md`) |
 
 ## Review results (2026-09-30)
 - Every function has an auth guard (checked programmatically: webhook = HMAC, claimAccess = allowlist, all 7 others = assertStaff).

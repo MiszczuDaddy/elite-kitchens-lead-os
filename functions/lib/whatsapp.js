@@ -5,22 +5,34 @@ class WhatsAppError extends Error {
   constructor(message, details) { super(message); this.details = details; }
 }
 
+// A failed send says whether it is DEFINITE (error.definite === true: nothing was sent, because the client is not configured or
+// Meta answered with a 4xx refusal) or AMBIGUOUS (anything else: a 5xx, an answer without a message id, or, for errors that are
+// not a WhatsAppError at all, a network failure or timeout: the message may or may not have gone out).
+const refusal = (message, details, definite, code) => Object.assign(new WhatsAppError(message, details), { definite, ...(code ? { code } : {}) });
+
 // cfg: { phoneId, token, version, template, lang }; fetchImpl is injectable for tests.
 function createClient(cfg, fetchImpl = fetch) {
-  async function post(payload) {
-    if (!cfg.phoneId || !cfg.token) throw new WhatsAppError('WhatsApp is not configured (phone number id / access token missing).');
-    const res = await fetchImpl(`${cfg.apiBase || 'https://graph.facebook.com'}/${cfg.version || 'v21.0'}/${cfg.phoneId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),
-    });
+  // timeoutMs (optional) gives up on a Meta call that hangs, so the caller can report "not confirmed" instead of being cut off.
+  async function post(payload, { timeoutMs } = {}) {
+    if (!cfg.phoneId || !cfg.token) throw refusal('WhatsApp is not configured (phone number id / access token missing).', undefined, true);
+    const ac = timeoutMs ? new AbortController() : null;
+    const timer = ac && setTimeout(() => ac.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetchImpl(`${cfg.apiBase || 'https://graph.facebook.com'}/${cfg.version || 'v21.0'}/${cfg.phoneId}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),
+        ...(ac ? { signal: ac.signal } : {}),
+      });
+    } finally { if (timer) clearTimeout(timer); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const e = data.error || {};
-      throw new WhatsAppError(`Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data);
+      throw refusal(`Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data, res.status >= 400 && res.status < 500, e.code);
     }
     const id = data.messages && data.messages[0] && data.messages[0].id;
-    if (!id) throw new WhatsAppError('Meta API returned no message id', data);
+    if (!id) throw refusal('Meta API returned no message id', data, false);
     return id;
   }
   const base = () => `${cfg.apiBase || 'https://graph.facebook.com'}/${cfg.version || 'v21.0'}`;
@@ -52,6 +64,12 @@ function createClient(cfg, fetchImpl = fetch) {
       template: { name: cfg.template, language: { code: cfg.lang },
         components: [{ type: 'body', parameters: [{ type: 'text', text: firstName }] }] },
     }),
+    // Any approved template by name (Phase 6.1: Reopen conversation). params fill {{1}}, {{2}}... of the body, in order.
+    sendTemplateByName: (to, { name, lang, params = [] }, opts) => post({
+      to, type: 'template',
+      template: { name, language: { code: lang },
+        ...(params.length ? { components: [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) }] } : {}) },
+    }, opts),
   };
 }
 
