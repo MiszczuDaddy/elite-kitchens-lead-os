@@ -1,8 +1,11 @@
 # Phase 6.1 — Direct quote sending and "Reopen conversation" (agreed design)
 
-Status: **M0 (design, branch and baseline) done.** Branch `phase-6-1-quote-sending`, started from tag
-`phase-6-quotes-complete` (`ab84a7d`). Nothing is built, nothing is deployed, nothing real has been sent. This document is the
-specification the milestones below implement. A rule in it changes only with the owner's approval.
+Status (2026-10-05): **M0 to M5 are built and tested** (design, Reopen conversation, delivery foundation, WhatsApp, email, the Send screen), in
+a state ready for the owner's review. **Nothing is deployed, nothing real has been sent, nothing outside this repository has been changed.**
+Next: the owner's review, then M6 (backend deploy, preview with a controlled test customer, live, merge and tag: each only with explicit
+approval; see "Testing the preview" and "Rollout"). Branch `phase-6-1-quote-sending`, started from tag `phase-6-quotes-complete`
+(`ab84a7d`). The first half of this document is the agreed specification; "Built so far" records what was built and how it was tested. A rule in
+the specification changes only with the owner's approval.
 
 Phase 6 (docs/QUOTES.md) is live, merged and tagged. Phase 6.1 must not destabilise it: every Phase 6 test and the full
 regression suite must keep passing unchanged.
@@ -459,6 +462,275 @@ all passed.
 
 **Left for later milestones.** The adapters (M3, M4); the Cloud Function exports and their deploy script (M3); the screens (M5);
 the history on screen reads the delivery records (M5).
+
+### M3: WhatsApp quote sending
+
+Built and tested on 2026-10-05. Nothing deployed. Reuses the **existing** WhatsApp client and conversation records: no second WhatsApp
+system.
+
+| File | What |
+|---|---|
+| `functions/lib/quoteChannels.js` | `whatsappChannel`: the channel for the delivery module (`check` and `send`) |
+| `functions/lib/whatsapp.js` | additive only: an optional time limit on `uploadMedia` and `sendMedia`, and the Meta error code on a failed upload. Every existing call behaves exactly as before |
+| `functions/lib/store.js` | additive only: `storeOutbound` takes an optional `extra` (the quote label). `storeOutbound`'s existing behaviour, including the known millisecond race, is unchanged and still documented technical debt |
+| `functions/index.js` | the callables `deliverQuote` and `retryQuoteDelivery` (they hold only the WhatsApp access token; 180 s), `resolveQuoteDelivery`, `cancelQuoteSend`, `markQuoteSent` and `quoteChannels` (no secrets) |
+| `functions/test/quote-whatsapp.test.js` | 24 tests |
+
+How it works: the server **re-checks the 24-hour window at send time** (`WindowState`, the same rule as the screen and the chat), so what the
+browser showed is never relied on. It refuses (a failure, nothing uploaded or sent) when the window is closed, or when a Reopen
+template is waiting for the customer's reply; the words say so and say to reopen the conversation. If the window closes after our check,
+Meta's own answer (131047) is turned into the same plain failure. It then uploads **the exact stored PDF** to WhatsApp and sends **one
+document message with the editable text as its caption** (limit 1,024 characters), and records it in the existing conversation: an
+outgoing document labelled with the quote (`quote: { id, ref, version }`), with its own copy of the PDF under `media/` so the existing
+media viewer, retention and erasure code is used unchanged (the quote keeps the original). If that chat record cannot be made after Meta
+accepted the message, the delivery is still a success.
+
+Failure shapes, all tested: Meta refuses (4xx): a failure in plain words, nothing in the chat, safe to retry. The PDF upload failing (any
+way): a failure, because nothing reached the customer. Meta 5xx, an answer without a message id, no connection, or no answer in 20 s:
+**not confirmed**, never resent by itself. A Reopen template does not open the window; only the customer's reply does (tested end to end
+through the M1 code and the existing `storeInbound`).
+
+### M4: email quote sending
+
+Built and tested on 2026-10-05. Nothing deployed, no DNS changed, no email provider account added, no real email sent.
+
+| File | What |
+|---|---|
+| `functions/lib/gmail.js` | a minimal Gmail client (REST, no extra packages), the **keyless** sign-in, and the hand-built email |
+| `functions/lib/quoteChannels.js` | `emailChannel`: the channel for the delivery module |
+| `functions/lib/quoteDelivery.js` | additive: an optional `subject` for the email, the customer's **current** address when an already-sent version is sent again |
+| `scripts/setup-mailer.sh` | the one-time Google Cloud setup (below), safe to repeat, `--check` is read-only |
+| `functions/test/gmail.test.js`, `functions/test/quote-email.test.js` | 11 and 19 tests |
+
+Sign-in, with no key, password or token stored anywhere: the function's own runtime identity gets a short-lived token; it asks the **IAM
+Credentials** API to sign a one-hour request for the dedicated service account `ek-mailer` naming the mailbox (`info@elitekitchens.ie`)
+and the **single scope `gmail.send`** (it can send, and cannot read mail); Google's token endpoint exchanges that for a one-hour Gmail
+token (cached, renewed 5 minutes before it expires). `ek-mailer` has no project roles and no keys. Every failure of this sign-in is
+**definite** (nothing was sent) and says which step.
+
+The message: plain text, the customer's saved address (frozen on the quote at the time it was prepared), `From: "Elite Kitchens"
+<info@elitekitchens.ie>`, `Reply-To` the same (so replies come back to `info@`, and the message sits in its Sent folder), the editable text
+as the body, the **exact stored PDF** attached. Built by hand, so it is tested hard: quoted-printable text (round-trips `=`, accents, euro,
+em dash, emoji, long lines, spaces at the end of a line), RFC 2047 encoded subject and name in words of at most 75 characters, base64 PDF
+that survives byte for byte at every length, and **nothing can break out of a header** (a line break or odd address in the subject, name,
+recipient or file name is refused; the body may contain anything). The default subject is the existing wording
+(`Elite Kitchens — Kitchen Quote EK-0104 v1`), editable.
+
+Failure shapes: Google refusing (400, 401, 403, 429) is a failure in plain words ending "Nothing was sent."; Google 5xx, an answer
+without a message id, no connection or no answer in 20 s is **not confirmed** ("check the Sent folder of info@"), never resent by itself.
+The email switch: `MAIL_SEND` is **off** unless it is `on` and `MAIL_SENDER` and `MAIL_SERVICE_ACCOUNT` are set (plain settings, not
+secrets); with it off the channel refuses with "Email sending is not switched on yet" and Google is never contacted. In the emulator,
+`MAIL_API_BASE` points at a local fake Gmail.
+
+**What the mailbox owner must do once** (the owner said yes to this): see "One-time Google Workspace setup" below. **No DNS change is
+needed to build or test anything**; see "Email authentication" below for what the preview test decides.
+
+### M5: the send experience
+
+Built and tested on 2026-10-05. Nothing deployed.
+
+| File | What |
+|---|---|
+| `public/quote-send-model.js` | the logic behind the dialog, pure and unit-tested in Node (`functions/test/quote-send-model.test.js`, 11 tests): which channels can be used and why not, the default wording, how each delivery is described |
+| `public/quotes.js`, `public/index.html`, `public/app.css` | the Send dialog, the results, the "send in progress" box, the delivery lines under each sent version, the activity wording |
+| `public/app.js` | "Reopen conversation" can be opened from anywhere (the Send dialog uses it), the Send dialog follows the customer's conversation live, and a quote document in the chat shows a **Quote EK-0104 v1** label that opens the quote |
+| `test-ui/quote-delivery.e2e.js` | the browser test (desktop and phone) |
+
+What staff see. **Send quote** opens a dialog that shows **Send via** with each channel and why it can or cannot be used:
+
+* **WhatsApp:** *Available* (window open, and until when), *24-hour window closed* (disabled, with **Reopen conversation**: the same
+  confirmation as in the chat), *Template sent at 14:27. Waiting for Anna to reply: WhatsApp does not allow this message until they do*
+  (never "reopened"), or no conversation. When the customer replies the row unlocks by itself, without closing the dialog.
+* **Email:** *Available: anna@example.com*, *No email address: add one in the customer's Details*, a bad address, or *not switched on yet*.
+* **One channel is ticked by default** (WhatsApp if it can be used, else email); staff tick both if they want both. Each ticked channel
+  has its own **editable message**: WhatsApp (1,024 characters) and email (subject and body), prefilled with the approved wording.
+* Staff cannot press **Send quote** with no channel. When none can be used the dialog says how to fix that (reopen WhatsApp, add an email
+  address) and offers the fallback below.
+
+After **Send quote** the dialog shows **each channel's result on its own**: `✓ WhatsApp: sent 5 Oct 14:32`, `✕ Email: failed` with
+the plain reason and **Retry Email**, or `? WhatsApp: delivery not confirmed` with **It arrived** / **It did not arrive** and no Retry.
+The headline says **"sent"** as soon as one channel confirmed, and otherwise **"not sent yet"** with what to do next. If every channel
+fails, the quote stays a locked draft and the quote page shows a **"A send is in progress: v1 is not marked sent"** box with the
+channels, **Download PDF**, **I sent it myself: mark as sent** and **Cancel this send**; the draft cannot be edited until it is finished.
+A connection that drops during a send is shown as "we do not know whether it went", and pressing Send again is safe (same request).
+
+Also: **Send this version…** (on a sent quote and on each sent version) delivers the stored PDF of a version already sent, by WhatsApp or
+email, with no new version and no change to the quote; **Send again…** (new version, new dates) and **Revise** are unchanged. **The
+manual ways stay as the fallback**, under the same ids as before: "Prefer to send it yourself? Make the PDF and mark it sent", then
+Download PDF and Email draft; and "I sent it myself" on a prepared send. Existing quotes marked sent by hand show "Marked sent: no channel
+recorded". The quote's **Sent versions** list shows every version's deliveries channel by channel (a failed attempt is hidden once the same
+channel has since delivered), the **activity** says "sent v1 via WhatsApp", the quote row and the customer's profile say "Sent 3 Oct via
+WhatsApp", and the chat shows the document labelled with the quote number. PDF v1 stays exactly as it was when v2 is sent.
+
+### Results at the end of M5 (2026-10-05)
+
+All on emulators with fake providers: nothing real was sent, nothing was deployed, nothing outside the repository was changed.
+
+| Suite | Result |
+|---|---|
+| Backend (`npm test`) | **317 of 317** (baseline 201, +116: Reopen 20, delivery 30, Gmail 11, WhatsApp 24, email 20, send model 11) |
+| `ui.e2e.js` / `lead` / `crm` / `dnd` / `conversion` / `appointments` | 57 of 57 / 11 of 11 / 14 of 14 / 13 of 13 / 10 of 10 / 17 of 17 |
+| `quotes.e2e.js`, `quote-send.e2e.js` (Phase 6, **unchanged**, now against the new Send dialog) | 20 of 20, 9 of 9 |
+| `reopen.e2e.js` (M1) | 14 of 14 |
+| `quote-delivery.e2e.js` (M5, new; desktop and phone) | 16 of 16 |
+| `theme.e2e.js` (Google Chrome) | 10 of 10 |
+
+No existing test file was modified. The one harness change is in `test-ui/run.sh` (it also writes the fake-Gmail settings), in its own commit.
+
+**Planted errors** (a deliberate bug is put into the code and the tests must fail; every source file was restored byte-for-byte after each):
+backend **47 of 47 caught** (M1 8, M2 20, M3/M4 19), among them: a failed channel recorded as sent; the quote committed while every channel
+failed; a retry that resends a delivered channel; no claim before sending (double send); the 24-hour window bypassed; a Reopen template
+treated as opening the window; the PDF or recipient swapped; header injection allowed; the Gmail scope widened; an unsure answer treated as
+refused (so retryable) or as sent; the staff check removed. Two M2 attempts were first wrong (one did not load, one removed only one of two
+guards); they were redone as valid mutants and both were caught. A representative sample of eleven backend ones was run again on the final tree
+(the backend code is unchanged since, except one comment). Screen, **10 of 10 caught** (by the model's unit test, the browser test, or both): a failed
+channel shown as "sent"; the headline saying "sent" when nothing was sent; Retry offered on an unsure result; a closed window treated as usable; **Send quote** enabled with no
+channel ticked; both channels ticked by default; a new request id on every press (the double-send guard); Reopen hidden inside the dialog; the dialog
+ignoring the customer's reply; the wrong first name in the default message. One of my first attempts at the request-id one did not match the code
+(nothing was changed); it was redone and caught.
+
+**Flaky tests:** none in the final runs. One Phase 5 test (`calendar.test.js`, "immediate push, sweeper and Retry now") failed once during
+M1 under the load of a full run (2 GETs instead of 1); it passed 5 of 5 alone and in every later full run, including this one. Treated as a timing
+flake of a Phase 5 test, unrelated to Phase 6.1.
+
+### Security review at the end of M5
+
+| Check | Result |
+|---|---|
+| Staff-only | Every exported handler was called with no sign-in and with a signed-in non-staff user, with no database available: all 34 staff handlers (including the 7 new ones) reject with unauthenticated / permission-denied before doing anything; the 4 intentionally open ones (webhook verify and receive, claimAccess, isAllowedUser) are unchanged. Tested again per action in `delivery.test.js` and `quote-email.test.js` |
+| Recipient cannot be chosen by a browser | WhatsApp goes to the quote's own customer number (read from the quote), email to the customer's saved address; a changed address stops the send. A staff user cannot send quote X to customer Y |
+| Private PDF | Stored under `quotes/` (Storage rules deny all browser access); no public URL, no ACL, no `makePublic`; staff view it via 10-minute signed links; the PDF actually sent is read back and its SHA-256 compared first; the upload path must be the sender's own folder |
+| Replay, double click, refresh, two staff, timeouts | One request id = one send; each delivery is claimed (compare-and-set) before the provider is contacted; a stalled "sending" becomes "unsure" after 3 minutes and is **never** retried by itself; a late answer cannot overwrite a staff decision. All tested, with planted errors |
+| Stale state | The 24-hour window is re-checked on the server at send time; a changed customer, settings or draft, or an old issue date, refuses the send |
+| Customer deletion | Erases the delivery records, quote PDFs, the chat copy of the document and the messages (tested in WhatsApp and email suites). Not erasable by Elite OS: the email copy in info@'s Sent folder, and Meta's and Google's own copies (`docs/DATA_CONTROLS.md`) |
+| PII in logs and stored errors | Codes only, never a name, number, address, message text or PDF content (tested with logging captured, for every failure shape) |
+| Secrets | No secret in the repository or its new files (scanned the 25 changed or new files for keys, tokens, private keys, passwords). No key file anywhere: Gmail sign-in is keyless (IAM signs a one-hour request for `ek-mailer`); the email functions hold no secret at all; only the two functions that send hold the WhatsApp token |
+| Google permission | `gmail.send` only (checked in the code and by a planted error that widens it), sender fixed by a setting, `ek-mailer` has no project roles and no keys (the setup script warns if it finds either) |
+| Unchanged | Webhook (`webhookVerify`/`webhookReceive`), Meta Lead Ads, Appointments/Calendar, Firestore and Storage rules, the CRM stage rules: `git diff` shows no change to any of them. `whatsapp.js` and `store.js` changes are additive (an optional time limit, the Meta error code on the error, an optional `extra` on an outgoing message); the old tests pass unchanged |
+| Browser code | No `innerHTML` with customer text: the new code uses `textContent` only (the four existing `innerHTML` uses insert fixed SVG icons and are older than Phase 6.1) |
+
+### Deviations from the approved design, and limits to know
+
+1. **"Confirmed delivery" means "the provider accepted it".** Decision 1 says a quote is Sent once a channel "confirms successful delivery".
+   Neither Meta nor Gmail can confirm arrival at the time of sending, only acceptance (see "What sent means"). That is what is implemented and
+   what the screen now says ("accepted it for delivery"). If you want a quote to go back to a draft when Meta later reports a failure, that is a new feature.
+2. **A retry of an email goes to the address stored with that attempt.** If the first attempt failed because the address was wrong, correcting it in the
+   customer's Details does not change a retry that is already queued: **Cancel this send** and send again (a new send uses the corrected address, as
+   does **Send this version…**). Not changed here: it is safe, only less convenient. Candidate for a later small change.
+3. The two deploy and rollback scripts and the one-time mailer setup script were written in M4/M5 (the plan placed deploy scripts in M6). **None has been run.**
+4. The optional M7 (quote document inside an approved template outside the 24-hour window) is **not built**, as instructed.
+
+### Technical debt (documented, not fixed: out of scope)
+
+* An outgoing WhatsApp message whose Meta status arrives within the same millisecond as our own record can have its stored `error` reset to null
+  (`storeOutbound`). Pre-existing, rare, documented since M1; the quote delivery record itself is unaffected.
+* `public/quotes.js` is large (about 1,200 lines) and now holds the whole Send flow. Splitting it is a refactor with no user value today.
+* The Phase 5 calendar timing test mentioned above.
+
+### Still needed from the owner before the preview
+
+* **Meta:** confirm the Reopen template `elite_kitchens_reopen` (language `en`) is **approved** and send me the exact name and language. The
+  second template (`elite_kitchens_quote_document`) is not used by anything built so far (it is for the optional M7).
+* **Google Workspace:** run `./scripts/setup-mailer.sh` in Cloud Shell, then authorise the printed client ID for the single scope `gmail.send` in the
+  Admin console (steps above). Not done.
+* **DNS:** nothing needs changing now. SPF, DKIM and DMARC are decided by the header test in "Testing the preview"; any change needs approval first.
+* **Approvals:** backend deploy, preview deploy, email switched on, then (after your review) live, merge and tag. None has been given or done.
+
+## What "sent" means (read this before the preview)
+
+A channel counts as **sent** when the provider **accepts** the message: Meta returns a message id, Gmail returns a message id. That
+is the strongest answer either gives synchronously, and it is what Elite OS records and what marks the quote Sent. It does **not** prove the
+message reached the customer's phone or inbox: a phone that is off still shows one tick, a number that turns out not to be on
+WhatsApp is reported by Meta a moment later, and a mailbox can bounce. For WhatsApp the later report is recorded on the chat message as
+before (ticks, "failed", the existing status webhook, unchanged); the quote's delivery record and the quote's Sent status are **not** rewritten
+by it. For email a bounce arrives as a message in the info@ mailbox (Elite OS cannot read it). Choosing to act on a later failure (for
+example moving a quote back to a draft) would be a new feature and a business decision: not part of Phase 6.1.
+
+## Testing the preview (controlled, real; the owner runs it after approving the preview deploy)
+
+Nothing here has been run. **No real customer is used.** The test customer is the owner's own WhatsApp number and own email address
+(ideally a second phone or a family member's who has agreed), created as a normal customer called, for example, **Test Customer**. The
+preview (Hosting channel `phase61`) uses the live data and the live backend, so everything below really sends.
+
+**Before starting (all from the owner; none is done yet)**
+
+| Needed | Why | Status at the end of M5 |
+|---|---|---|
+| Meta template `elite_kitchens_reopen` approved (name and language code sent to me) | "Reopen conversation" | submitted and in review (owner, 2026-10-05); not yet confirmed approved |
+| Cloud Shell: `./scripts/setup-mailer.sh`, then the Workspace approval (see "One-time Google Workspace setup") | email | not done |
+| An email address the owner can read, different from info@ (their own Gmail, ideally also an Outlook one) | the email test and the header check | to be given |
+| A phone for the test customer that has WhatsApp and can message the business number | WhatsApp tests | to be given |
+| Approval to deploy the backend, then the preview | the whole test | not given |
+
+**The test** (each line is a tick box; tell me what you see, with a screenshot of anything odd)
+
+1. **Reopen.** From the test phone, message the business number once, then do nothing for 24 hours (or use a number that has not messaged
+   for more than 24 hours). In Elite OS open that chat: the grey band says the window is closed and offers **Reopen conversation**. Press it, confirm.
+   The phone receives the template; the chat says "Template sent … waiting for Test Customer to reply" (it never says "reopened"). Press
+   **Go ahead** on the phone: the chat unlocks by itself. Press Reopen again straight away: it is refused (one a day).
+2. **WhatsApp quote.** Make a quote for Test Customer. **Send quote**: *WhatsApp* is ticked and says "Available". Send. The phone gets the PDF
+   with the message; the dialog shows "WhatsApp: sent"; the quote is **Sent**; the customer moved from New lead to Quoted; the chat shows the
+   document labelled **Quote EK-… v1**; the activity says "via WhatsApp". Open the PDF on the phone: it is the quote, v1.
+3. **Email quote.** (Switch email on first: `./scripts/deploy-quote-sending.sh mail on`.) Give Test Customer your own email address. Send
+   with only *Email* ticked. It arrives from info@elitekitchens.ie with the PDF attached and the subject shown in the dialog. It also appears
+   in the info@ mailbox's **Sent** folder.
+4. **Email authentication.** In your Gmail, open the email, **three dots > Show original**: write down SPF, DKIM and DMARC (PASS / NONE / FAIL).
+   Do the same in an Outlook address. Tell me the six words. (Nothing in DNS is changed without your approval: "Email authentication" below.)
+5. **Both at once.** Revise to v2 and send by WhatsApp and email together. Both arrive; the quote page lists both under v2; v1's PDF is unchanged.
+6. **Send this version.** On the sent quote press **Send this version…** for v1, email only: v1 arrives again, no new version appears.
+7. **Window closed while sending.** With the test customer's window closed (after 24 hours of silence), open **Send quote**: WhatsApp is
+   greyed with "24-hour window closed" and **Reopen conversation** inside the dialog; email still works.
+8. **No email address.** For a customer without one the Email row says so and cannot be ticked.
+9. **Email switched off.** `./scripts/deploy-quote-sending.sh mail off`: the Email row says "not switched on yet"; WhatsApp still works.
+   Switch it back on if you want to continue.
+10. **Failure paths** cannot be forced safely with real Meta and Google, so they are proved by the automated tests with fake providers (below).
+    One you can try for real, with a number you own that is **not** on WhatsApp (never someone else's): Meta may refuse at once (the quote
+    stays a locked draft with "A send is in progress" and **Retry WhatsApp**) or may accept the message and report "undeliverable" a moment
+    later (the quote is then marked Sent, because Meta accepted it, and the chat shows the message as failed). Tell me which you see.
+11. **Clean up.** Press **Delete customer…** on Test Customer: the chat, the quotes, the PDFs and the delivery records go. The emails
+    stay in the info@ Sent folder: delete them there by hand.
+
+**Stop at once** if anything is sent to a number or address that is not your own, if a quote is marked Sent when nothing arrived, or if
+a message arrives twice: run `./scripts/rollback-quote-sending.sh --close` and tell me.
+
+## Rollout (M6, not started)
+
+Every step is run by the owner in Cloud Shell, after approval, one stage at a time; each functions step asks for "yes" and saves the
+revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollback-quote-sending.sh`). Nothing below has been run.
+
+1. **Clone on the Phase 6.1 branch:** `cd ~/elite-kitchens-lead-os && git fetch && git checkout phase-6-1-quote-sending && git pull`.
+2. **Check (changes nothing):** `./scripts/deploy-quote-sending.sh check`.
+3. **Email setup (once, only needed before email is switched on):** `./scripts/setup-mailer.sh`, then the Workspace approval below.
+4. **Backend:** `./scripts/deploy-quote-sending.sh backend`: the 7 new functions and the 14 quote functions (they share the quote code
+   that now locks a draft while a send is prepared). Email stays **off**. The live screen is unchanged: it does not call the new functions.
+5. **Preview:** `./scripts/deploy-quote-sending.sh preview` (Hosting channel `phase61`, live data and live backend). Test as in "Testing
+   the preview".
+6. **Email on, when the test plan reaches it:** `./scripts/deploy-quote-sending.sh mail on` (kill switch: `mail off`).
+7. **Live (approval):** `./scripts/deploy-quote-sending.sh live`. Then reload Elite OS.
+8. **Merge and tag (approval), after live is confirmed:** merge `phase-6-1-quote-sending` into `main` and tag it.
+
+Rollback: `./scripts/rollback-quote-sending.sh` (the last backend deploy back to the saved revisions, in seconds), `--close` (the 7 new
+functions stop answering browsers; data stays), `--mail-off`; the screen: Firebase console > Hosting > Release history > Rollback.
+
+## One-time Google Workspace setup (email)
+
+1. **Cloud Shell**, in the project `elite-kitchens-lead-os`: `./scripts/setup-mailer.sh`. It enables the Gmail API and IAM Credentials,
+   creates the service account `ek-mailer` (no roles, no keys) and lets the functions' own account ask for tokens for it. It prints the
+   **client ID** (a long number). Safe to repeat; `./scripts/setup-mailer.sh --check` only reads.
+2. **Google Workspace Admin console** (admin.google.com, as a **super admin**): **Security > Access and data control > API controls >
+   Manage Domain Wide Delegation > Add new**. Client ID: the number from step 1. OAuth scopes: `https://www.googleapis.com/auth/gmail.send`
+   (this one only). **Authorise.** This lets Elite OS send email as a mailbox of the domain and nothing else (it cannot read mail).
+3. `./scripts/setup-mailer.sh --check` should now show everything "ok".
+4. Nothing else: no key, password or token is created or pasted anywhere. Email stays off until `mail on`.
+
+## Email authentication (SPF, DKIM, DMARC): decided by evidence, not now
+
+Inspected 2026-10-05 (see "Email" above): the domain has no SPF, DKIM or DMARC record in public DNS. **Nothing is changed.** At the preview
+the owner sends one test email to their own Gmail and Outlook addresses and opens the message's headers ("Show original" in Gmail):
+if SPF, DKIM and DMARC read **pass**, nothing is needed; if they read **none** or **fail**, the recommendation is SPF
+`v=spf1 include:_spf.google.com ~all` (one TXT record at the root, after confirming nothing else sends as `@elitekitchens.ie`) and
+DKIM switched on in Admin console (Apps > Google Workspace > Gmail > Authenticate email), with DMARC optional and monitor-only. Any DNS
+change needs the owner's explicit approval first.
 
 ## Open items
 
