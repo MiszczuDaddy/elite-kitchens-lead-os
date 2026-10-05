@@ -443,20 +443,56 @@
     <p id="qsend-who" class="hint"></p>
     <dl id="qsend-facts" class="qb-figures qsend-facts"></dl>
     <p id="qsend-warn" class="q-warn" hidden></p>
-    <label>Design renders <span class="label-note">(optional: up to 5 images, each on its own page)</span><input id="qsend-renders" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
-    <div id="qsend-thumbs" class="qsend-thumbs"></div>
-    <label class="q-check" id="qsend-reopen-row" hidden><input type="checkbox" id="qsend-reopen"> <span id="qsend-reopen-text"></span></label>
-    <label>Pipeline value<input id="qsend-value" inputmode="decimal" maxlength="12" aria-describedby="qsend-value-help"></label>
-    <p class="hint field-hint" id="qsend-value-help">Prefilled with the dearest option. Leave it empty to keep the current value.</p>
+    <fieldset id="qsend-via" class="qsend-via">
+      <legend>Send via</legend>
+      <div class="qsend-chan" id="qsend-ch-wa">
+        <label class="q-check"><input type="checkbox" id="qsend-wa"> <span class="qsend-chan-name">WhatsApp</span></label>
+        <p id="qsend-wa-state" class="qsend-chan-state" role="status"></p>
+        <button type="button" id="qsend-wa-reopen" class="btn btn-ghost btn-sm" hidden>Reopen conversation</button>
+        <div id="qsend-wa-box" hidden>
+          <label>WhatsApp message <span class="label-note">(sent with the PDF)</span><textarea id="qsend-wa-text" rows="3" maxlength="1024"></textarea></label>
+        </div>
+      </div>
+      <div class="qsend-chan" id="qsend-ch-em">
+        <label class="q-check"><input type="checkbox" id="qsend-em"> <span class="qsend-chan-name">Email</span></label>
+        <p id="qsend-em-state" class="qsend-chan-state" role="status"></p>
+        <div id="qsend-em-box" hidden>
+          <label>Subject<input id="qsend-em-subject" maxlength="150"></label>
+          <label>Email message<textarea id="qsend-em-text" rows="9" maxlength="5000"></textarea></label>
+        </div>
+      </div>
+      <p id="qsend-via-note" class="hint qsend-via-note"></p>
+    </fieldset>
+    <div id="qsend-new-only">
+      <label>Design renders <span class="label-note">(optional: up to 5 images, each on its own page)</span><input id="qsend-renders" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+      <div id="qsend-thumbs" class="qsend-thumbs"></div>
+      <label class="q-check" id="qsend-reopen-row" hidden><input type="checkbox" id="qsend-reopen"> <span id="qsend-reopen-text"></span></label>
+      <label>Pipeline value<input id="qsend-value" inputmode="decimal" maxlength="12" aria-describedby="qsend-value-help"></label>
+      <p class="hint field-hint" id="qsend-value-help">Prefilled with the dearest option. Leave it empty to keep the current value.</p>
+    </div>
     <p id="qsend-effect" class="q-effect"></p>
     <p id="qsend-progress" class="qsend-progress" role="status"></p>
     <div id="qsend-err" class="dlg-err" role="alert"></div>
     <div class="dlg-actions">
       <button type="button" id="qsend-preview" class="btn btn-ghost qsend-left">Preview</button>
       <button type="button" id="qsend-cancel" class="btn btn-ghost">Cancel</button>
-      <button type="submit" id="qsend-go" class="btn btn-primary">Make PDF and mark sent</button>
+      <button type="submit" id="qsend-send" class="btn btn-primary">Send quote</button>
     </div>
+    <p class="hint dlg-alt" id="qsend-manual-row">Prefer to send it yourself? <button type="button" id="qsend-go" class="linkbtn">Make the PDF and mark it sent</button>, then download it or open an email draft.</p>
   </form>
+  <div id="qsend-results" hidden>
+    <h2 id="qsend-res-title">Result</h2>
+    <p id="qsend-res-summary" class="hint" role="status"></p>
+    <ul id="qsend-res-list" class="qsend-res"></ul>
+    <p id="qsend-res-effect" class="hint"></p>
+    <div id="qsend-res-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions qsend-res-actions">
+      <a id="qsend-res-download" class="btn btn-ghost" href="#" download hidden>Download PDF</a>
+      <button type="button" id="qsend-res-manual" class="btn btn-ghost" hidden>I sent it myself: mark as sent</button>
+      <button type="button" id="qsend-res-cancel" class="btn btn-ghost" hidden>Cancel this send</button>
+      <button type="button" id="qsend-res-close" class="btn btn-primary">Close</button>
+    </div>
+  </div>
   <div id="qsend-done" hidden>
     <h2>Quote sent</h2>
     <p id="qsend-done-text" class="hint"></p>
@@ -483,6 +519,7 @@
 <script src="/__/firebase/init.js"></script>
 <script src="/crm.js"></script>
 <script src="/window-state.js"></script>
+<script src="/quote-send-model.js"></script>
 <script src="/app.js"></script>
 <script src="/pipeline.js"></script>
 <script src="/appointments.js"></script>

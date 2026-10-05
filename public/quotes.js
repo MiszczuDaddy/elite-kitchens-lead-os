@@ -18,6 +18,7 @@ window.QUOTES = (() => {
     notesDirty: false, built: null, busy: false,
     customer: null, custList: [], custLoaded: false, unsubCust: null,
     dlg: null,
+    deliveries: [], unsubDeliveries: null, mailInfo: null,        // Phase 6.1: how this quote was sent, channel by channel (quotes/{id}/deliveries)
   };
   const QUOTE_ID = /^q_[0-9a-f]{24}$/;
   const newRequestId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
@@ -55,7 +56,13 @@ window.QUOTES = (() => {
     if (q.status === 'accepted') return `Accepted ${tsShort(q.acceptedAt)}: ${q.acceptedOption ? q.acceptedOption.name : ''}`;
     if (q.status === 'declined') return 'Declined ' + tsShort(q.declinedAt) + (q.declineReason ? ': ' + q.declineReason : '');
     const extra = q.draftVersion ? ` · draft v${q.draftVersion} not sent` : '';
-    return (isExpired(q) ? `Expired: valid until ${fmtDate(q.validUntil, false)} (sent ${tsShort(q.sentAt)})` : `Sent ${tsShort(q.sentAt)} · valid until ${fmtDate(q.validUntil, false)}`) + extra;
+    const via = sentVia(q) ? ' via ' + sentVia(q) : '';
+    return (isExpired(q) ? `Expired: valid until ${fmtDate(q.validUntil, false)} (sent ${tsShort(q.sentAt)}${via})` : `Sent ${tsShort(q.sentAt)}${via} · valid until ${fmtDate(q.validUntil, false)}`) + extra;
+  }
+  // How the customer's current version was sent, when a channel confirmed it (quotes marked sent by hand say nothing).
+  function sentVia(q) {
+    const h = [...(q.history || [])].reverse().find((x) => x.action === 'sent');
+    return h && h.via && h.via !== 'manual' ? QuoteSend.CHANNEL_NAME[h.via] || h.via : '';
   }
   const stageName = (s) => INBOX_STATUSES[s] || 'New lead';
 
@@ -90,17 +97,24 @@ window.QUOTES = (() => {
       if (Q.id !== id) return;
       Q.quote = d.exists ? { id, ...d.data() } : null; Q.quoteLoaded = true;
       if (Q.quote) watchQuoteContact(Q.quote.phone);
-      renderQuote();
+      renderQuote(); if (Q.deliveriesChanged) Q.deliveriesChanged();
     }, (e) => { if (Q.id === id) { Q.quoteLoaded = true; note('Cannot load the quote: ' + errText(e), 'err'); } });
     Q.unsubVersions = db.collection('quotes').doc(id).collection('versions').onSnapshot((snap) => {
       if (Q.id !== id) return;
       Q.versions = new Map(snap.docs.map((d) => [d.data().n, d.data()])); Q.versionsLoaded = true;
       renderQuote();
     }, () => {});
+    Q.unsubDeliveries = db.collection('quotes').doc(id).collection('deliveries').onSnapshot((snap) => {
+      if (Q.id !== id) return;
+      Q.deliveries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderQuote(); if (Q.deliveriesChanged) Q.deliveriesChanged();
+    }, () => {});
   }
   function closeQuote() {
     if (Q.unsubQuote) { Q.unsubQuote(); Q.unsubQuote = null; }
     if (Q.unsubVersions) { Q.unsubVersions(); Q.unsubVersions = null; }
+    if (Q.unsubDeliveries) { Q.unsubDeliveries(); Q.unsubDeliveries = null; }
+    Q.deliveries = [];
     watchQuoteContact(null);
     if (Q.builder) { Q.builder.destroy(); Q.builder = null; }
     Object.assign(Q, { quote: null, quoteLoaded: false, versions: new Map(), versionsLoaded: false, builderKey: null, answers: null, dirty: false, sheet: null, errors: [], problems: [], notesDirty: false, built: null });
@@ -278,6 +292,7 @@ window.QUOTES = (() => {
       const b = el('button', 'linkbtn', 'Use today\'s prices'); b.type = 'button'; b.id = 'qv-use-current'; b.onclick = () => saveDraft(true);
       p.append(b); return p;
     }));
+    if (q.preparedSend) banner.append(sendStatePanel(q));
     if (q.draftVersion) {
       if (!dv) { body.replaceChildren(el('p', 'appts-empty', 'Loading…')); return; }
       const key = q.draftVersion + '|' + JSON.stringify(dv.priceList);
@@ -342,6 +357,20 @@ window.QUOTES = (() => {
     Q.builder.showErrors(r.errors);
     renderTotals();
   }
+  // A send is in progress (prepared, but no channel has confirmed yet): the quote is NOT marked sent. Each channel's state on its
+  // own, and what to do next: retry a failed one, settle one we could not confirm, send it yourself, or cancel.
+  function sendStatePanel(q) {
+    const box = el('div', 'qv-sendstate'); box.id = 'qv-sendstate';
+    const list = Q.deliveries.filter((x) => x.requestId === q.preparedSend.requestId), now = Date.now(), sum = QuoteSend.summarize(list, now);
+    box.append(el('h3', null, `A send is in progress: v${q.preparedSend.version} is not marked sent`), el('p', 'qv-msg', list.length ? sum.text : 'Checking the send…'));
+    if (list.length) box.append(deliveryRows(list, q));
+    const row = el('div', 'qv-buttons');
+    row.append(button('Download PDF', 'btn-ghost', (ev) => openPdf(q.preparedSend.version, ev.currentTarget), 'qv-prep-pdf'),
+      button('I sent it myself: mark as sent', 'btn-ghost', markPreparedSent, 'qv-prep-manual'));
+    if (list.length && !sum.sent && !list.some((x) => ['sending', 'unknown'].includes(QuoteSend.effective(x, now)))) row.append(button('Cancel this send', 'btn-ghost', cancelPreparedSend, 'qv-prep-cancel'));
+    box.append(row);
+    return box;
+  }
   function renderSide() {
     if (!Q.quote || Q.built !== Q.id) return;
     renderTotals(); renderActions(); renderCustomerPart(); renderVersions(); renderNotes(); renderActivity();
@@ -394,7 +423,7 @@ window.QUOTES = (() => {
   // keystroke could swallow a click on Save made straight after typing: the field's change event redrew the button mid-click.)
   function renderActions() {
     const host = part('actions'); if (!host || !Q.quote) return;
-    const q = Q.quote, key = [q.status, q.draftVersion, q.sentVersion].join('|');
+    const q = Q.quote, key = [q.status, q.draftVersion, q.sentVersion, q.preparedSend ? 'sending' : ''].join('|');
     if (host.dataset.key !== key) { buildActions(host, q); host.dataset.key = key; }
     const save = $('qv-save');
     if (save) { save.disabled = Q.saving || !Q.dirty; save.textContent = Q.saving ? 'Saving…' : 'Save draft'; }
@@ -408,6 +437,10 @@ window.QUOTES = (() => {
   }
   function buildActions(host, q) {
     const nodes = [el('h3', null, 'Actions')], row = el('div', 'qv-buttons');
+    if (q.preparedSend) {                                   // locked while a send is prepared: the box at the top has the choices
+      host.replaceChildren(...nodes, el('p', 'qb-note', 'A send is in progress, so this draft cannot be edited, discarded or deleted until it is finished or cancelled. Choose what to do in the box at the top of the quote.'));
+      return;
+    }
     if (q.draftVersion) {
       row.append(button('Save draft', 'btn-primary', () => saveDraft(false), 'qv-save'), button('Send…', 'btn-ghost', () => openSend('send'), 'qv-send'),
         button('Preview', 'btn-ghost', openPreview, 'qv-preview'));
@@ -416,8 +449,9 @@ window.QUOTES = (() => {
       nodes.push(row, el('p', 'qb-note qv-hint', SEND_HINT));
     } else if (q.status === 'sent') {
       row.append(button('Mark accepted…', 'btn-primary', openAccept, 'qv-accept'), button('Mark declined…', 'btn-ghost', openDecline, 'qv-decline'),
-        button('Revise', 'btn-ghost', revise, 'qv-revise'), button('Send again…', 'btn-ghost', () => openSend('renew'), 'qv-renew'));
-      nodes.push(row, el('p', 'qb-note', 'Revise starts a new version with the same prices to change. Send again sends the same quote with a new date and validity.'));
+        button('Revise', 'btn-ghost', revise, 'qv-revise'), button('Send again…', 'btn-ghost', () => openSend('renew'), 'qv-renew'),
+        button('Send this version…', 'btn-ghost', () => openSend('resend'), 'qv-resend'));
+      nodes.push(row, el('p', 'qb-note', 'Revise starts a new version with the same prices to change. Send again sends the same quote with a new date and validity. Send this version sends the PDF the customer already has, by WhatsApp or email.'));
     } else if (q.status === 'accepted') {
       row.append(button('Reopen…', 'btn-ghost', openReopen, 'qv-reopen'));
       nodes.push(row);
@@ -453,6 +487,11 @@ window.QUOTES = (() => {
       r.append(el('span', null, `v${v.n} · ${fmtDate(v.issueDate)} · ${euros(d && d.incVat)}`));
       if (v.pdf) { const b = el('button', 'linkbtn', 'PDF'); b.type = 'button'; b.onclick = () => openPdf(v.n, b); r.append(b); }
       nodes.push(r);
+      // How this version reached the customer, channel by channel (a failed attempt is hidden once the same channel has since delivered).
+      const all = Q.deliveries.filter((x) => x.version === v.n && x.state !== 'cancelled');
+      const shown = all.filter((x) => !(x.state === 'failed' && all.some((y) => y.channel === x.channel && y.state === 'sent')));
+      if (shown.length) { const rows = deliveryRows(shown, Q.quote); rows.classList.add('qv-vdel'); nodes.push(rows); }
+      else if (v.pdf && !all.length) nodes.push(el('p', 'qv-vnote', 'Marked sent: no channel recorded.'));
     }
     host.replaceChildren(...nodes);
   }
@@ -477,7 +516,7 @@ window.QUOTES = (() => {
       if (c.value) bits.push(`pipeline value ${euros(c.value.from)} → ${euros(c.value.to)}`);
       if (bits.length) lines.push([c.at, `${c.action} v${c.version}: ${bits.join('; ')}`]);
     }
-    for (const h of (q.history || [])) lines.push([h.at, `${h.action}${h.version ? ' v' + h.version : ''}${h.option ? ' (' + h.option + ')' : ''} · ${h.by}`]);
+    for (const h of (q.history || [])) lines.push([h.at, `${h.action}${h.version ? ' v' + h.version : ''}${h.option ? ' (' + h.option + ')' : ''}${h.via ? ' via ' + (h.via === 'manual' ? 'staff (by hand)' : QuoteSend.CHANNEL_NAME[h.via] || h.via) : ''} · ${h.by}`]);
     lines.sort((a, b) => ((b[0] && b[0].toMillis ? b[0].toMillis() : 0) - (a[0] && a[0].toMillis ? a[0].toMillis() : 0)));
     const ul = el('ul', 'qv-activity-list'); lines.slice(0, 12).forEach(([at, text]) => ul.append(el('li', null, tsTime(at) + ' · ' + text)));
     nodes.push(ul);
@@ -677,12 +716,20 @@ window.QUOTES = (() => {
   });
   $('qr-cancel').onclick = () => { closeDialog($('qr-dlg')); Q.dlg = null; };
 
-  // ---------- send (M4): the customer PDF, its exact stored copy, and the quote marked Sent ----------
-  // "Send" sends the draft. "Send again" (renew) starts the next version with the same content and prices, then sends it with a
-  // new date and validity. The PDF is made here from the frozen draft, the customer's details and the business details read
-  // fresh; the server refuses the send if any of them changed meanwhile, so the stored copy is always what the customer gets.
+  // ---------- send (Phase 6.1): through WhatsApp and/or email, resend a version, or send it yourself ----------
+  // "Send quote" makes the customer PDF here and uploads it; the server then prepares it, delivers it through each ticked channel
+  // and marks the quote Sent ONLY once a channel confirms delivery (functions/lib/quoteDelivery.js). Every channel's result is shown
+  // on its own, with Retry for a failed one and "It arrived / It did not arrive" for one we could not confirm: nothing is ever
+  // sent twice by itself. "Send this version" delivers an already-sent version's stored PDF through more channels. "Prefer to send
+  // it yourself" is Phase 6's way: the PDF is made and kept, the quote marked sent at once, then Download PDF and an email draft.
+  // The PDF is made here from the frozen draft, the customer's details and the business details read fresh; the server refuses the
+  // send if any of them changed meanwhile, so the stored copy is always what the customer gets.
   const addDays = (k, n) => { const [y, m, d] = k.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
   const MAX_RENDERS = 5;
+  const ids = ['qsend-go', 'qsend-send', 'qsend-preview', 'qsend-cancel', 'qsend-renders', 'qsend-wa', 'qsend-em', 'qsend-wa-text', 'qsend-em-text', 'qsend-em-subject', 'qsend-wa-reopen'];
+  const setBusy = (on) => { for (const id of ids) { $(id).disabled = on ? true : $(id).dataset.off === '1'; } };
+  const UNSURE_CODES = ['functions/internal', 'functions/unavailable', 'functions/deadline-exceeded', 'functions/unknown'];
+  const looksUnsure = (e) => UNSURE_CODES.includes(e && e.code) || /network|fetch|timed? ?out|offline/i.test((e && e.message) || '');
   async function sendContext(q) {
     const f = db.collection('quotes').doc(q.id);
     const [qs, settings, conv, contact] = await Promise.all([f.get(), db.collection('quoteSettings').doc('current').get(),
@@ -691,7 +738,7 @@ window.QUOTES = (() => {
     if (!settings.exists) throw new Error('Quote Settings are not set up.');
     const ct = contact.exists ? contact.data() : {}, cv = conv.exists ? conv.data() : {};
     return { quote: { id: q.id, ...qs.data() }, settings: settings.data(), stage: conv.exists ? inboxStatus(cv) : 'inbox',
-      value: typeof ct.quoteValue === 'number' ? ct.quoteValue : null,
+      value: typeof ct.quoteValue === 'number' ? ct.quoteValue : null, conv: conv.exists ? cv : null, contactDoc: ct,
       customer: { name: ct.name || cv.name || null, email: ct.email || null, address: ct.address || null } };
   }
   const versionDoc = async (id, n) => { const d = await db.collection('quotes').doc(id).collection('versions').doc(String(n)).get(); return d.exists ? d.data() : null; };
@@ -699,33 +746,43 @@ window.QUOTES = (() => {
     return { ref: `${q.ref}-v${n}`, issueDate, validUntil: addDays(issueDate, ctx.settings.validityDays), customer: { ...ctx.customer, phone: q.phone },
       business: ctx.settings.business, sheet, renders: renders || [], draft: !!draft };
   }
+  const sendDlg = () => { const d = Q.dlg; return d && d.kind === 'send' ? d : null; };
+  const err = (t) => { $('qsend-err').textContent = t || ''; };
+
   async function openSend(mode) {
     const q = Q.quote; if (!q || Q.busy) return;
     if (mode === 'send') {
       if (Q.dirty) { await saveDraft(false); if (Q.dirty) return; }                // send exactly what is saved
       if (Q.errors.length || Q.problems.length) { note(Q.errors.length ? 'Fix the highlighted fields first.' : Q.problems[0], 'err'); return; }
     }
+    if (mode !== 'resend' && q.preparedSend) { note('A send is already in progress for this quote: see the box at the top of the quote.', 'err'); return; }
     Q.busy = true;
     try {
       const ctx = await sendContext(q);
-      const fq = ctx.quote;
-      const n = mode === 'send' ? fq.draftVersion : (fq.currentVersion || fq.sentVersion) + 1;
-      const base = await versionDoc(fq.id, mode === 'send' ? fq.draftVersion : fq.sentVersion);
+      const fq = ctx.quote, resend = mode === 'resend';
+      const n = resend ? (fq.sentVersion || fq.currentVersion) : mode === 'send' ? fq.draftVersion : (fq.currentVersion || fq.sentVersion) + 1;
+      const base = await versionDoc(fq.id, resend ? n : mode === 'send' ? fq.draftVersion : fq.sentVersion);
       if (!base) throw new Error('This quote changed. Please try again.');
-      const issueDate = today();
-      Q.dlg = { kind: 'send', mode, q: fq, ctx, n, sheet: base.sheet, issueDate, renders: [], requestId: newRequestId(), blobUrl: null };
-      $('qsend-title').textContent = mode === 'send' ? `Send ${fq.ref} v${n}` : `Send ${fq.ref} again (as v${n})`;
-      $('qsend-who').textContent = mode === 'send' ? 'Elite OS makes the customer PDF, keeps an exact copy with the quote and marks it sent.'
-        : 'The same options and prices as v' + fq.sentVersion + ', with a new date and validity. Elite OS keeps an exact copy of the PDF.';
+      const issueDate = resend ? base.issueDate : today();
+      const b = ctx.settings.business || {}, trading = b.tradingName || 'Elite Kitchens', w = QuoteDocument.wording(base.sheet.document.project);
+      const d = Q.dlg = { kind: 'send', mode, q: fq, ctx, n, sheet: base.sheet, base, issueDate, renders: [], requestId: newRequestId(), blobUrl: null, view: 'form',
+        conv: ctx.conv, contactDoc: ctx.contactDoc, reopenMsg: null, started: false, committed: null, result: null };
+      d.defaults = { whatsapp: QuoteSend.whatsappText({ name: ctx.customer.name, ref: fq.ref, version: n, trading }), emailSubject: QuoteSend.emailSubject({ trading, wording: w, ref: fq.ref, version: n }),
+        email: QuoteSend.emailText({ name: ctx.customer.name, ref: fq.ref, version: n, trading, wording: w, options: base.sheet.options.length, validityDays: ctx.settings.validityDays, business: b }) };
+      $('qsend-wa-text').value = d.defaults.whatsapp; $('qsend-em-subject').value = d.defaults.emailSubject; $('qsend-em-text').value = d.defaults.email;
+      $('qsend-title').textContent = mode === 'send' ? `Send ${fq.ref} v${n}` : mode === 'renew' ? `Send ${fq.ref} again (as v${n})` : `Send ${fq.ref} v${n} to the customer`;
+      $('qsend-who').textContent = mode === 'send' ? 'Elite OS makes the customer PDF, keeps an exact copy with the quote, sends it, and marks the quote sent once a channel accepts it for delivery.'
+        : mode === 'renew' ? 'The same options and prices as v' + fq.sentVersion + ', with a new date and validity. Elite OS keeps an exact copy of the PDF and marks the quote sent once a channel accepts it for delivery.'
+        : `Sends the stored PDF of v${n}, exactly as it was. Nothing about the quote changes.`;
       const facts = $('qsend-facts'); facts.replaceChildren();
       const fact = (k, v) => facts.append(el('dt', null, k), el('dd', null, v));
       fact('Customer', ctx.customer.name || formatPhone(fq.phone));
-      fact('Address', ctx.customer.address || '— (none)');
+      fact('Address', resend ? ((base.customer && base.customer.address) || '— (none)') : ctx.customer.address || '— (none)');
       fact('Email', ctx.customer.email || '— (none)');
       fact('Date', fmtDate(issueDate));
-      fact('Valid until', fmtDate(addDays(issueDate, ctx.settings.validityDays)) + ` (${ctx.settings.validityDays} days)`);
+      fact('Valid until', fmtDate(resend ? base.validUntil : addDays(issueDate, ctx.settings.validityDays)) + ` (${ctx.settings.validityDays} days)`);
       fact('Options', base.sheet.options.map((o) => `${o.name} ${euros(o.incVat)}`).join(' · '));
-      const warn = [!ctx.customer.address && 'There is no address: the quote will show only the name. Add it in the customer\'s Details first if it should be printed.',
+      const warn = [!resend && !ctx.customer.address && 'There is no address: the quote will show only the name. Add it in the customer\'s Details first if it should be printed.',
         !ctx.customer.email && 'There is no email address: the email draft will have no recipient.'].filter(Boolean);
       $('qsend-warn').hidden = !warn.length; $('qsend-warn').textContent = warn.join(' ');
       $('qsend-renders').value = ''; $('qsend-thumbs').replaceChildren();
@@ -733,52 +790,172 @@ window.QUOTES = (() => {
       $('qsend-reopen-text').textContent = `Reopen: move ${ctx.customer.name || 'the customer'} from Closed to Quoted`;
       const dearest = base.sheet.options.find((o) => o.key === base.sheet.dearest);
       $('qsend-value').value = dearest && dearest.incVat >= 1 ? CRM.money(dearest.incVat) : '';      // a €0 quote proposes no value
-      $('qsend-progress').textContent = ''; $('qsend-err').textContent = '';
-      $('qsend-form').hidden = false; $('qsend-done').hidden = true;
-      for (const id of ['qsend-go', 'qsend-preview', 'qsend-cancel', 'qsend-renders']) $(id).disabled = false;
+      $('qsend-new-only').hidden = resend; $('qsend-manual-row').hidden = resend; $('qsend-preview').hidden = resend;
+      $('qsend-progress').textContent = ''; err('');
+      $('qsend-form').hidden = false; $('qsend-results').hidden = true; $('qsend-done').hidden = true;
+      for (const id of ids) $(id).dataset.off = '0';
+      $('qsend-wa').checked = false; $('qsend-em').checked = false;
+      setBusy(false);
+      renderChannels(true);
       sendEffect();
-      showDialog($('qsend-dlg')); $('qsend-go').focus();
-    } catch (err) { note(errText(err), 'err'); }
+      showDialog($('qsend-dlg')); $('qsend-send').focus();
+      loadChannelInfo(d);
+    } catch (e) { note(errText(e), 'err'); }
     finally { Q.busy = false; }
   }
+
+  // --- which channels can be used, and why not (the logic is quote-send-model.js; this only draws it) ---
+  async function loadChannelInfo(d) {
+    try { if (!Q.mailInfo) Q.mailInfo = ((await call('quoteChannels')({})).data || {}).email || { enabled: false }; } catch (e) { Q.mailInfo = { enabled: false }; }
+    await loadReopenMsg(d);
+    if (sendDlg() === d) renderChannels(false);
+  }
+  async function loadReopenMsg(d) {
+    const w = d.conv && d.conv.reopen && d.conv.reopen.wamid;
+    if (!w) { d.reopenMsg = null; return; }
+    try { const m = await db.collection('conversations').doc(d.q.phone).collection('messages').doc(w).get(); d.reopenMsg = m.exists ? m.data() : null; } catch (e) { d.reopenMsg = null; }
+  }
+  function channelStatesNow(d) {
+    return QuoteSend.channelStates({ conv: d.conv, contact: d.contactDoc, mail: Q.mailInfo || null, nowMs: Date.now(), reopenMsg: d.reopenMsg });
+  }
+  const ticked = () => ['whatsapp', 'email'].filter((c) => $(c === 'whatsapp' ? 'qsend-wa' : 'qsend-em').checked);
+  function renderChannels(first) {
+    const d = sendDlg(); if (!d || d.view !== 'form') return;
+    const st = channelStatesNow(d);
+    const rows = { whatsapp: ['qsend-wa', 'qsend-wa-state', 'qsend-wa-box'], email: ['qsend-em', 'qsend-em-state', 'qsend-em-box'] };
+    // One channel is ticked for staff until they choose for themselves (once the server has said whether email is switched on).
+    if (!d.userTouched && Q.mailInfo && !ticked().length) for (const c of QuoteSend.defaultChannels(st)) $(rows[c][0]).checked = true;
+    for (const c of ['whatsapp', 'email']) {
+      const [cb, stateEl, box] = rows[c], s = st[c];
+      if (!s.usable) $(cb).checked = false;
+      $(cb).dataset.off = s.usable ? '0' : '1'; $(cb).disabled = !s.usable || !!d.working;
+      $(stateEl).textContent = s.text; $(stateEl).dataset.state = s.state;
+      $(box).hidden = !$(cb).checked;
+    }
+    const wa = st.whatsapp;
+    $('qsend-wa-reopen').hidden = !(wa.state === 'closed' && wa.canReopen);
+    $('qsend-wa-reopen').dataset.off = $('qsend-wa-reopen').hidden ? '1' : '0';
+    const any = ticked().length > 0;
+    $('qsend-send').dataset.off = any ? '0' : '1'; $('qsend-send').disabled = !any || !!d.working;
+    $('qsend-send').title = any ? '' : 'Choose WhatsApp or email first.';
+    $('qsend-via-note').textContent = any ? (ticked().length > 1 ? 'Both are sent. If one fails, the other still counts, and you can retry just the one that failed.' : '')
+      : 'Neither channel can be used right now. Reopen the WhatsApp conversation (the customer must reply before it opens), add an email address in their Details, or send it yourself below.';
+    sendEffect();
+  }
+  for (const id of ['qsend-wa', 'qsend-em']) $(id).addEventListener('change', () => { const d = sendDlg(); if (d) d.userTouched = true; renderChannels(false); });
+  $('qsend-wa-reopen').onclick = () => { const d = sendDlg(); if (d && window.openReopenFor) window.openReopenFor(d.q.phone, d.reopenMsg); };
+  // The customer's conversation changed (they replied, or a Reopen template was sent): the WhatsApp row follows at once. Called by app.js.
+  Q.convChanged = async () => {
+    const d = sendDlg(); if (!d || d.view !== 'form') return;
+    const c = convOf(d.q.phone); if (!c) return;
+    const { id, ...data } = c; d.conv = data; await loadReopenMsg(d);
+    if (sendDlg() === d) renderChannels(false);
+  };
+
   function sendEffect() {
-    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    const d = sendDlg(); if (!d) return;
+    if (d.mode === 'resend') { $('qsend-effect').textContent = 'Sending an earlier version again does not change the quote or the customer\'s stage.'; return; }
     const who = d.ctx.customer.name || 'The customer', s = d.ctx.stage;
     const moves = s === 'inbox' || s === 'booked' || (s === 'closed' && $('qsend-reopen').checked);
     const typed = CRM.parseMoney($('qsend-value').value);
-    $('qsend-effect').textContent = (moves ? `${who} will move from ${stageName(s)} to Quoted.` : `${who} stays in ${stageName(s)}.`) + ' ' + (Number.isNaN(typed) ? '' : valuePreview(d.ctx.value, typed));
+    $('qsend-effect').textContent = (moves ? `${who} will move from ${stageName(s)} to Quoted.` : `${who} stays in ${stageName(s)}.`) + ' ' + (Number.isNaN(typed) ? '' : valuePreview(d.ctx.value, typed))
+      + (ticked().length ? ' This happens once a channel accepts it for delivery.' : '');
   }
   $('qsend-reopen').onchange = sendEffect;
   $('qsend-value').oninput = sendEffect;
   $('qsend-renders').onchange = async (e) => {
-    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    const d = sendDlg(); if (!d) return;
     const files = [...e.target.files].slice(0, MAX_RENDERS);
-    $('qsend-err').textContent = e.target.files.length > MAX_RENDERS ? `Only the first ${MAX_RENDERS} images are used.` : '';
+    err(e.target.files.length > MAX_RENDERS ? `Only the first ${MAX_RENDERS} images are used.` : '');
     $('qsend-progress').textContent = files.length ? 'Reading the images…' : '';
     try {
       d.renders = await Promise.all(files.map((f) => QuoteDocument.readRender(f)));
       $('qsend-thumbs').replaceChildren(...d.renders.map((u, i) => { const img = el('img'); img.src = u; img.alt = 'Render ' + (i + 1); return img; }));
       $('qsend-progress').textContent = d.renders.length ? `${d.renders.length} render${d.renders.length > 1 ? 's' : ''} added, each on its own page.` : '';
-    } catch (err) { d.renders = []; $('qsend-thumbs').replaceChildren(); $('qsend-progress').textContent = ''; $('qsend-err').textContent = errText(err); }
+    } catch (e2) { d.renders = []; $('qsend-thumbs').replaceChildren(); $('qsend-progress').textContent = ''; err(errText(e2)); }
   };
   $('qsend-preview').onclick = () => {
-    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    const d = sendDlg(); if (!d) return;
     showPreview(documentData(d.q, d.n, d.sheet, d.ctx, d.issueDate, d.renders, true), `Preview of ${d.q.ref} v${d.n} — not sent yet`);
   };
+
+  // --- the PDF: made once per dialog (a repeat of the same request must carry the same file) ---
+  async function makePdfAndUpload(d, n, sheet, progress) {
+    if (!d.upload) {
+      progress('Making the PDF…');
+      const data = documentData(d.q, n, sheet, d.ctx, d.issueDate, d.renders, false);
+      d.filename = `EliteKitchens-${d.q.ref}-v${n}.pdf`;
+      d.blob = await QuoteDocument.toPdf(data, { filename: d.filename });
+      d.upload = true;
+    }
+    progress('Uploading the PDF…');
+    const path = `uploads/${auth.currentUser.uid}/${Date.now()}-${d.q.ref}-v${n}.pdf`;
+    await firebase.storage().ref(path).put(d.blob, { contentType: 'application/pdf' });
+    return path;
+  }
+  function pipelineChoice(d) {
+    const value = CRM.parseMoney($('qsend-value').value);
+    if (Number.isNaN(value) || (value !== null && (value < 1 || value > 1000000))) { err('The pipeline value should be a number of euros, e.g. 14500 or €14,500, or empty.'); return null; }
+    return { reopen: $('qsend-reopen').checked, value };
+  }
+
+  // --- Send quote: through the ticked channels ---
   $('qsend-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const d = Q.dlg; if (!d || d.kind !== 'send' || d.working) return;
-    const value = CRM.parseMoney($('qsend-value').value);
-    if (Number.isNaN(value) || (value !== null && (value < 1 || value > 1000000))) { $('qsend-err').textContent = 'The pipeline value should be a number of euros, e.g. 14500 or €14,500, or empty.'; return; }
-    d.working = true; $('qsend-err').textContent = '';
-    for (const id of ['qsend-go', 'qsend-preview', 'qsend-cancel', 'qsend-renders']) $(id).disabled = true;
+    const d = sendDlg(); if (!d || d.working || d.view !== 'form') return;
+    const channels = ticked();
+    if (!channels.length) { err('Choose WhatsApp or email first.'); return; }
+    const messages = {}, wa = $('qsend-wa-text').value.trim(), em = $('qsend-em-text').value.trim(), subject = $('qsend-em-subject').value.trim();
+    if (channels.includes('whatsapp')) { if (!wa) { err('Write the WhatsApp message.'); return; } if (wa.length > 1024) { err('The WhatsApp message is too long (max 1,024 characters).'); return; } messages.whatsapp = wa; }
+    if (channels.includes('email')) { if (!em) { err('Write the email message.'); return; } if (!subject) { err('Write the email subject.'); return; } messages.email = em; }
+    const resend = d.mode === 'resend';
+    const pipeline = resend ? null : pipelineChoice(d); if (!resend && !pipeline) return;
+    d.working = true; err(''); setBusy(true);
+    const progress = (t) => { $('qsend-progress').textContent = t; };
+    try {
+      let n = d.n, expectedRev = d.q.rev, sheet = d.sheet, r;
+      if (resend) {
+        progress('Sending…');
+        r = (await call('deliverQuote')({ id: d.q.id, version: n, requestId: d.requestId, channels, messages, ...(messages.email ? { subject } : {}) })).data;
+      } else {
+        if (d.mode === 'renew' && !d.revisedTo) {                          // the next version, a copy with the same prices (once per dialog)
+          progress('Starting v' + n + '…');
+          const rv = (await call('reviseQuote')({ id: d.q.id, expectedRev })).data;
+          d.revisedTo = rv.draftVersion; d.reviseRev = rv.rev;
+          const v = await versionDoc(d.q.id, d.revisedTo); d.sheet = v.sheet;
+        }
+        if (d.mode === 'renew') { n = d.revisedTo; expectedRev = d.reviseRev; sheet = d.sheet; }
+        const path = await makePdfAndUpload(d, n, sheet, progress);
+        progress('Sending…');
+        r = (await call('deliverQuote')({ id: d.q.id, expectedRev, requestId: d.requestId, issueDate: d.issueDate, settingsRev: d.ctx.settings.rev,
+          customer: d.ctx.customer, pdfUploadPath: path, pipeline, channels, messages, ...(messages.email ? { subject } : {}) })).data;
+        Q.dirty = false; d.sentN = n; d.sheetSent = sheet;
+        if (d.blob) { if (d.blobUrl) URL.revokeObjectURL(d.blobUrl); d.blobUrl = URL.createObjectURL(d.blob); }
+      }
+      progress(''); showResults(d, r);
+    } catch (e2) {
+      progress('');
+      if (looksUnsure(e2)) {
+        err('The connection dropped while sending, so we do not know whether it went. Nothing is ever sent twice by itself: press Send quote again to check (it is safe), or look at the quote page, which shows exactly what happened.');
+      } else {
+        err('Not sent: ' + errText(e2) + (d.revisedTo ? ` A draft v${d.revisedTo} was started: send it or discard it.` : ''));
+      }
+      setBusy(false); renderChannels(false);
+    } finally { if (Q.dlg === d) d.working = false; }
+  });
+
+  // --- "Prefer to send it yourself": Phase 6's way, unchanged ---
+  $('qsend-go').onclick = async () => {
+    const d = sendDlg(); if (!d || d.working || d.view !== 'form' || d.mode === 'resend') return;
+    const pipeline = pipelineChoice(d); if (!pipeline) return;
+    d.working = true; err(''); setBusy(true);
     const progress = (t) => { $('qsend-progress').textContent = t; };
     let revised = false, expectedRev = d.q.rev, sheet = d.sheet, n = d.n;
     try {
       if (d.mode === 'renew') {                                         // the next version, a copy with the same prices
         progress('Starting v' + n + '…');
-        const r = (await call('reviseQuote')({ id: d.q.id, expectedRev })).data;
-        revised = true; expectedRev = r.rev; n = r.draftVersion;
+        const rv = (await call('reviseQuote')({ id: d.q.id, expectedRev })).data;
+        revised = true; expectedRev = rv.rev; n = rv.draftVersion;
         const v = await versionDoc(d.q.id, n); sheet = v.sheet;
       }
       progress('Making the PDF…');
@@ -790,7 +967,7 @@ window.QUOTES = (() => {
       await firebase.storage().ref(path).put(blob, { contentType: 'application/pdf' });
       progress('Marking the quote sent…');
       const r = (await call('sendQuote')({ id: d.q.id, expectedRev, requestId: d.requestId, issueDate: d.issueDate, settingsRev: d.ctx.settings.rev,
-        customer: d.ctx.customer, pdfUploadPath: path, pipeline: { reopen: $('qsend-reopen').checked, value } })).data;
+        customer: d.ctx.customer, pdfUploadPath: path, pipeline })).data;
       Q.dirty = false;
       d.blobUrl = URL.createObjectURL(blob); d.filename = filename; d.sentN = n; d.sheetSent = sheet;
       const who = d.ctx.customer.name || 'The customer';
@@ -799,32 +976,117 @@ window.QUOTES = (() => {
       $('qsend-download').href = d.blobUrl; $('qsend-download').download = filename;
       $('qsend-email').disabled = false;
       $('qsend-form').hidden = true; $('qsend-done').hidden = false; $('qsend-download').focus();
-    } catch (err) {
+    } catch (e2) {
       progress('');
-      $('qsend-err').textContent = 'Not sent: ' + errText(err) + (revised ? ` A draft v${n} was started: send it or discard it.` : '');
-      for (const id of ['qsend-go', 'qsend-preview', 'qsend-cancel', 'qsend-renders']) $(id).disabled = false;
+      err('Not sent: ' + errText(e2) + (revised ? ` A draft v${n} was started: send it or discard it.` : ''));
+      setBusy(false); renderChannels(false);
     } finally { if (Q.dlg === d) d.working = false; }
-  });
-  function closeSend() {
+  };
+
+  // --- the result: each channel on its own ---
+  function showResults(d, r) {
+    d.view = 'results'; d.result = r; if (r.committed) d.committed = r.committed;
+    $('qsend-form').hidden = true; $('qsend-done').hidden = true; $('qsend-results').hidden = false;
+    renderResults(); $('qsend-res-close').focus();
+  }
+  // One row per delivery, with the actions that make sense (shared by this dialog and the quote page).
+  function deliveryRows(list, quote) {
+    const ul = el('ul', 'qsend-res'), now = Date.now();
+    for (const x of [...list].sort(QuoteSend.byChannel)) {
+      const dsc = QuoteSend.describe(x, now), li = el('li', 'qsend-res-row tone-' + dsc.tone); li.dataset.channel = x.channel; li.dataset.state = dsc.state;
+      li.append(el('span', 'qsend-mark', dsc.mark));
+      const main = el('div', 'qsend-res-main'); main.append(el('strong', null, dsc.title));
+      if (dsc.detail) main.append(el('p', 'qsend-res-detail', dsc.detail));
+      const acts = el('div', 'qsend-res-acts');
+      for (const a of dsc.actions) {
+        const label = a === 'retry' ? `Retry ${QuoteSend.CHANNEL_NAME[x.channel] || ''}`.trim() : a === 'arrived' ? 'It arrived' : 'It did not arrive';
+        const b = el('button', 'btn btn-ghost btn-sm', label); b.type = 'button'; b.dataset.action = a;
+        b.onclick = () => deliveryAction(a, x, b);
+        acts.append(b);
+      }
+      if (acts.childNodes.length) main.append(acts);
+      li.append(main); ul.append(li);
+    }
+    return ul;
+  }
+  function liveDeliveries(requestId, fallback) {
+    const live = Q.deliveries.filter((x) => x.requestId === requestId);
+    const byId = new Map((fallback || []).map((x) => [x.id, x]));
+    for (const x of live) byId.set(x.id, x);                            // the live record wins over the answer to the call
+    return [...byId.values()];
+  }
+  function renderResults() {
+    const d = sendDlg(); if (!d || d.view !== 'results') return;
+    const list = liveDeliveries(d.requestId, d.result && d.result.deliveries), sum = QuoteSend.summarize(list, Date.now());
+    const q = Q.quote && Q.quote.id === d.q.id ? Q.quote : null, n = d.sentN || d.n, who = d.ctx.customer.name || 'The customer';
+    $('qsend-res-title').textContent = `${d.q.ref} v${n}: ${sum.sent ? 'sent' : 'not sent yet'}`;
+    $('qsend-res-summary').textContent = sum.text;
+    $('qsend-res-list').replaceChildren(...deliveryRows(list, d.q).childNodes);
+    const c = d.committed;
+    $('qsend-res-effect').textContent = sum.sent && d.mode !== 'resend' ? [c && c.stage ? `${who} moved from ${stageName(c.stage.from)} to Quoted.` : `${who}'s stage did not change.`, c && c.value ? valueChange(c.value) : ''].filter(Boolean).join(' ') : '';
+    const prepared = !!(q && q.preparedSend && q.preparedSend.requestId === d.requestId);
+    const settled = !list.some((x) => ['sending', 'unknown'].includes(QuoteSend.effective(x, Date.now())));
+    $('qsend-res-manual').hidden = !prepared; $('qsend-res-cancel').hidden = !(prepared && settled && !sum.sent);
+    const dl = $('qsend-res-download'); dl.hidden = !(d.blobUrl || prepared || d.mode === 'resend');
+    if (d.blobUrl) { dl.href = d.blobUrl; dl.download = d.filename; dl.onclick = null; }
+    else { dl.href = '#'; dl.removeAttribute('download'); dl.onclick = (ev) => { ev.preventDefault(); openPdf(d.sentN || d.n, dl); }; }
+  }
+  $('qsend-res-close').onclick = () => closeSend(true);
+  $('qsend-res-manual').onclick = () => markPreparedSent();
+  $('qsend-res-cancel').onclick = () => cancelPreparedSend();
+
+  // --- retry, settle, cancel, mark sent by hand (from the dialog or the quote page) ---
+  async function deliveryAction(action, x, btn) {
+    const q = Q.quote; if (!q || Q.busy) return;
+    Q.busy = true; if (btn) btn.disabled = true;
+    try {
+      const r = action === 'retry' ? (await call('retryQuoteDelivery')({ id: q.id, deliveryId: x.id })).data
+        : (await call('resolveQuoteDelivery')({ id: q.id, deliveryId: x.id, outcome: action === 'arrived' ? 'delivered' : 'not_delivered' })).data;
+      const d = sendDlg(); if (d && d.view === 'results' && d.requestId === r.requestId) { d.result = r; if (r.committed) d.committed = r.committed; renderResults(); }
+      const dsc = (r.deliveries.find((y) => y.id === x.id));
+      note(action === 'retry' ? `${QuoteSend.CHANNEL_NAME[x.channel]}: ${dsc && dsc.state === 'sent' ? 'sent.' : dsc && dsc.state === 'unknown' ? 'delivery not confirmed.' : 'failed again.'}` : action === 'arrived' ? 'Recorded as delivered.' : 'Recorded as not delivered: you can retry it.', dsc && dsc.state === 'failed' ? 'err' : undefined);
+    } catch (e) { note(errText(e), 'err'); if (btn) btn.disabled = false; }
+    finally { Q.busy = false; }
+  }
+  async function markPreparedSent() {
+    const q = Q.quote; if (!q || !q.preparedSend || Q.busy) return;
+    if (!window.confirm(`Mark ${q.ref} v${q.preparedSend.version} as sent by you? Nothing is sent to the customer from here: only do this if you sent them the PDF yourself.`)) return;
+    Q.busy = true;
+    try {
+      const r = (await call('markQuoteSent')({ id: q.id, expectedRev: q.rev })).data;
+      const d = sendDlg(); if (d && d.view === 'results') { d.result = r; if (r.committed) d.committed = r.committed; renderResults(); }
+      note(`${q.ref} v${q.preparedSend.version} is marked sent (by you).`);
+    } catch (e) { note(errText(e), 'err'); }
+    finally { Q.busy = false; }
+  }
+  async function cancelPreparedSend() {
+    const q = Q.quote; if (!q || !q.preparedSend || Q.busy) return;
+    Q.busy = true;
+    try {
+      await call('cancelQuoteSend')({ id: q.id, expectedRev: q.rev });
+      note('The send was cancelled and nothing was sent: the draft can be edited again.');
+      if (sendDlg()) closeSend(true);
+    } catch (e) { note(errText(e), 'err'); }
+    finally { Q.busy = false; }
+  }
+  Q.deliveriesChanged = () => { renderResults(); };
+
+  function closeSend(force) {
     const d = Q.dlg;
-    if (d && d.kind === 'send') { if (d.working) return; if (d.blobUrl) setTimeout(() => URL.revokeObjectURL(d.blobUrl), 60000); }
+    if (d && d.kind === 'send') { if (d.working && !force) return; if (d.blobUrl) setTimeout(() => URL.revokeObjectURL(d.blobUrl), 60000); }
     closeDialog($('qsend-dlg')); if (Q.dlg === d) Q.dlg = null;
   }
-  $('qsend-cancel').onclick = closeSend;
-  $('qsend-close').onclick = closeSend;
+  $('qsend-cancel').onclick = () => closeSend();
+  $('qsend-close').onclick = () => closeSend();
   $('qsend-dlg').addEventListener('cancel', (e) => { const d = Q.dlg; if (d && d.kind === 'send' && d.working) e.preventDefault(); });
   // The usual email, from Gmail (the customer's address, the subject and the wording filled in, naming what the quote is
-  // for). The PDF is attached by hand.
+  // for). The PDF is attached by hand. (The fallback for "send it yourself"; direct sending does not need it.)
   $('qsend-email').onclick = () => {
-    const d = Q.dlg; if (!d || d.kind !== 'send') return;
+    const d = sendDlg(); if (!d) return;
     const b = d.ctx.settings.business || {}, trading = b.tradingName || 'Elite Kitchens', c = d.ctx.customer;
     const sheet = d.sheetSent || d.sheet, w = QuoteDocument.wording(sheet.document.project);
-    const first = (c.name || '').trim().split(/\s+/)[0] || 'there', options = sheet.options.length;
-    const subject = `${trading} — ${w.subject} ${d.q.ref} v${d.sentN}`;
-    const body = [`Hi ${first},`, '', `Thank you for getting in touch with ${trading}. Please find attached your ${w.quote} ${d.q.ref} v${d.sentN}.`, '',
-      `I've put together ${options > 1 ? options + ' options' : 'a proposal'} based on our conversation — all details are outlined in the attached PDF.`, '',
-      `The quote is valid for ${d.ctx.settings.validityDays} days. If you have any questions or would like to make any changes, please don't hesitate to get in touch.`, '',
-      'Looking forward to hearing from you.', '', 'Kind regards,', b.signatureName || '', trading, [b.phone, b.email].filter(Boolean).join(' | ')].join('\n');
+    const subject = QuoteSend.emailSubject({ trading, wording: w, ref: d.q.ref, version: d.sentN });
+    const body = QuoteSend.emailText({ name: c.name, ref: d.q.ref, version: d.sentN, trading, wording: w, options: sheet.options.length, validityDays: d.ctx.settings.validityDays, business: b });
     const url = 'https://mail.google.com/mail/?view=cm&fs=1' + (c.email ? '&to=' + encodeURIComponent(c.email) : '') + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
     window.open(url, '_blank', 'noopener');
   };

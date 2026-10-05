@@ -180,6 +180,7 @@ function watchList() {
     renderThreadHeader();
     renderDetails(false);          // keeps the stage dates line current when the stage changes
     updateComposer();
+    if (window.QUOTES && QUOTES.convChanged) QUOTES.convChanged();      // the quote Send dialog follows the customer's WhatsApp window live
     maybeMarkRead();
   }, (e) => { $('list-empty').hidden = false; $('list-empty').textContent = 'Cannot load conversations: ' + errText(e); });
 }
@@ -519,6 +520,10 @@ function buildBubble(m) {
     if (m.media || m.attach) b.append(mediaBlock(m, type));
     else { const [icon, label] = MEDIA_LABEL[type]; b.append(chip(icon, label)); }
   }
+  if (m.quote && m.quote.ref) {                               // a quote sent from Elite OS (Phase 6.1): labelled, and a link to the quote
+    const a = el('a', 'quote-chip', `Quote ${m.quote.ref} v${m.quote.version}`); a.href = '#quotes/' + m.quote.id; a.title = 'Open the quote';
+    b.append(a);
+  }
   const placeholder = /^\[[a-z]+\]$/.test(m.body || '');
   if (m.body && !(isMedia && placeholder)) b.append(el('div', 'body', m.body));
   const meta = el('div', 'meta');
@@ -538,7 +543,7 @@ function patchTick(b, m) {
 // Keep each message's element between renders (a playing voice note must not restart when a new message arrives).
 const nodeCache = new Map();
 let cacheFor = null;
-const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename]]); };
+const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename], m.quote && [m.quote.ref, m.quote.version]]); };
 
 function renderMessages() {
   const box = $('msgs');
@@ -568,8 +573,8 @@ function renderMessages() {
 // The 24-hour window and Reopen conversation (Phase 6.1 M1). open: normal messages. awaiting: a Reopen template was sent and the
 // customer has not replied, so messaging stays OFF. closed: Reopen (once per 24 hours). The state comes from window-state.js, the
 // same rule the server enforces; the screen never implies the chat is open before the customer's reply.
-function windowInfo(c) {
-  const w = c && c.reopen && c.reopen.wamid ? S.msgs.find((m) => m.id === c.reopen.wamid) : null;    // its delivery status
+function windowInfo(c, msg) {                       // msg: the Reopen template's stored message, when the caller already has it
+  const w = msg !== undefined ? msg : (c && c.reopen && c.reopen.wamid && c.id === S.selected ? S.msgs.find((m) => m.id === c.reopen.wamid) : null);    // its delivery status
   return WindowState.windowStatus(c, Date.now(), w || null);
 }
 const whenText = (t) => { const d = new Date(t); return dayKey(d) === dayKey(new Date()) ? hhmm(d) : dayLabel(d) + ' at ' + hhmm(d); };
@@ -748,9 +753,9 @@ $('new-btn').onclick = () => openNewDialog();
 const rdlg = $('reopen-dlg');
 let reopenDlg = null;                                           // { phone, requestId, working } while the dialog is open
 const reopenRequestId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
-function openReopen() {
-  const c = selectedConv(); if (!c) return;
-  const w = windowInfo(c);
+function openReopen(phone, msg) {                    // phone: any customer (the quote Send dialog uses this too); none = the open chat
+  const c = phone ? S.convs.find((x) => x.id === phone) : selectedConv(); if (!c) return;
+  const w = windowInfo(c, msg);
   if (w.state !== 'closed' || !w.canReopen) { updateComposer(); return; }
   reopenDlg = { phone: c.id, requestId: reopenRequestId(), working: false };      // one request id per dialog: a double click sends once
   const who = c.name || formatPhone(c.id);
@@ -761,7 +766,8 @@ function openReopen() {
   if (typeof rdlg.showModal === 'function') rdlg.showModal(); else rdlg.setAttribute('open', '');
   $('reopen-go').focus();
 }
-$('tpl-btn').onclick = openReopen;
+$('tpl-btn').onclick = () => openReopen();
+window.openReopenFor = (phone, msg) => openReopen(phone, msg === undefined ? null : msg);
 $('reopen-cancel').onclick = () => { if (!reopenDlg || !reopenDlg.working) rdlg.close(); };
 rdlg.addEventListener('cancel', (e) => { if (reopenDlg && reopenDlg.working) e.preventDefault(); });
 rdlg.addEventListener('close', () => { reopenDlg = null; });
