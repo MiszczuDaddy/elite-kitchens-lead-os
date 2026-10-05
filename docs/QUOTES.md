@@ -713,6 +713,6 @@ Invoices, deposits and payments; sending quotes directly by WhatsApp or email; r
 quote; kitchen templates, options and upgrades; importing the old app's quotes; online acceptance or e-signature by the
 customer; AI.
 
-**Planned follow-up: Phase 6.1, direct quote sending (WhatsApp and email) and "Reopen conversation" on WhatsApp.** Recorded
-in [PHASE6_1_PLAN.md](PHASE6_1_PLAN.md) (2026-10-05). Not started, and not part of Phase 6. It may start only after Phase 6
-is live, verified, merged and tagged `phase-6-quotes-complete`, and only when the owner chooses it as the next task.
+**Follow-up: Phase 6.1, direct quote sending (WhatsApp and email) and "Reopen conversation" on WhatsApp.** Designed and approved
+2026-10-05, built on its own branch `phase-6-1-quote-sending` (from tag `phase-6-quotes-complete`); see
+[PHASE6_1_PLAN.md](PHASE6_1_PLAN.md). Not part of Phase 6: nothing in it changes what Phase 6 does.
