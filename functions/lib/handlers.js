@@ -334,6 +334,12 @@ const resolveQuoteDelivery = quoteAction(delivery.resolve);
 const cancelQuoteSend = quoteAction(delivery.cancelSend);
 const markQuoteSent = quoteAction(delivery.markSent);
 
-module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+// What a browser cannot see about the channels: whether email sending is switched on (the Send dialog shows it before staff press Send).
+async function quoteChannels(auth, data, deps) {
+  assertStaff(auth, deps.cfg);
+  return { whatsapp: { enabled: true }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
+}
+
+module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

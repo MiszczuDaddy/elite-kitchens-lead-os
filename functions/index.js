@@ -135,3 +135,38 @@ const reopenDeps = () => ({
   wa: createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim() }),
 });
 exports.reopenConversation = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 60 }, (req) => h.reopenConversation(req.auth, req.data, reopenDeps()));
+
+// ---- Phase 6.1: sending a quote through WhatsApp and email (docs/PHASE6_1_PLAN.md). Staff-only callables. A quote is marked Sent only
+// once a channel confirms delivery (lib/quoteDelivery.js); the channels are in lib/quoteChannels.js. Only the two that send hold the
+// WhatsApp access token (least privilege); email needs NO secret: Gmail sign-in is keyless (lib/gmail.js). The mail settings are plain
+// settings in functions/.env.<project>, not secrets. Email is off unless MAIL_SEND=on and both MAIL_SENDER and MAIL_SERVICE_ACCOUNT
+// are set (the kill switch, like GCAL_SYNC). In the emulator, MAIL_API_BASE points at a local fake Gmail. Nothing above is touched.
+const quoteChannelLib = require('./lib/quoteChannels');
+const gmailLib = require('./lib/gmail');
+const MAIL_SEND = defineString('MAIL_SEND', { default: 'off' });
+const MAIL_SENDER = defineString('MAIL_SENDER', { default: '' });
+const MAIL_SERVICE_ACCOUNT = defineString('MAIL_SERVICE_ACCOUNT', { default: '' });
+const MAIL_FROM_NAME = defineString('MAIL_FROM_NAME', { default: 'Elite Kitchens' });
+let gmailClient = null, gmailKey = null;
+function mailChannel() {
+  const sender = MAIL_SENDER.value().trim(), serviceAccount = MAIL_SERVICE_ACCOUNT.value().trim();
+  const testBase = process.env.FUNCTIONS_EMULATOR === 'true' ? process.env.MAIL_API_BASE : undefined;     // emulator tests only: a local fake Gmail
+  const enabled = MAIL_SEND.value().trim().toLowerCase() === 'on' && !!sender && (!!serviceAccount || !!testBase);
+  const key = [sender, serviceAccount, testBase].join('|');
+  if (key !== gmailKey) {                                           // one client per instance, so the short-lived token is reused between calls
+    const tokens = testBase ? { get: async () => 'emulator-token', clear: () => {} } : gmailLib.delegatedTokenProvider({ serviceAccount, sender });
+    gmailClient = gmailLib.createGmailClient({ apiBase: testBase || undefined, tokens }); gmailKey = key;
+  }
+  return { enabled, sender, channel: quoteChannelLib.emailChannel({ gmail: gmailClient, enabled, sender, fromName: MAIL_FROM_NAME.value().trim() || 'Elite Kitchens' }) };
+}
+const deliveryDeps = () => {
+  const db = getFirestore(), bucket = getStorage().bucket(bucketName());
+  const wa = createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim() });
+  return { db, bucket, cfg: { allowedEmails: ALLOWED_EMAILS.value() }, channels: { whatsapp: quoteChannelLib.whatsappChannel({ db, bucket, wa }), email: mailChannel().channel } };
+};
+exports.deliverQuote = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 180, memory: '512MiB' }, (req) => h.deliverQuote(req.auth, req.data, deliveryDeps()));
+exports.retryQuoteDelivery = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 180, memory: '512MiB' }, (req) => h.retryQuoteDelivery(req.auth, req.data, deliveryDeps()));
+exports.resolveQuoteDelivery = onCall({}, (req) => h.resolveQuoteDelivery(req.auth, req.data, quoteDeps()));
+exports.cancelQuoteSend = onCall({}, (req) => h.cancelQuoteSend(req.auth, req.data, quoteDeps()));
+exports.markQuoteSent = onCall({}, (req) => h.markQuoteSent(req.auth, req.data, quoteDeps()));
+exports.quoteChannels = onCall({}, (req) => { const m = mailChannel(); return h.quoteChannels(req.auth, req.data, { ...quoteDeps(), mailEnabled: m.enabled, mailSender: m.sender }); });

@@ -387,7 +387,7 @@ async function prepare({ db, bucket }, actor, data, { nowMs = Date.now(), uid, i
         pipeline: { reopen: r.reopen, value: r.value } } });
       const patch = { preparedSend: { version: n, requestId }, history: withHistory(q, { action: 'send started', at: now, by: actor.id, version: n }), rev: q.rev + 1, updatedAt: now, updatedBy: actor };
       tx.update(ref, patch);
-      if (inTx) inTx(tx, { ref, q, n, requestId, pdf, customer: c.current, now });
+      if (inTx) inTx(tx, { ref, q, n, requestId, pdf, customer: c.current, business: c.settings.business, now });
       return { ...view(ref.id, { ...q, ...patch }), existing: false, committed: false, version: n, requestId, customer: c.current, pdf };
     });
   } catch (e) {

@@ -1,5 +1,5 @@
 // Phase 6.1 M2: the delivery foundation (docs/PHASE6_1_PLAN.md). Sends a quote's exact PDF through one or more channels
-// (WhatsApp, email: adapters arrive in M3 and M4) and marks the quote Sent ONLY once a channel confirms delivery. It knows
+// (WhatsApp, email: adapters arrive in M3 and M4) and marks the quote Sent ONLY once a channel confirms the send (= the provider accepted the message; that is the strongest answer Meta and Gmail give, see "What sent means" in the plan). It knows
 // nothing about WhatsApp or Gmail: a channel is an adapter behind one small interface. The quote itself (statuses, the pipeline
 // rules, what is frozen) stays in quotes.js: this module calls its prepare / commit pieces and never duplicates a rule.
 //
@@ -67,9 +67,18 @@ function cleanMessages(deps, channels, data) {
   }
   return out;
 }
-function newDelivery(ctx, channel, message, actor) {
+const SUBJECT_MAX = 150;
+function cleanSubject(data) {
+  if (data.subject == null) return null;
+  if (typeof data.subject === 'string' && /[\r\n]/.test(data.subject)) throw bad('The subject must be one line.');
+  return text(data.subject, SUBJECT_MAX, 'The subject');
+}
+// The email's subject: what staff chose, else the business name and the quote number (version included).
+const defaultSubject = (ctx) => `${(ctx.business && ctx.business.tradingName) || 'Elite Kitchens'} — Quote ${ctx.q.ref} v${ctx.n}`;
+function newDelivery(ctx, channel, message, actor, subject) {
   return { quoteId: ctx.ref.id, phone: ctx.q.phone, version: ctx.n, channel, requestId: ctx.requestId, state: 'queued', attempts: 0, attemptId: null, message,
-    to: channel === 'email' ? { email: ctx.customer.email || null } : null, pdf: ctx.pdf, provider: null, error: null, claimedAt: null, sentAt: null, failedAt: null,
+    to: channel === 'email' ? { email: ctx.customer.email || null } : null, subject: channel === 'email' ? (subject || defaultSubject(ctx)) : null,
+    pdf: ctx.pdf, provider: null, error: null, claimedAt: null, sentAt: null, failedAt: null,
     resolvedBy: null, history: [entry({ now: ctx.now, actor }, { event: 'queued' })], createdAt: ctx.now, createdBy: actor, updatedAt: ctx.now };
 }
 
@@ -112,8 +121,8 @@ async function attempt(deps, actor, id, did, { nowMs, retry = false, message = n
   try {
     if (!adapter) throw new ChannelError('That way of sending is not available.', { code: 'unavailable', definite: true });
     const pdf = await readPdf(bucket, claim.d.pdf);
-    const ctx = { quoteId: id, quoteRef: claim.quoteRef, version: claim.d.version, channel, phone: claim.phone, to: claim.d.to, message: claim.d.message, requestId: claim.d.requestId,
-      deliveryId: did, attempt: claim.attempt, pdf, filename: `EliteKitchens-${claim.quoteRef}-v${claim.d.version}.pdf` };
+    const ctx = { quoteId: id, quoteRef: claim.quoteRef, version: claim.d.version, channel, phone: claim.phone, to: claim.d.to, message: claim.d.message, subject: claim.d.subject || null,
+      requestId: claim.d.requestId, deliveryId: did, attempt: claim.attempt, pdf, filename: `EliteKitchens-${claim.quoteRef}-v${claim.d.version}.pdf` };
     const check = adapter.check ? await adapter.check(ctx) : null;
     if (check && check.ok === false) throw new ChannelError(check.text || 'This cannot be sent.', { code: check.code || 'not_possible', definite: true });
     const r = await adapter.send(ctx);
@@ -157,7 +166,8 @@ async function summary(deps, id, requestId, nowMs, extra = {}) {
   const q = qSnap.data();
   const deliveries = dSnaps.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byChannel).map((d) => ({
     id: d.id, channel: d.channel, version: d.version, state: effectiveState(d, nowMs), attempts: d.attempts, error: d.error || null, sentAt: ms(d.sentAt) }));
-  return { ok: true, ...view(ref.id, q), requestId, sent: q.lastSendRequestId === requestId, deliveries, ...extra };
+  // sent: at least one channel of THIS request has confirmed delivery (for a draft that is exactly when the quote was committed)
+  return { ok: true, ...view(ref.id, q), requestId, sent: deliveries.some((d) => d.state === 'sent'), deliveries, ...extra };
 }
 // Try, in channel order, every delivery of this request that is still waiting (a repeat of the same request finishes only those).
 async function runQueued(deps, actor, id, requestId, nowMs) {
@@ -177,24 +187,25 @@ const SEND_KEYS = ['id', 'expectedRev', 'requestId', 'issueDate', 'settingsRev',
 async function deliver(deps, actor, data, { nowMs = Date.now(), uid } = {}) {
   const { db } = deps;
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw bad('Missing details.');
-  onlyKeys(data, [...SEND_KEYS, 'version', 'channels', 'messages']);
-  const channels = cleanChannels(deps, data), messages = cleanMessages(deps, channels, data);
+  onlyKeys(data, [...SEND_KEYS, 'version', 'channels', 'messages', 'subject']);
+  const channels = cleanChannels(deps, data), messages = cleanMessages(deps, channels, data), subject = cleanSubject(data);
   let id = data.id, requestId = data.requestId;
   if (data.version == null) {
     const sendData = {};
     for (const k of SEND_KEYS) if (k in data) sendData[k] = data[k];
     await quotes.prepare(deps, actor, sendData, { nowMs, uid, inTx: (tx, ctx) => {          // the delivery records are created with the preparation
-      for (const c of channels) tx.create(ctx.ref.collection('deliveries').doc(deliveryId(ctx.n, ctx.requestId, c)), newDelivery(ctx, c, messages[c], actor));
+      for (const c of channels) tx.create(ctx.ref.collection('deliveries').doc(deliveryId(ctx.n, ctx.requestId, c)), newDelivery(ctx, c, messages[c], actor, subject));
     } });
   } else {
     for (const k of SEND_KEYS) if (!['id', 'requestId'].includes(k) && k in data) throw bad(`Unknown field: ${k}`);
-    await createForSent(deps, actor, data, channels, messages, nowMs);
+    await createForSent(deps, actor, data, channels, messages, subject, nowMs);
   }
   const results = await runQueued(deps, actor, id, requestId, nowMs);
   return summary(deps, id, requestId, nowMs, { committed: committedOf(results) });
 }
 // Another channel for a version the customer already has: no prepare, no commit. The same request again creates nothing twice.
-async function createForSent(deps, actor, data, channels, messages, nowMs) {
+// The email goes to the customer's CURRENT address (they may have corrected it since); the PDF is the frozen one.
+async function createForSent(deps, actor, data, channels, messages, subject, nowMs) {
   const { db } = deps;
   const ref = quoteRef(db, data.id);
   if (typeof data.requestId !== 'string' || !REQUEST_ID.test(data.requestId)) throw bad('Missing request id.');
@@ -204,10 +215,12 @@ async function createForSent(deps, actor, data, channels, messages, nowMs) {
     if (!qSnap.exists || !vSnap.exists) throw new HttpsError('not-found', 'Quote not found.');
     const v = vSnap.data();
     if (v.state !== 'sent' || !v.pdf) throw refused('Only a version that was sent can be sent again this way. Send the draft instead.');
+    const contact = await tx.get(db.collection('contacts').doc(qSnap.data().phone));
     const dRefs = channels.map((c) => ref.collection('deliveries').doc(deliveryId(data.version, data.requestId, c)));
     const existing = await Promise.all(dRefs.map((r) => tx.get(r)));
-    const ctx = { ref, q: qSnap.data(), n: data.version, requestId: data.requestId, pdf: v.pdf, customer: v.customer, now: at(nowMs) };
-    channels.forEach((c, i) => { if (!existing[i].exists) tx.create(dRefs[i], newDelivery(ctx, c, messages[c], actor)); });
+    const email = (contact.exists && contact.data().email) || (v.customer && v.customer.email) || null;
+    const ctx = { ref, q: qSnap.data(), n: data.version, requestId: data.requestId, pdf: v.pdf, customer: { ...v.customer, email }, business: v.business, now: at(nowMs) };
+    channels.forEach((c, i) => { if (!existing[i].exists) tx.create(dRefs[i], newDelivery(ctx, c, messages[c], actor, subject)); });
   });
 }
 

@@ -34,12 +34,12 @@ async function storeInbound(db, m) {
 
 // Record an outbound message that Meta accepted. Handles the race where the delivery status webhook
 // arrives before we get to write the message: keep the (higher) status the webhook already stored.
-async function storeOutbound(db, phone, { wamid, type, body, media }) {
+async function storeOutbound(db, phone, { wamid, type, body, media, extra }) {      // extra (Phase 6.1): more fields on the message, e.g. the quote label
   const convRef = db.collection('conversations').doc(phone);
   const msgRef = convRef.collection('messages').doc(wamid);
   await db.runTransaction(async (tx) => {
     const existing = await tx.get(msgRef);
-    const base = { wamid, direction: 'out', type, body, media: media || null, error: null };
+    const base = { wamid, direction: 'out', type, body, media: media || null, error: null, ...(extra || {}) };
     if (existing.exists) tx.set(msgRef, { ...base, createdAt: Timestamp.now() }, { merge: true });   // status untouched
     else tx.set(msgRef, { ...base, status: 'sent', createdAt: Timestamp.now() });
     tx.set(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(body), lastMessageType: type, lastMessageDirection: 'out' }, { merge: true });

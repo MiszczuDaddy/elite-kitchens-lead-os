@@ -41,23 +41,29 @@ function createClient(cfg, fetchImpl = fetch) {
     if (res.ok) return res;
     const data = await res.json().catch(() => ({}));
     const e = data.error || {};
-    throw new WhatsAppError(`${what}: Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data);
+    throw Object.assign(new WhatsAppError(`${what}: Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data), e.code ? { code: e.code } : {});
   }
   return {
     // --- media (official Cloud API): look up a media id, then fetch the bytes with the same bearer token ---
     getMediaInfo: async (id, signal) => (await ok(await fetchImpl(`${base()}/${encodeURIComponent(id)}`, { headers: auth(), signal }), 'Media lookup')).json(),
     fetchMedia: async (url, signal) => ok(await fetchImpl(url, { headers: auth(), signal }), 'Media download'),
-    uploadMedia: async (buffer, mime, filename) => {
+    // timeoutMs (optional, Phase 6.1): give up on an upload that hangs, so a quote send can report a clear failure.
+    uploadMedia: async (buffer, mime, filename, { timeoutMs } = {}) => {
       if (!cfg.phoneId || !cfg.token) throw new WhatsAppError('WhatsApp is not configured (phone number id / access token missing).');
       const form = new FormData();
       form.append('messaging_product', 'whatsapp'); form.append('type', mime);
       form.append('file', new Blob([buffer], { type: mime }), filename);
-      const data = await (await ok(await fetchImpl(`${base()}/${cfg.phoneId}/media`, { method: 'POST', headers: auth(), body: form }), 'Media upload')).json();
+      const ac = timeoutMs ? new AbortController() : null;
+      const timer = ac && setTimeout(() => ac.abort(), timeoutMs);
+      let res;
+      try { res = await fetchImpl(`${base()}/${cfg.phoneId}/media`, { method: 'POST', headers: auth(), body: form, ...(ac ? { signal: ac.signal } : {}) }); }
+      finally { if (timer) clearTimeout(timer); }
+      const data = await (await ok(res, 'Media upload')).json();
       if (!data.id) throw new WhatsAppError('Meta returned no media id', data);
       return data.id;
     },
-    sendMedia: (to, kind, mediaId, { caption, filename } = {}) => post({ to, type: kind, [kind]: {
-      id: mediaId, ...(caption && kind !== 'audio' ? { caption } : {}), ...(kind === 'document' && filename ? { filename } : {}) } }),
+    sendMedia: (to, kind, mediaId, { caption, filename } = {}, opts) => post({ to, type: kind, [kind]: {
+      id: mediaId, ...(caption && kind !== 'audio' ? { caption } : {}), ...(kind === 'document' && filename ? { filename } : {}) } }, opts),
     sendText: (to, body) => post({ to, type: 'text', text: { body, preview_url: false } }),
     sendTemplate: (to, firstName) => post({
       to, type: 'template',
