@@ -6,6 +6,7 @@ const appointments = require('./appointments');
 const calendarSync = require('./calendarSync');
 const quotes = require('./quotes');
 const reopenLib = require('./reopen');
+const delivery = require('./quoteDelivery');
 const { WINDOW_MS } = require('./windowState');          // 24 hours; the same rule the screen uses (Phase 6.1)
 const { normalizeLeadPhone } = require('./phone');
 const { verifySignature, parseWebhook, normalizePhone } = require('./whatsapp');
@@ -324,6 +325,15 @@ async function quotePdfUrl(auth, data, deps) { assertStaff(auth, deps.cfg); retu
 // ./windowState; this wrapper only checks who is asking. ----
 async function reopenConversation(auth, data, deps) { assertStaff(auth, deps.cfg); return reopenLib.reopen(deps, actorOf(auth), data); }
 
-module.exports = { reopenConversation, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+// ---- Phase 6.1 M2: sending a quote through channels. The rules live in ./quoteDelivery (and ./quotes); these wrappers only check
+// who is asking. deps.channels holds the channel adapters (WhatsApp and email arrive in M3 and M4); they are not exposed as
+// Cloud Functions yet, so nothing here is reachable from a browser. ----
+const deliverQuote = quoteAction(delivery.deliver);
+const retryQuoteDelivery = quoteAction(delivery.retry);
+const resolveQuoteDelivery = quoteAction(delivery.resolve);
+const cancelQuoteSend = quoteAction(delivery.cancelSend);
+const markQuoteSent = quoteAction(delivery.markSent);
+
+module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

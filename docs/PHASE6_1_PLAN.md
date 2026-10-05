@@ -180,7 +180,7 @@ delivery of the same stored PDF. A sent version's PDF never changes.
   * *Failed:* "WhatsApp couldn't deliver the template: {reason}." Closed again, subject to the cap.
   * *Open:* the normal composer.
 * **`reopenConversation({ phone, requestId })`** (staff only): refuses if the window is open; enforces **one Reopen template per customer
-  per 24 hours** (a send in progress, sent, or unsure counts; **proposed, owner to confirm:** a template Meta reports as never
+  per 24 hours** (a send in progress, sent, or unsure counts; **owner-confirmed 2026-10-05:** a template Meta reports as never
   delivered, for example because it expired, does not count, since the customer never saw it); claims first (the same claim-then-send
   rule); sends the Reopen template with the customer's first name (or "there"); records it in the chat as an outgoing
   template. Works for any customer, with or without a quote.
@@ -353,7 +353,7 @@ How it behaves, beyond the plan:
 * **The 24-hour allowance** counts a template that is in progress, sent (delivered or not yet), or not confirmed. It does **not** count a
   template Meta refused (nothing was sent: for example the template was not approved yet) or one Meta reports as never delivered (for
   example it expired). **Exception:** Meta's own "wait 24 hours" (131049) and "customer opted out" (131050) answers still count, and the
-  band says when to try again. *This follows the owner-confirmation proposal in "Open items": say if the cap should be stricter.*
+  band says when to try again. *Confirmed by the owner on 2026-10-05: confirmed failed or not delivered does not use the cap; unsure does (the customer may have received it); Meta's "wait 24 hours" and "opted out" answers keep blocking.*
 * **Not confirmed** (Meta 5xx, no message id, network failure, a send with no answer after 20 seconds): recorded as "not confirmed",
   counted, never retried by itself, with a message in the chat telling staff to check before trying again. A send still in progress
   after 3 minutes is treated the same way.
@@ -397,10 +397,72 @@ loaded run. It then passed 5 of 5 on its own and in the next full run. Treated a
 parameter, is accepted with its quick-reply buttons; that the wording in `windowState.js` still matches the approved template; and
 how the chat bubble reads. It shows the existing `[template: name]` prefix, as for the welcome template; it can be tidied later.
 
+### M2: the delivery foundation
+
+Built and tested on 2026-10-05. Nothing deployed, and **no new Cloud Function is exported**: the delivery actions can be reached only
+from tests until M3 adds the first real channel, so nothing in this milestone is reachable from a browser. No Firestore or Storage rule,
+index or setting changed.
+
+| File | What |
+|---|---|
+| `functions/lib/quotes.js` | Phase 6's `send` is now built from shared pieces (`parseSend`, `storeSendPdf`, `checkSendable`, `applySent`) with **unchanged behaviour, wording and records**. `applySent` is the only place a version is frozen, a quote marked Sent and the pipeline rules applied. New: `prepare`, `readState`, `commitPrepared`, `releasePrepared`. The draft is locked while a send is prepared (`saveDraft`, `discardDraft`, `deleteDraft` and the old `send` refuse; `pdfLink` can also open the prepared PDF; deleting a never-sent quote now also deletes its delivery records) |
+| `functions/lib/quoteDelivery.js` | The delivery module: `deliver`, `retry`, `resolve`, `cancelSend`, `markSent`, the `ChannelError` a channel adapter throws, the state machine. Knows nothing about WhatsApp or Gmail |
+| `functions/lib/handlers.js` | Staff-only wrappers (`deliverQuote`, `retryQuoteDelivery`, `resolveQuoteDelivery`, `cancelQuoteSend`, `markQuoteSent`) |
+| `functions/test/delivery.test.js` | 30 tests |
+
+**The channel interface** (what M3's WhatsApp and M4's email adapters implement): `{ maxMessage, check(ctx), send(ctx) }`. `ctx` holds
+the quote number, version, customer phone, the address to use (email only), the message, the exact PDF (`pdf.bytes`, size, SHA-256) and a
+file name. `check` may return `{ ok: false, code, text }` to refuse before anything is sent (the 24-hour window has closed, there is no email
+address). `send` returns `{ providerId }` or throws `ChannelError(text, { code, definite })`: **definite** means nothing was sent (recorded as
+failed, safe to retry); anything else, including any other error, means we cannot tell (recorded as **unknown**).
+
+**What `deliver` does.** For a draft it takes Phase 6's `sendQuote` fields plus `channels` and `messages`: *prepare* (the same checks and
+stored PDF as `send`, the draft locked, the delivery records created in the same transaction, **nothing marked sent**), then each channel in
+the order WhatsApp, email: *claim* (a compare-and-set in a transaction: one winner), check the stored PDF against its SHA-256, hand it to the
+channel, *record* the answer. The first channel to confirm also **commits** in that same transaction (`commitPrepared`, which runs
+`applySent`: the version frozen from what was frozen at prepare, the quote Sent, `planSend` and the value rules). With `version` and no PDF
+fields it delivers an already-sent version's stored PDF through more channels: no prepare, no commit, no change to the quote record.
+
+**Rules, all tested.**
+* **A failed channel is never recorded as sent**, and one channel failing never undoes another's success. If every channel fails, the quote,
+  the customer's stage and the pipeline value are exactly as they were, and the draft stays locked.
+* **The same request again** returns the current state and sends nothing (it only finishes a channel still "queued", for example after a
+  crash before the claim); a failed channel is retried only by an explicit **retry**. Five identical requests at once, and four retries at
+  once, send once per channel.
+* **Not confirmed** (`unknown`: a provider answer we cannot read, a crash, a send still "sending" after 3 minutes): never retried by itself,
+  never cancelled over, and refused for a retry. Staff **settle** it: "it arrived" counts it as delivered (and commits); "it did not arrive" makes it
+  a failure that can be retried. A late answer from a send that was settled meanwhile is not written over the staff member's decision.
+* **Retry** works on a failed channel only, can carry an edited message, re-checks the stored PDF, and, for a send not yet marked sent,
+  refuses once the date on the quote is neither today nor yesterday (the same rule as Phase 6's send): cancel and send again.
+* **Cancel** unlocks the draft and deletes the prepared PDF; refused while any channel has delivered, is sending, or is not confirmed.
+* **Mark as sent by hand** on a prepared send commits it through the same rules with a "manual" delivery record, using the stored PDF.
+* **Never overwritten:** every send request stores its own PDF; revising and resending keeps every earlier version's PDF and deliveries.
+* Existing Phase 6 sent quotes have no delivery records: they are simply "marked sent by hand" (no migration).
+* **Privacy:** logs hold a channel and a code only (an unexpected error's own message is never logged); stored errors are plain sentences
+  or codes; erasing a customer removes the deliveries with the quotes (tested, prepared or delivered).
+
+**Tests.** 30 backend tests, including one that runs Phase 6's own `send` and the delivery commit side by side for every stage (New lead,
+Booked, Quoted, Won, Closed, with and without "reopen") and every value choice, and checks the quote, the version, the customer's stage and
+the pipeline value come out identical. **Twenty planted errors** were each caught: a failed channel recorded as sent; a delivered channel
+resent by a retry; committing when the channel failed; the quote marked Sent at prepare; no one-winner claim; an unconfirmed send treated as
+failed; an unconfirmed send retryable; the draft editable while prepared; cancelling over an unconfirmed send; the staff check skipped; every
+request sharing one PDF path; a late answer overwriting staff's decision; marking sent by hand while a channel is sending; an out-of-date send
+retried; the PDF not verified before sending; channels in the wrong order; the "reopen" choice ignored; cancelling not unlocking the draft;
+deleting a cancelled quote leaving its deliveries; the old send ignoring the lock. (Two of my first attempts at planting an error did not
+test anything: one crashed on a typo of mine, and one removed only one of two guards that do the same job; both were redone properly.)
+
+**Regression (2026-10-05, after M2):** backend 251 of 251 (the 221 from M1 unchanged, plus the 30 new ones); browser suites `ui` 57/57, `lead`
+11/11, `crm` 14/14, `dnd` 13/13, `conversion` 10/10, `appointments` 17/17, `quotes` 20/20, `quote-send` 9/9, `reopen` 14/14, `theme` 10/10
+(Chrome). `quotes` and `quote-send` drive the real Send dialog through the refactored Phase 6 `send`. No existing test file was changed.
+Before the delivery module was built, the 65 existing quote, customer and calculator tests were run against the refactored `send` alone and
+all passed.
+
+**Left for later milestones.** The adapters (M3, M4); the Cloud Function exports and their deploy script (M3); the screens (M5);
+the history on screen reads the delivery records (M5).
+
 ## Open items
 
 * The Reopen template's name and language (owner creates it; needed before the M1 preview).
-* The owner to confirm that a template Meta reports as never delivered does not use up the one-per-24-hours Reopen cap.
 * Email authentication (SPF / DKIM / DMARC): decided by the M4 header check, not before.
 * Whether free-form replies are billed from 1 October 2026 (check WhatsApp Manager billing).
 * For customers who have never messaged (phone or walk-in enquiries): whether the closed band should also offer the old

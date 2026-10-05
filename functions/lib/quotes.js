@@ -203,6 +203,7 @@ async function saveDraft({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (!snap.exists) throw new HttpsError('not-found', 'Quote not found.');
     const q = snap.data();
     checkRev(q, data.expectedRev);
+    if (q.preparedSend) throw refused(IN_PROGRESS);                       // Phase 6.1: the draft is locked while a send is prepared
     if (q.draftVersion == null) throw refused('This quote has no draft. Revise it to make changes.');
     const vRef = versionRef(ref, q.draftVersion);
     const [vSnap, settings] = await Promise.all([tx.get(vRef), useCurrent ? tx.get(db.doc('quoteSettings/current')) : null]);
@@ -222,10 +223,19 @@ async function saveDraft({ db }, actor, data, { nowMs = Date.now() } = {}) {
   });
 }
 
-// Send the draft: freeze it (issue date, validity, customer and business details), store the exact PDF the customer gets,
-// mark the quote Sent and apply the pipeline rules. The browser made the PDF from this draft, these customer details and
-// these settings: if any of them changed meanwhile, the send is refused so the stored copy is always what was sent.
-async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {}) {
+// ============================================== sending (shared pieces) ===============================================
+// A quote becomes Sent in exactly one place, applySent. Phase 6's `send` (staff mark it sent by hand) and Phase 6.1's delivery
+// (docs/PHASE6_1_PLAN.md: prepare, deliver through a channel, commit once a channel confirms) both go through the same four
+// pieces, so they can never disagree about what is frozen, what the pipeline does or what is checked:
+//   parseSend / storeSendPdf   the request, and the exact PDF (before the transaction)
+//   checkSendable              what must still be true inside the transaction
+//   applySent                  the ONLY place a version is frozen, the quote marked Sent and the pipeline rules applied
+// `prepare` runs the same checks and stores the same PDF but marks NOTHING sent: it locks the draft (`prepared` on the version,
+// `preparedSend` on the quote) until delivery decides. `commitPrepared` then applies applySent from what was frozen at prepare,
+// in the transaction that records the first channel confirmed as delivered; `releasePrepared` unlocks the draft again.
+const IN_PROGRESS = 'A send is already in progress for this quote: retry it, cancel it, or mark it sent first.';
+
+function parseSend(db, data, nowMs, uid) {
   onlyKeys(data, ['id', 'expectedRev', 'requestId', 'issueDate', 'settingsRev', 'customer', 'pdfUploadPath', 'pipeline']);
   const ref = quoteRef(db, data.id);
   if (typeof data.requestId !== 'string' || !REQUEST_ID.test(data.requestId)) throw bad('Missing request id.');
@@ -240,25 +250,83 @@ async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {
   }
   const upload = String(data.pdfUploadPath || '');
   if (!uid || !upload.startsWith(`uploads/${uid}/`) || upload.includes('..')) throw new HttpsError('permission-denied', 'Bad upload path.');
+  return { ref, requestId: data.requestId, reopen, value, shown, upload };
+}
 
-  const first = await ref.get();
-  if (!first.exists) throw new HttpsError('not-found', 'Quote not found.');
-  const q0 = first.data();
-  if (q0.lastSendRequestId === data.requestId) return { ...view(ref.id, q0), existing: true };   // the same request again
-  checkRev(q0, data.expectedRev);
-  if (q0.draftVersion == null) throw refused('There is nothing to send: revise the quote first.');
-  const n = q0.draftVersion;
-
-  // The PDF: must be a real PDF of sensible size. Stored under a path unique to this request, so two different sends racing
-  // for the same draft can never overwrite each other's file; the loser removes its own copy.
+// The PDF: must be a real PDF of sensible size. Stored under a path unique to this request, so two different sends racing
+// for the same draft can never overwrite each other's file; the loser removes its own copy.
+async function storeSendPdf(bucket, q0, ref, n, requestId, upload) {
   const upFile = bucket.file(upload);
   let buf;
   try { [buf] = await upFile.download(); } catch (e) { throw new HttpsError('not-found', 'The PDF upload was not found. Please try again.'); }
   if (buf.length < 8 || buf.length > PDF_MAX || buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw bad('The quote PDF is missing or not a PDF (max 25 MB).');
   const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
-  const finalPath = `quotes/${q0.phone}/${ref.id}/v${n}-${crypto.createHash('sha256').update(data.requestId).digest('hex').slice(0, 12)}.pdf`;
+  const finalPath = `quotes/${q0.phone}/${ref.id}/v${n}-${crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 12)}.pdf`;
   await bucket.file(finalPath).save(buf, { contentType: 'application/pdf', resumable: false });
+  return { upFile, size: buf.length, sha256, finalPath };
+}
 
+// Inside the transaction, after the quote itself has been read: everything that must still be true. s = the snapshots read.
+function checkSendable(s, data, n, shown) {
+  checkRev(s.q, data.expectedRev);
+  if (s.q.draftVersion !== n || !s.vSnap.exists) throw refused(CHANGED);
+  if (!s.conv.exists) throw new HttpsError('not-found', 'Customer not found.');
+  if (!s.settings.exists || s.settings.data().rev !== data.settingsRev) throw refused('Quote Settings changed while you were sending. Please check the quote again.');
+  const ct = s.contact.exists ? s.contact.data() : {};
+  const current = { name: customerNameOf(s.contact, s.conv), email: ct.email || null, address: ct.address || null };
+  if (current.name !== shown.name || current.email !== shown.email || current.address !== shown.address) {
+    throw refused("The customer's details changed while you were sending. Please check the quote again.");
+  }
+  const v = s.vSnap.data();
+  const p = priced(v.engine, v.answers, v.priceList, v.vatRate);
+  if (p.sendProblems.length) throw refused(p.sendProblems[0]);
+  return { ct, current, v, p, settings: s.settings.data() };
+}
+
+// Freeze the version, mark the quote Sent, apply the pipeline rules. `via` (a delivery channel, or "manual") is recorded in the
+// history; `delivered` also clears the lock set by prepare. Phase 6's own send passes neither, so its records are unchanged.
+function applySent(tx, r, s, a) {
+  const { ref, vRef, convRef, contactRef } = r;
+  const { q, conv, contact, p } = s;
+  const ct = contact.exists ? contact.data() : {};
+  const now = at(a.nowMs);
+  const stage = pipeline.planSend(conv.data(), { reopen: a.reopen }, a.nowMs);
+  const val = pipeline.planValue(ct, a.value);
+  tx.update(vRef, { state: 'sent', sheet: p.sheet, issueDate: a.issueDate, validUntil: a.validUntil, customer: { ...a.customer, phone: q.phone }, business: a.business,
+    sentAt: now, sentBy: a.actor, pdf: a.pdf, ...(a.delivered ? { prepared: FieldValue.delete() } : {}) });
+  if (stage) tx.update(convRef, stage.patch);
+  if (val) tx.set(contactRef, { ...val.patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  const summary = summaryOf(p.sheet);
+  const patch = {
+    status: 'sent', currentVersion: a.n, sentVersion: a.n, draftVersion: null, summary, customerName: a.customer.name,
+    sent: { version: a.n, issueDate: a.issueDate, validUntil: a.validUntil, summary }, validUntil: a.validUntil, sentAt: now, sentBy: a.actor,
+    declinedAt: null, declinedBy: null, declineReason: null,
+    pipelineChanges: capped(q.pipelineChanges, { action: 'sent', version: a.n, at: now, by: a.actor.id, stage: stage ? stage.change : null, value: val ? val.change : null }, PIPELINE_MAX),
+    history: withHistory(q, { action: 'sent', at: now, by: a.actor.id, version: a.n, ...(a.via ? { via: a.via } : {}) }),
+    lastSendRequestId: a.requestId, rev: q.rev + 1, updatedAt: now, updatedBy: a.actor,
+    ...(a.delivered ? { preparedSend: FieldValue.delete() } : {}),
+  };
+  tx.update(ref, patch);
+  return { ...view(ref.id, { ...q, ...patch }), existing: false, stage: stage ? stage.change : null, value: val ? val.change : null };
+}
+
+// Send the draft: freeze it (issue date, validity, customer and business details), store the exact PDF the customer gets,
+// mark the quote Sent and apply the pipeline rules. The browser made the PDF from this draft, these customer details and
+// these settings: if any of them changed meanwhile, the send is refused so the stored copy is always what was sent.
+// This is "marked sent by hand" (Phase 6); Phase 6.1's delivery prepares first and marks Sent only after a channel confirms.
+async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {}) {
+  const r = parseSend(db, data, nowMs, uid);
+  const { ref, requestId } = r;
+  const first = await ref.get();
+  if (!first.exists) throw new HttpsError('not-found', 'Quote not found.');
+  const q0 = first.data();
+  if (q0.lastSendRequestId === requestId) return { ...view(ref.id, q0), existing: true };   // the same request again
+  if (q0.preparedSend) throw refused(IN_PROGRESS);
+  checkRev(q0, data.expectedRev);
+  if (q0.draftVersion == null) throw refused('There is nothing to send: revise the quote first.');
+  const n = q0.draftVersion;
+
+  const stored = await storeSendPdf(bucket, q0, ref, n, requestId, r.upload);
   const convRef = db.collection('conversations').doc(q0.phone), contactRef = db.collection('contacts').doc(q0.phone);
   let result;
   try {
@@ -267,47 +335,97 @@ async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {
       const [snap, vSnap, conv, contact, settings] = await Promise.all([tx.get(ref), tx.get(vRef), tx.get(convRef), tx.get(contactRef), tx.get(db.doc('quoteSettings/current'))]);
       if (!snap.exists) throw new HttpsError('not-found', 'Quote not found.');
       const q = snap.data();
-      if (q.lastSendRequestId === data.requestId) return { ...view(ref.id, q), existing: true };
-      checkRev(q, data.expectedRev);
-      if (q.draftVersion !== n || !vSnap.exists) throw refused(CHANGED);
-      if (!conv.exists) throw new HttpsError('not-found', 'Customer not found.');
-      if (!settings.exists || settings.data().rev !== data.settingsRev) throw refused('Quote Settings changed while you were sending. Please check the quote again.');
-      const ct = contact.exists ? contact.data() : {};
-      const current = { name: customerNameOf(contact, conv), email: ct.email || null, address: ct.address || null };
-      if (current.name !== shown.name || current.email !== shown.email || current.address !== shown.address) {
-        throw refused("The customer's details changed while you were sending. Please check the quote again.");
-      }
-      const v = vSnap.data();
-      const p = priced(v.engine, v.answers, v.priceList, v.vatRate);
-      if (p.sendProblems.length) throw refused(p.sendProblems[0]);
-      const s = settings.data();
-      const now = at(nowMs);
-      const stage = pipeline.planSend(conv.data(), { reopen }, nowMs);
-      const val = pipeline.planValue(ct, value);
-      const validUntil = addDays(data.issueDate, s.validityDays);
-      tx.update(vRef, { state: 'sent', sheet: p.sheet, issueDate: data.issueDate, validUntil, customer: { ...current, phone: q.phone }, business: s.business,
-        sentAt: now, sentBy: actor, pdf: { path: finalPath, size: buf.length, sha256 } });
-      if (stage) tx.update(convRef, stage.patch);
-      if (val) tx.set(contactRef, { ...val.patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-      const summary = summaryOf(p.sheet);
-      const patch = {
-        status: 'sent', currentVersion: n, sentVersion: n, draftVersion: null, summary, customerName: current.name,
-        sent: { version: n, issueDate: data.issueDate, validUntil, summary }, validUntil, sentAt: now, sentBy: actor,
-        declinedAt: null, declinedBy: null, declineReason: null,
-        pipelineChanges: capped(q.pipelineChanges, { action: 'sent', version: n, at: now, by: actor.id, stage: stage ? stage.change : null, value: val ? val.change : null }, PIPELINE_MAX),
-        history: withHistory(q, { action: 'sent', at: now, by: actor.id, version: n }),
-        lastSendRequestId: data.requestId, rev: q.rev + 1, updatedAt: now, updatedBy: actor,
-      };
-      tx.update(ref, patch);
-      return { ...view(ref.id, { ...q, ...patch }), existing: false, stage: stage ? stage.change : null, value: val ? val.change : null };
+      if (q.lastSendRequestId === requestId) return { ...view(ref.id, q), existing: true };
+      if (q.preparedSend) throw refused(IN_PROGRESS);
+      const c = checkSendable({ q, vSnap, conv, contact, settings }, data, n, r.shown);
+      const validUntil = addDays(data.issueDate, c.settings.validityDays);
+      return applySent(tx, { ref, vRef, convRef, contactRef }, { q, conv, contact, p: c.p }, { n, actor, nowMs, requestId, issueDate: data.issueDate, validUntil,
+        customer: c.current, business: c.settings.business, pdf: { path: stored.finalPath, size: stored.size, sha256: stored.sha256 }, reopen: r.reopen, value: r.value });
     });
   } catch (e) {
-    await bucket.file(finalPath).delete({ ignoreNotFound: true }).catch(() => {});   // this request's own copy only
+    await bucket.file(stored.finalPath).delete({ ignoreNotFound: true }).catch(() => {});   // this request's own copy only
     throw e;
   }
   // (A repeat of the same request that raced the first one lands on the same path with the same file: nothing to remove.)
-  await upFile.delete({ ignoreNotFound: true }).catch(() => {});
+  await stored.upFile.delete({ ignoreNotFound: true }).catch(() => {});
   return result;
+}
+
+// Phase 6.1: the same request, the same checks and the same stored PDF as `send`, but NOTHING is marked sent. The draft is locked
+// (editing, discarding and deleting are refused) until the delivery commits, or the send is cancelled. `inTx(tx, ctx)` lets the
+// delivery module create its records in this same transaction (writes only: every read has already happened).
+// The same request again returns what exists ({ existing: true }, { committed: true } once a channel has confirmed).
+async function prepare({ db, bucket }, actor, data, { nowMs = Date.now(), uid, inTx } = {}) {
+  const r = parseSend(db, data, nowMs, uid);
+  const { ref, requestId } = r;
+  const first = await ref.get();
+  if (!first.exists) throw new HttpsError('not-found', 'Quote not found.');
+  const q0 = first.data();
+  if (q0.lastSendRequestId === requestId) return { ...view(ref.id, q0), existing: true, committed: true };
+  if (q0.preparedSend && q0.preparedSend.requestId === requestId) return { ...view(ref.id, q0), existing: true, committed: false, version: q0.preparedSend.version };
+  if (q0.preparedSend) throw refused(IN_PROGRESS);
+  checkRev(q0, data.expectedRev);
+  if (q0.draftVersion == null) throw refused('There is nothing to send: revise the quote first.');
+  const n = q0.draftVersion;
+
+  const stored = await storeSendPdf(bucket, q0, ref, n, requestId, r.upload);
+  const convRef = db.collection('conversations').doc(q0.phone), contactRef = db.collection('contacts').doc(q0.phone);
+  let result;
+  try {
+    result = await db.runTransaction(async (tx) => {
+      const vRef = versionRef(ref, n);
+      const [snap, vSnap, conv, contact, settings] = await Promise.all([tx.get(ref), tx.get(vRef), tx.get(convRef), tx.get(contactRef), tx.get(db.doc('quoteSettings/current'))]);
+      if (!snap.exists) throw new HttpsError('not-found', 'Quote not found.');
+      const q = snap.data();
+      if (q.lastSendRequestId === requestId) return { ...view(ref.id, q), existing: true, committed: true };
+      if (q.preparedSend && q.preparedSend.requestId === requestId) return { ...view(ref.id, q), existing: true, committed: false, version: q.preparedSend.version };
+      if (q.preparedSend) throw refused(IN_PROGRESS);
+      const c = checkSendable({ q, vSnap, conv, contact, settings }, data, n, r.shown);
+      const validUntil = addDays(data.issueDate, c.settings.validityDays);
+      const now = at(nowMs), pdf = { path: stored.finalPath, size: stored.size, sha256: stored.sha256 };
+      tx.update(vRef, { prepared: { requestId, at: now, by: actor, pdf, issueDate: data.issueDate, validUntil, customer: c.current, business: c.settings.business,
+        pipeline: { reopen: r.reopen, value: r.value } } });
+      const patch = { preparedSend: { version: n, requestId }, history: withHistory(q, { action: 'send started', at: now, by: actor.id, version: n }), rev: q.rev + 1, updatedAt: now, updatedBy: actor };
+      tx.update(ref, patch);
+      if (inTx) inTx(tx, { ref, q, n, requestId, pdf, customer: c.current, now });
+      return { ...view(ref.id, { ...q, ...patch }), existing: false, committed: false, version: n, requestId, customer: c.current, pdf };
+    });
+  } catch (e) {
+    await bucket.file(stored.finalPath).delete({ ignoreNotFound: true }).catch(() => {});   // this request's own copy only
+    throw e;
+  }
+  await stored.upFile.delete({ ignoreNotFound: true }).catch(() => {});
+  return result;
+}
+
+// Phase 6.1, for the delivery module's own transactions: read what a commit needs (all reads, before any write)...
+async function readState(tx, db, id, n) {
+  const ref = quoteRef(db, id);
+  const snap = await tx.get(ref);
+  if (!snap.exists) return null;                                                // the customer was erased meanwhile: nothing to write
+  const q = snap.data();
+  const vRef = versionRef(ref, n), convRef = db.collection('conversations').doc(q.phone), contactRef = db.collection('contacts').doc(q.phone);
+  const [vSnap, conv, contact] = await Promise.all([tx.get(vRef), tx.get(convRef), tx.get(contactRef)]);
+  return { ref, vRef, convRef, contactRef, q, n, vSnap, conv, contact };
+}
+// ...and commit: mark the prepared version Sent from what was frozen at prepare, exactly as `send` does (applySent). Does nothing
+// when this request has already committed (a second channel confirming) or the preparation is gone.
+function commitPrepared(tx, st, actor, nowMs, requestId, via) {
+  const { q, n, vSnap, conv, contact } = st;
+  if (q.lastSendRequestId === requestId) return { committed: false, already: true };
+  const v = vSnap.exists ? vSnap.data() : null, prep = v && v.prepared;
+  if (!prep || prep.requestId !== requestId || q.draftVersion !== n || !conv.exists) return { committed: false, already: false };
+  const p = priced(v.engine, v.answers, v.priceList, v.vatRate);
+  const r = applySent(tx, st, { q, conv, contact, p }, { n, actor, nowMs, requestId, issueDate: prep.issueDate, validUntil: prep.validUntil, customer: prep.customer,
+    business: prep.business, pdf: prep.pdf, reopen: prep.pipeline.reopen, value: prep.pipeline.value, via, delivered: true });
+  return { committed: true, already: false, stage: r.stage, value: r.value };
+}
+// Unlock the draft: only the delivery module calls this, and only when nothing was delivered.
+function releasePrepared(tx, st, actor, nowMs) {
+  const { ref, vRef, q } = st, now = at(nowMs);
+  tx.update(vRef, { prepared: FieldValue.delete() });
+  tx.update(ref, { preparedSend: FieldValue.delete(), history: withHistory(q, { action: 'send cancelled', at: now, by: actor.id, version: q.preparedSend.version }),
+    rev: q.rev + 1, updatedAt: now, updatedBy: actor });
 }
 
 // Accept: the customer chose one option of the version they were sent. Allowed on an expired quote (the answer says so).
@@ -441,6 +559,7 @@ async function discardDraft({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (!snap.exists) throw new HttpsError('not-found', 'Quote not found.');
     const q = snap.data();
     checkRev(q, data.expectedRev);
+    if (q.preparedSend) throw refused(IN_PROGRESS);                       // Phase 6.1: cancel the prepared send first
     if (q.draftVersion == null || q.sentVersion == null) throw refused(q.sentVersion == null ? 'This quote was never sent: delete it instead.' : 'There is no draft revision to discard.');
     const now = at(nowMs);
     tx.delete(versionRef(ref, q.draftVersion));
@@ -461,9 +580,11 @@ async function deleteDraft({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (!snap.exists) throw new HttpsError('not-found', 'Quote not found.');
     const q = snap.data();
     checkRev(q, data.expectedRev);
+    if (q.preparedSend) throw refused(IN_PROGRESS);                       // Phase 6.1: cancel the prepared send first
     if (q.sentVersion != null) throw refused('A quote that was sent cannot be deleted: it is the record of what the customer received.');
-    const versions = await tx.get(ref.collection('versions'));
+    const [versions, deliveries] = await Promise.all([tx.get(ref.collection('versions')), tx.get(ref.collection('deliveries'))]);   // Phase 6.1: cancelled sends leave delivery records
     versions.docs.forEach((d) => tx.delete(d.ref));
+    deliveries.docs.forEach((d) => tx.delete(d.ref));
     tx.delete(ref);
     tx.set(db.collection('auditLog').doc(), { action: 'deleteQuote', quoteRef: q.ref, by: actor.id, at: at(nowMs) });
     return { id: ref.id, deleted: true };
@@ -493,7 +614,7 @@ async function pdfLink({ db, bucket }, actor, data, { signedUrl }) {
   if (!Number.isInteger(data.version) || data.version < 1) throw bad('Missing version.');
   const [snap, vSnap] = await Promise.all([ref.get(), versionRef(ref, data.version).get()]);
   if (!snap.exists || !vSnap.exists) throw new HttpsError('not-found', 'Quote not found.');
-  const q = snap.data(), pdf = vSnap.data().pdf;
+  const q = snap.data(), vd = vSnap.data(), pdf = vd.pdf || (vd.prepared && vd.prepared.pdf);     // Phase 6.1: a prepared (not yet delivered) PDF can be downloaded too
   if (!pdf || !pdf.path) throw new HttpsError('not-found', 'This version has no stored PDF (it was not sent).');
   if (!pdf.path.startsWith(`quotes/${q.phone}/${ref.id}/`)) throw new HttpsError('permission-denied', 'Bad file path.');     // defence in depth
   if (!(await bucket.file(pdf.path).exists())[0]) throw new HttpsError('not-found', 'The stored PDF is missing.');
@@ -501,7 +622,12 @@ async function pdfLink({ db, bucket }, actor, data, { signedUrl }) {
   return { url, filename: `EliteKitchens-${q.ref}-v${data.version}.pdf`, size: pdf.size };
 }
 
+// Small helpers for the delivery module (quoteDelivery.js), which keeps its own records but must validate, order and word things
+// exactly as this module does.
+const H = { onlyKeys, text, bad, refused, checkRev, quoteRef, versionRef, capped, at, view, REQUEST_ID };
+
 module.exports = {
   TZ, HISTORY_MAX, VERSIONS_MAX, PDF_MAX, dublinDate, addDays, isExpired, isQuoteId, quoteId,
   saveSettings, setNumbering, create, saveDraft, send, accept, decline, reopen, revise, discardDraft, deleteDraft, setNotes, pdfLink,
+  IN_PROGRESS, prepare, readState, commitPrepared, releasePrepared, H,
 };
