@@ -629,8 +629,8 @@ flake of a Phase 5 test, unrelated to Phase 6.1.
 
 ### Still needed from the owner before the preview
 
-* **Meta:** confirm the Reopen template `elite_kitchens_reopen` (language `en`) is **approved** and send me the exact name and language. The
-  second template (`elite_kitchens_quote_document`) is not used by anything built so far (it is for the optional M7).
+* **Meta: done (2026-10-07).** WhatsApp Manager shows `elite_kitchens_reopen` (Utility, English `en`) as **Active**, with the quality rating still "pending" (normal until it has been sent). The name and language are the plan defaults, so no setting changes. The second
+  template (`elite_kitchens_quote_document`, Utility, Active) is not used by anything built so far (it is for the optional M7).
 * **Google Workspace:** run `./scripts/setup-mailer.sh` in Cloud Shell, then authorise the printed client ID for the single scope `gmail.send` in the
   Admin console (steps above). Not done.
 * **DNS:** nothing needs changing now. SPF, DKIM and DMARC are decided by the header test in "Testing the preview"; any change needs approval first.
@@ -656,7 +656,7 @@ preview (Hosting channel `phase61`) uses the live data and the live backend, so 
 
 | Needed | Why | Status at the end of M5 |
 |---|---|---|
-| Meta template `elite_kitchens_reopen` approved (name and language code sent to me) | "Reopen conversation" | submitted and in review (owner, 2026-10-05); not yet confirmed approved |
+| Meta template `elite_kitchens_reopen` approved (name and language code sent to me) | "Reopen conversation" | **done**: Active, Utility, English (owner's WhatsApp Manager screenshot, 2026-10-07) |
 | Cloud Shell: `./scripts/setup-mailer.sh`, then the Workspace approval (see "One-time Google Workspace setup") | email | not done |
 | An email address the owner can read, different from info@ (their own Gmail, ideally also an Outlook one) | the email test and the header check | to be given |
 | A phone for the test customer that has WhatsApp and can message the business number | WhatsApp tests | to be given |
