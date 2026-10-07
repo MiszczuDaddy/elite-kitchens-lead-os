@@ -70,6 +70,15 @@ function createClient(cfg, fetchImpl = fetch) {
       template: { name: cfg.template, language: { code: cfg.lang },
         components: [{ type: 'body', parameters: [{ type: 'text', text: firstName }] }] },
     }),
+    // An approved template whose header is a DOCUMENT (Phase 6.1 M7: the quotation template): the already-uploaded media id goes into
+    // the header, params fill {{1}}, {{2}}... of the body in order.
+    sendTemplateWithDocument: (to, { name, lang, mediaId, filename, params = [] }, opts) => post({
+      to, type: 'template',
+      template: { name, language: { code: lang }, components: [
+        { type: 'header', parameters: [{ type: 'document', document: { id: mediaId, ...(filename ? { filename } : {}) } }] },
+        ...(params.length ? [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) }] : []),
+      ] },
+    }, opts),
     // Any approved template by name (Phase 6.1: Reopen conversation). params fill {{1}}, {{2}}... of the body, in order.
     sendTemplateByName: (to, { name, lang, params = [] }, opts) => post({
       to, type: 'template',

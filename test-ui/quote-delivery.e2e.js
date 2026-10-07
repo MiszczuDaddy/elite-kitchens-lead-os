@@ -94,7 +94,7 @@ const inbound = (from, name, extra) => hook({ entry: [{ changes: [{ field: 'mess
   messages: [{ id: 'wamid.IN' + ++wm, from, timestamp: String(Math.floor(Date.now() / 1000)), ...extra }] } }] }] });
 
 const H = 3600e3;
-const ph = { anna: '353860000031', brian: '353860000032', cara: '353860000033', dan: '353860000034', eva: '353860000035', finn: '353860000036', gus: '353860000037' };
+const ph = { anna: '353860000031', brian: '353860000032', cara: '353860000033', dan: '353860000034', eva: '353860000035', finn: '353860000036', gus: '353860000037', hal: '353860000038' };
 const SETTINGS = { vatRate: 13.5, validityDays: 30,
   business: { tradingName: 'Elite Kitchens', signatureName: 'Test Signer', phone: '01 000 0000', email: 'quotes@example.com', web: 'www.example.com', address: 'Test Street, Dublin', vatNumber: 'IE0000000X' },
   priceList: { options: { ess: { perDoor: 313.37, perTopBox: 171.17 }, prem: { perDoor: 323.41, perTopBox: 181.19 }, pp: { perDoor: 333.53, perTopBox: 191.29 } },
@@ -111,13 +111,14 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   };
   await seed(ph.anna, 'Anna Murphy', 'anna@example.com', 2); await seed(ph.brian, 'Brian Byrne', 'brian@example.com', 30);
   await seed(ph.cara, 'Cara Walsh', null, 2); await seed(ph.dan, 'Dan Doyle', null, 30);
-  await seed(ph.eva, 'Eva Egan', 'eva@example.com', 2); await seed(ph.finn, 'Finn Flynn', 'finn@example.com', 2); await seed(ph.gus, 'Gus Grant', 'gus@example.com', 2);
+  await seed(ph.eva, 'Eva Egan', 'eva@example.com', 2); await seed(ph.finn, 'Finn Flynn', 'finn@example.com', 2); await seed(ph.gus, 'Gus Grant', 'gus@example.com', 2); await seed(ph.hal, 'Hal Hogan', 'hal@example.com', 30);
   const quote = async (id) => (await db.doc('quotes/' + id).get()).data();
   const version = async (id, v = 1) => (await db.doc(`quotes/${id}/versions/${v}`).get()).data();
   const conv = async (p) => (await db.doc('conversations/' + p).get()).data();
   const deliveries = async (id) => (await db.collection(`quotes/${id}/deliveries`).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
   const storedPdf = async (id, v = 1) => (await bucket.file((await version(id, v)).pdf.path).download())[0];
   const docMsgs = () => metaState.messages.filter((m) => m.type === 'document');
+  const tmplMsgs = () => metaState.messages.filter((m) => m.type === 'template' && m.template.name === 'elite_kitchens_quote_document');
 
   const u = await getAuth().createUser({ email: 'staff@test.dev', emailVerified: true });
   const token = await getAuth().createCustomToken(u.uid);
@@ -200,34 +201,44 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   assert.match(await page.textContent('#msgs'), /Hi Anna, your kitchen quotation is attached/);
   ok('the history shows the sending on the quote (versions, activity) and the customer profile; the chat shows the document labelled with the quote number');
 
-  // ============================================ a closed window: Reopen inside the dialog, and the customer must reply ================
+  // ============================================ a closed window: the quote goes in the approved quotation template (M7) =================
   const brian = await makeQuote(ph.brian);
   await openDialog(brian);
-  assert.match(await page.textContent('#qsend-wa-state'), /^24-hour window closed: WhatsApp only allows an approved template until the customer replies\.$/);
-  assert.equal(await page.isDisabled('#qsend-wa'), true); assert.equal(await page.isChecked('#qsend-wa'), false);
-  assert.equal(await page.isVisible('#qsend-wa-reopen'), true); assert.equal(await page.isChecked('#qsend-em'), true);          // email is ticked instead
-  await page.click('#qsend-wa-reopen'); await page.waitForSelector('#reopen-dlg[open]');
-  assert.match(await page.textContent('#reopen-text'), /^Hi Brian, it's Elite Kitchens\. We have a quick question/);
-  assert.match(await page.textContent('#reopen-note'), /does not reopen normal messaging/);
-  await page.click('#reopen-go'); await page.waitForFunction(() => !document.getElementById('reopen-dlg').open);
-  await until(() => metaState.messages.some((m) => m.type === 'template'), 'the Reopen template reaches Meta');
-  await page.waitForFunction(() => /Waiting for Brian Byrne to reply/.test(document.getElementById('qsend-wa-state').textContent));
-  const waiting = await page.textContent('#qsend-wa-state');
-  assert.match(waiting, /^Template sent at \d\d:\d\d\. Waiting for Brian Byrne to reply: WhatsApp does not allow this message until they do\.$/);
-  assert.ok(!/reopened|is open/i.test(waiting)); assert.equal(await page.isDisabled('#qsend-wa'), true); assert.equal(await page.isVisible('#qsend-wa-reopen'), false);
-  assert.equal(docMsgs().length, 1);                                                                                         // the template did not open anything
-  ok('a closed window: WhatsApp is disabled with the reason and a Reopen button; Reopen opens the same confirmation as the chat; afterwards the row says "waiting for the customer to reply", never "reopened"');
+  const bref = (await quote(brian)).ref;
+  assert.match(await page.textContent('#qsend-wa-state'), /^24-hour window closed: WhatsApp only allows an approved template now, so the quote is sent with the approved quotation template, PDF attached\. The customer can reply to it\.$/);
+  assert.equal(await page.isDisabled('#qsend-wa'), false); assert.equal(await page.isChecked('#qsend-wa'), true);               // usable, and ticked by default
+  assert.equal(await page.isVisible('#qsend-wa-reopen'), false);                                                              // no Reopen step for a quote
+  assert.equal(await page.isChecked('#qsend-em'), false);
+  assert.equal(await page.inputValue('#qsend-wa-text'), `Hi Brian, as discussed, please find attached your Elite Kitchens quotation ${bref}. If you have any questions or would like to make any changes, just reply here.`);
+  assert.equal(await page.locator('#qsend-wa-text').isEditable(), false);                                                     // fixed words: WhatsApp does not allow changing them
+  assert.match(await page.textContent('#qsend-wa-note'), /fixed words of the approved quotation template/);
+  await page.screenshot({ path: path.join(SHOTS, 'delivery-template-dialog.png') });
+  ok('a closed window no longer blocks a quote: WhatsApp is usable and ticked, there is no Reopen step, and the box shows the approved template\'s fixed words (read-only) with the right name and quote number');
 
-  await inbound(ph.brian, 'Brian Byrne', { type: 'button', button: { text: 'Go ahead', payload: 'x' } });                      // the CUSTOMER replies
-  await page.waitForFunction(() => /^Available/.test(document.getElementById('qsend-wa-state').textContent));
-  assert.equal(await page.isDisabled('#qsend-wa'), false);
-  await page.check('#qsend-wa'); await page.uncheck('#qsend-em');
+  const mediaBefore = metaState.media.length, docsBefore = docMsgs().length;
   await page.click('#qsend-send'); await waitResults();
   await page.waitForFunction(() => document.querySelector('#qsend-res-list li[data-channel="whatsapp"][data-state="sent"]'));
-  assert.equal(await page.locator('#qsend-res-list li').count(), 1); assert.equal(docMsgs().length, 2);
-  assert.equal((await quote(brian)).status, 'sent'); assert.equal(mailState.raws.length, 1);                                // email was not used for Brian
+  assert.match(await rowText('whatsapp'), /approved quotation template, PDF attached/);
+  assert.equal(docMsgs().length, docsBefore);                                                                                 // no free-form document: Meta would refuse it
+  const tm = tmplMsgs(); assert.equal(tm.length, 1);
+  assert.deepEqual([tm[0].to, tm[0].template.name, tm[0].template.language.code], [ph.brian, 'elite_kitchens_quote_document', 'en']);
+  const hdr = tm[0].template.components.find((c) => c.type === 'header').parameters[0].document, stored = await storedPdf(brian);
+  assert.equal(metaState.media.length, mediaBefore + 1); assert.ok(metaState.media.at(-1).bytes.equals(stored), 'the PDF in the template header is the stored PDF');
+  assert.equal(hdr.id, 'UPMEDIA' + metaState.media.length); assert.equal(hdr.filename, `EliteKitchens-${bref}-v1.pdf`);
+  assert.deepEqual(tm[0].template.components.find((c) => c.type === 'body').parameters.map((p) => p.text), ['Brian', bref]);
+  const bd = (await deliveries(brian))[0]; assert.deepEqual([bd.state, bd.route, (await quote(brian)).status], ['sent', 'template', 'sent']);
+  assert.equal(mailState.raws.length, 1);                                                                                     // email was not used for Brian
   await page.click('#qsend-res-close');
-  ok('when the customer replies the dialog unlocks WhatsApp by itself (it never closes); sending then goes by WhatsApp only');
+  await page.evaluate((p) => { location.hash = '#c/' + p; }, ph.brian);
+  await page.waitForFunction(() => document.querySelectorAll('#msgs .m.out .quote-chip').length === 1);
+  assert.match(await page.textContent('#msgs'), /as discussed, please find attached your Elite Kitchens quotation/);
+  assert.equal(await page.isVisible('#window-note'), true); assert.equal(await page.isVisible('#tpl-btn'), true);              // the chat still says the window is closed: a template does not open it, and Reopen is still there for ordinary chats
+  assert.match(await page.textContent('#tpl-btn'), /Reopen conversation/);
+  ok('the template goes to Meta with the stored PDF as its header and the right first name and quote number, one message, no free-form document; the quote is Sent, the chat shows it labelled, and the closed-window band with Reopen conversation is unchanged');
+
+  await inbound(ph.brian, 'Brian Byrne', { type: 'button', button: { text: 'I have a question', payload: 'x' } });             // the CUSTOMER taps the template's button
+  await page.waitForFunction(() => document.getElementById('window-note').hidden);
+  ok('the customer tapping the template\'s "I have a question" button is their reply: it opens the 24-hour window, as for any reply');
 
   // ======================================== one channel fails, the other succeeds: retry only the failed one =======================
   reset(); metaState.mode = 'refuse';
@@ -317,12 +328,21 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   ok('a customer with no email address: email is disabled with the reason; a page refresh in the middle of a send neither loses nor repeats it: the quote shows what happened');
   reset();
 
-  // ======================================== nothing available, and the fallbacks =====================================================
+  // ======================================== nothing available (template route switched off), and the fallbacks ======================
+  // With no quotation template configured (the setting is left blank) a closed window is refused exactly as in M3: the browser is told so
+  // by the "which channels?" answer, which is changed here to say template: false. A reload makes the page ask again.
+  const reapply = async () => { await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { window.open = (u) => { window.__opened(String(u)); return null; }; }); };
+  await ctx.route('**/quoteChannels', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const r = await route.fetch(), body = await r.json(); body.result.whatsapp.template = false; await route.fulfill({ response: r, json: body });
+  });
+  await page.reload(); await reapply();
   const dan = await makeQuote(ph.dan);
   await openDialog(dan);
   assert.equal(await page.isDisabled('#qsend-wa'), true); assert.equal(await page.isDisabled('#qsend-em'), true);
   assert.match(await page.textContent('#qsend-via-note'), /Neither channel can be used right now/); assert.equal(await page.isDisabled('#qsend-send'), true);
   assert.match(await page.textContent('#qsend-em-state'), /No email address/); assert.equal(await page.isVisible('#qsend-wa-reopen'), true);
+  assert.match(await page.textContent('#qsend-wa-state'), /^24-hour window closed: WhatsApp only allows an approved template until the customer replies\.$/);
   const msgsBefore = docMsgs().length, mailBefore = mailState.raws.length;
   await page.click('#qsend-go'); await page.waitForSelector('#qsend-done:not([hidden])', { timeout: 90000 });
   assert.match(await page.textContent('#qsend-done-text'), /EK-\d+ v1 is marked sent/);
@@ -331,6 +351,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   assert.deepEqual([docMsgs().length, mailState.raws.length], [msgsBefore, mailBefore]);                                    // nothing went out through a channel
   await page.click('#qsend-close');
   await page.waitForFunction(() => /Marked sent: no channel recorded/.test(document.querySelector('.qv-versions').textContent));
+  await ctx.unroute('**/quoteChannels'); await page.reload(); await reapply();
   ok('with no channel available the dialog says so and explains how to fix it; "send it yourself" (Phase 6\'s way) still makes the PDF and marks it sent, and the history says no channel was recorded');
 
   // ======================================== re-sending a version; a revision keeps the old PDF ======================================
@@ -370,11 +391,25 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   await openDialog(closing);
   assert.equal(await page.isChecked('#qsend-wa'), true);
   await db.doc('conversations/' + ph.eva).update({ lastInboundAt: Timestamp.fromMillis(Date.now() - 30 * H) });
-  await page.waitForFunction(() => /24-hour window closed/.test(document.getElementById('qsend-wa-state').textContent));
-  assert.equal(await page.isChecked('#qsend-wa'), false); assert.equal(await page.isVisible('#qsend-wa-reopen'), true);
-  const g = docMsgs().length; await page.click('#qsend-cancel');
-  assert.equal(docMsgs().length, g);
-  ok('if the 24-hour window closes while the dialog is open it says so at once, un-ticks WhatsApp and offers Reopen (the server also re-checks at send time)');
+  await page.waitForFunction(() => /approved quotation template/.test(document.getElementById('qsend-wa-state').textContent));
+  assert.equal(await page.isChecked('#qsend-wa'), true); assert.equal(await page.isVisible('#qsend-wa-reopen'), false);
+  assert.equal(await page.locator('#qsend-wa-text').isEditable(), false); assert.match(await page.inputValue('#qsend-wa-text'), /^Hi Eva, as discussed, please find attached your Elite Kitchens quotation /);
+  const g = tmplMsgs().length, gd = docMsgs().length; await page.click('#qsend-send'); await waitResults();
+  await page.waitForFunction(() => document.querySelector('#qsend-res-list li[data-channel="whatsapp"][data-state="sent"]'));
+  assert.deepEqual([tmplMsgs().length, docMsgs().length], [g + 1, gd]); assert.equal((await deliveries(closing))[0].route, 'template');
+  await page.click('#qsend-res-close');
+  ok('if the 24-hour window closes while the dialog is open the box switches to the approved template\'s words at once (WhatsApp stays ticked, no Reopen), and Send then goes out as the template (the server also re-decides at send time)');
+
+  // ======================================== the customer replies while the dialog is open ===========================================
+  const hal = await makeQuote(ph.hal);
+  await openDialog(hal);
+  assert.equal(await page.locator('#qsend-wa-text').isEditable(), false);
+  await inbound(ph.hal, 'Hal Hogan', { type: 'text', text: { body: 'Hello?' } });
+  await page.waitForFunction(() => /^Available/.test(document.getElementById('qsend-wa-state').textContent));
+  assert.equal(await page.locator('#qsend-wa-text').isEditable(), true); assert.match(await page.inputValue('#qsend-wa-text'), /^Hi Hal, please find attached your quotation /);
+  assert.match(await page.textContent('#qsend-wa-note'), /sent with the PDF/);
+  await page.click('#qsend-cancel');
+  ok('if the customer replies while the dialog is open the box becomes the editable caption again, with the usual wording');
 
   // ======================================== phone ====================================================================================
   const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, isMobile: true, hasTouch: true });

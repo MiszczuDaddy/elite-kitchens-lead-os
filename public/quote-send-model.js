@@ -19,10 +19,16 @@
 
   // ---------------------------------------------------------------- which channels can be used ----------------------------------
   // conv: the customer's conversation (or null). reopenMsg: the stored message of conv.reopen.wamid, if any (its delivery status).
-  function whatsappState(conv, nowMs, reopenMsg) {
+  // template (Phase 6.1 M7): does the server have the approved quotation template? true: a closed window is no obstacle (the quote goes out
+  // in the template, PDF attached: no Reopen needed); false or left out: a closed window cannot take a quote (the M3 rules); null: not known yet.
+  // route: how the server will send it if nothing changes: 'document' (the staff's own words) or 'template' (fixed words). The server
+  // decides again at the moment of sending.
+  function whatsappState(conv, nowMs, reopenMsg, template) {
     if (!conv) return { state: 'none', usable: false, text: 'No WhatsApp conversation with this customer yet.' };
     const w = WS.windowStatus(conv, nowMs, reopenMsg || null);
-    if (w.state === 'open') return { state: 'open', usable: true, text: `Available: the customer messaged recently (open until ${hhmm(w.openUntil)}).` };
+    if (w.state === 'open') return { state: 'open', usable: true, route: 'document', text: `Available: the customer messaged recently (open until ${hhmm(w.openUntil)}).` };
+    if (template === null) return { state: 'checking', usable: false, text: 'Checking…' };
+    if (template) return { state: 'template', usable: true, route: 'template', text: '24-hour window closed: WhatsApp only allows an approved template now, so the quote is sent with the approved quotation template, PDF attached. The customer can reply to it.' };
     const name = conv.name ? conv.name : 'the customer';
     if (w.state === 'awaiting') {
       return { state: 'awaiting', usable: false, canReopen: false,
@@ -41,7 +47,7 @@
     if (!EMAIL_RE.test(e)) return { state: 'bad_email', usable: false, text: 'The email address does not look right: correct it in the customer\'s Details.' };
     return { state: 'ready', usable: true, text: `Available: ${e}` };
   }
-  const channelStates = ({ conv, contact, mail, nowMs, reopenMsg }) => ({ whatsapp: whatsappState(conv, nowMs, reopenMsg), email: emailState(contact, mail) });
+  const channelStates = ({ conv, contact, mail, nowMs, reopenMsg, template }) => ({ whatsapp: whatsappState(conv, nowMs, reopenMsg, template), email: emailState(contact, mail) });
   // One channel by default: WhatsApp when it can be used, else email, else none. Both only if staff tick both.
   const defaultChannels = (states) => (states.whatsapp.usable ? ['whatsapp'] : states.email.usable ? ['email'] : []);
 
@@ -49,6 +55,8 @@
   const refLabel = (ref, n) => (n > 1 ? `${ref} v${n}` : ref);
   // The approved default: "Hi {first name}, please find attached your quotation {EK-0104} from Elite Kitchens. Any questions, just reply here."
   const whatsappText = ({ name, ref, version, trading }) => `Hi ${WS.firstName(name)}, please find attached your quotation ${refLabel(ref, version)} from ${trading || 'Elite Kitchens'}. Any questions, just reply here.`;
+  // The words of the approved quotation template (fixed: WhatsApp does not let staff change them), for the closed-window route.
+  const templateText = ({ name, ref, version }) => WS.quoteTemplateText(WS.firstName(name), WS.quoteLabel(ref, version));
   // Phase 6's email wording, unchanged. wording: QuoteDocument.wording(project): { quote, subject }.
   const emailSubject = ({ trading, wording, ref, version }) => `${trading} — ${wording.subject} ${ref} v${version}`;
   function emailText({ name, ref, version, trading, wording, options, validityDays, business }) {
@@ -67,7 +75,8 @@
   const effective = (d, nowMs) => (d.state === 'sending' && ms(d.claimedAt) != null && nowMs - ms(d.claimedAt) > STUCK_MS ? 'unknown' : d.state);
   function describe(d, nowMs) {
     const name = CHANNEL_NAME[d.channel] || d.channel, st = effective(d, nowMs), at = ms(d.sentAt), err = d.error && d.error.text;
-    if (st === 'sent') return { state: st, mark: '✓', tone: 'ok', title: d.channel === 'manual' ? 'Marked sent by hand' : `${name}: sent${at ? ' ' + dayTime(at) : ''}`, detail: d.resolvedBy && d.channel !== 'manual' ? 'Confirmed by staff.' : '', actions: [] };
+    if (st === 'sent') return { state: st, mark: '✓', tone: 'ok', title: d.channel === 'manual' ? 'Marked sent by hand' : `${name}: sent${at ? ' ' + dayTime(at) : ''}`,
+      detail: [d.route === 'template' ? 'Sent with the approved quotation template, PDF attached (WhatsApp does not allow your own wording after 24 hours).' : '', d.resolvedBy && d.channel !== 'manual' ? 'Confirmed by staff.' : ''].filter(Boolean).join(' '), actions: [] };
     if (st === 'failed') return { state: st, mark: '✕', tone: 'bad', title: `${name}: failed`, detail: err || 'It was not sent.', actions: ['retry'] };
     if (st === 'unknown') return { state: st, mark: '?', tone: 'warn', title: `${name}: delivery not confirmed`,
       detail: (err || 'We could not tell whether it was delivered.') + ' It will not be sent again by itself.', actions: ['arrived', 'not_arrived'] };
@@ -89,5 +98,5 @@
     return { sent: false, text: 'Not sent: nothing reached the customer, and the quote is not marked sent. Retry, or send it yourself.' };
   }
 
-  return { CHANNEL_NAME, whatsappState, emailState, channelStates, defaultChannels, refLabel, whatsappText, emailSubject, emailText, describe, effective, summarize, byChannel, hhmm, dayTime, STUCK_MS };
+  return { CHANNEL_NAME, whatsappState, emailState, channelStates, defaultChannels, refLabel, whatsappText, templateText, emailSubject, emailText, describe, effective, summarize, byChannel, hhmm, dayTime, STUCK_MS };
 });

@@ -334,10 +334,11 @@ const resolveQuoteDelivery = quoteAction(delivery.resolve);
 const cancelQuoteSend = quoteAction(delivery.cancelSend);
 const markQuoteSent = quoteAction(delivery.markSent);
 
-// What a browser cannot see about the channels: whether email sending is switched on (the Send dialog shows it before staff press Send).
+// What a browser cannot see about the channels: whether email sending is switched on, and whether a closed WhatsApp window can still
+// take a quote through the approved template (the Send dialog shows both before staff press Send).
 async function quoteChannels(auth, data, deps) {
   assertStaff(auth, deps.cfg);
-  return { whatsapp: { enabled: true }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
+  return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
 module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,

@@ -126,3 +126,54 @@ test('the summary after sending: sent as soon as ONE channel confirmed; unconfir
   assert.equal(s('unknown', 'sent').sent, true);                                                // the other channel confirmed: the quote is sent, the unsure one stays unsure
   assert.deepEqual([{ channel: 'email' }, { channel: 'whatsapp' }, { channel: 'manual' }].sort(M.byChannel).map((x) => x.channel), ['whatsapp', 'email', 'manual']);
 });
+
+// ============================================================== M7: a closed window takes the quote in the approved template ==========
+test('WhatsApp with the quotation template: a closed window (or one waiting for a Reopen reply) IS usable, by template, with no Reopen needed', () => {
+  const closed = conv({ lastInboundAt: ts(NOW - 30 * H) });
+  const s = M.whatsappState(closed, NOW, null, true);
+  assert.deepEqual([s.state, s.usable, s.route, s.canReopen], ['template', true, 'template', undefined]);
+  assert.match(s.text, /24-hour window closed.*approved quotation template, PDF attached.*customer can reply/);
+  assert.ok(!/reopen/i.test(s.text));
+  const reopen = { state: 'sent', sentAt: ts(NOW - 5 * MIN), claimedAt: ts(NOW - 5 * MIN), wamid: 'w' };
+  const waiting = M.whatsappState(conv({ lastInboundAt: ts(NOW - 30 * H), reopen }), NOW, { status: 'sent' }, true);
+  assert.deepEqual([waiting.state, waiting.usable, waiting.route], ['template', true, 'template']);
+  const never = M.whatsappState({ name: 'Walk In' }, NOW, null, true);                                  // never messaged: a template can still start the conversation
+  assert.deepEqual([never.state, never.usable, never.route], ['template', true, 'template']);
+  assert.deepEqual([M.whatsappState(null, NOW, null, true).state, M.whatsappState(null, NOW, null, true).usable], ['none', false]);   // but no conversation at all: still no
+});
+
+test('WhatsApp: an OPEN window always sends the staff\'s own words as a normal document; the template flag changes nothing there', () => {
+  for (const t of [true, false, null, undefined]) {
+    const s = M.whatsappState(conv(), NOW, null, t);
+    assert.deepEqual([s.state, s.usable, s.route], ['open', true, 'document']);
+  }
+});
+
+test('WhatsApp without the template (switched off, or the answer unknown): exactly the M3 rules, or "Checking…" while it is not known', () => {
+  const closed = conv({ lastInboundAt: ts(NOW - 30 * H) });
+  for (const t of [false, undefined]) {
+    const s = M.whatsappState(closed, NOW, null, t);
+    assert.deepEqual([s.state, s.usable, s.canReopen, s.route], ['closed', false, true, undefined]);
+  }
+  const unknown = M.whatsappState(closed, NOW, null, null);
+  assert.deepEqual([unknown.state, unknown.usable, unknown.text], ['checking', false, 'Checking…']);
+  assert.equal(M.channelStates({ conv: closed, contact: {}, mail: { enabled: false }, nowMs: NOW, template: true }).whatsapp.state, 'template');
+  assert.equal(M.channelStates({ conv: closed, contact: {}, mail: { enabled: false }, nowMs: NOW }).whatsapp.state, 'closed');
+  assert.deepEqual(M.defaultChannels(M.channelStates({ conv: closed, contact: { email: 'a@example.com' }, mail: { enabled: true }, nowMs: NOW, template: true })), ['whatsapp']);   // WhatsApp is the default again
+});
+
+test('the approved template\'s words: the first name, the quote number (version after v1), and the same text as the server records', () => {
+  assert.equal(M.templateText({ name: 'Anna Murphy', ref: 'EK-0104', version: 1 }), 'Hi Anna, as discussed, please find attached your Elite Kitchens quotation EK-0104. If you have any questions or would like to make any changes, just reply here.');
+  assert.match(M.templateText({ name: 'Anna Murphy', ref: 'EK-0104', version: 2 }), /quotation EK-0104 v2\./);
+  assert.match(M.templateText({ name: '+353 85 111 1111', ref: 'EK-0104', version: 1 }), /^Hi there,/);
+  assert.equal(M.templateText({ name: 'Anna', ref: 'EK-1', version: 1 }), require('../lib/windowState').quoteTemplateText('Anna', 'EK-1'));
+});
+
+test('a delivery that went by template says so in plain words, and a normal one does not', () => {
+  const sent = { channel: 'whatsapp', state: 'sent', sentAt: ts(NOW) };
+  const t = M.describe({ ...sent, route: 'template' }, NOW);
+  assert.deepEqual([t.state, t.mark, t.tone], ['sent', '✓', 'ok']);
+  assert.match(t.detail, /approved quotation template, PDF attached.*does not allow your own wording after 24 hours/);
+  assert.equal(M.describe({ ...sent, route: 'document' }, NOW).detail, ''); assert.equal(M.describe(sent, NOW).detail, '');
+  assert.match(M.describe({ ...sent, route: 'template', resolvedBy: 'staff' }, NOW).detail, /template.*Confirmed by staff\./);
+});

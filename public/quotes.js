@@ -806,7 +806,9 @@ window.QUOTES = (() => {
 
   // --- which channels can be used, and why not (the logic is quote-send-model.js; this only draws it) ---
   async function loadChannelInfo(d) {
-    try { if (!Q.mailInfo) Q.mailInfo = ((await call('quoteChannels')({})).data || {}).email || { enabled: false }; } catch (e) { Q.mailInfo = { enabled: false }; }
+    try {
+      if (!Q.mailInfo) { const r = (await call('quoteChannels')({})).data || {}; Q.mailInfo = r.email || { enabled: false }; Q.waInfo = r.whatsapp || { enabled: true, template: false }; }
+    } catch (e) { Q.mailInfo = { enabled: false }; Q.waInfo = { enabled: true, template: false }; }
     await loadReopenMsg(d);
     if (sendDlg() === d) renderChannels(false);
   }
@@ -816,7 +818,7 @@ window.QUOTES = (() => {
     try { const m = await db.collection('conversations').doc(d.q.phone).collection('messages').doc(w).get(); d.reopenMsg = m.exists ? m.data() : null; } catch (e) { d.reopenMsg = null; }
   }
   function channelStatesNow(d) {
-    return QuoteSend.channelStates({ conv: d.conv, contact: d.contactDoc, mail: Q.mailInfo || null, nowMs: Date.now(), reopenMsg: d.reopenMsg });
+    return QuoteSend.channelStates({ conv: d.conv, contact: d.contactDoc, mail: Q.mailInfo || null, nowMs: Date.now(), reopenMsg: d.reopenMsg, template: Q.waInfo ? !!Q.waInfo.template : null });
   }
   const ticked = () => ['whatsapp', 'email'].filter((c) => $(c === 'whatsapp' ? 'qsend-wa' : 'qsend-em').checked);
   function renderChannels(first) {
@@ -833,6 +835,19 @@ window.QUOTES = (() => {
       $(box).hidden = !$(cb).checked;
     }
     const wa = st.whatsapp;
+    // The message box follows the route. Window open: the staff's own caption (editable). Window closed with the approved template: the
+    // template's fixed words, read-only, because WhatsApp does not let them be changed. If the customer replies while the dialog is
+    // open, the box goes back to the caption staff had (or the default). The server decides again at the moment of sending.
+    const box = $('qsend-wa-text');
+    if (wa.route === 'template') {
+      if (d.waRoute !== 'template') d.waCaption = box.value;
+      box.value = QuoteSend.templateText({ name: d.ctx.customer.name, ref: d.q.ref, version: d.n }); box.readOnly = true;
+      $('qsend-wa-note').textContent = '(the fixed words of the approved quotation template, with the PDF attached)';
+    } else if (wa.route === 'document') {
+      if (d.waRoute === 'template') box.value = d.waCaption != null ? d.waCaption : d.defaults.whatsapp;
+      box.readOnly = false; $('qsend-wa-note').textContent = '(sent with the PDF)';
+    }
+    if (wa.route) d.waRoute = wa.route;
     $('qsend-wa-reopen').hidden = !(wa.state === 'closed' && wa.canReopen);
     $('qsend-wa-reopen').dataset.off = $('qsend-wa-reopen').hidden ? '1' : '0';
     const any = ticked().length > 0;

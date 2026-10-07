@@ -5,7 +5,8 @@
 //
 // WhatsApp (M3) is built on the EXISTING WhatsApp client (whatsapp.js) and conversation records: no second WhatsApp system. The
 // server re-checks the 24-hour window at send time (never trusting the browser's idea of it), uploads the stored PDF as it is, and
-// sends ONE document message with the text as its caption. Delivery ticks come through the existing webhook.
+// sends ONE document message with the text as its caption. Delivery ticks come through the existing webhook. (M7) When the window is
+// closed it sends the same stored PDF inside the approved quotation template instead, so a quote never waits for a Reopen reply.
 const store = require('./store');
 const WS = require('./windowState');
 const { ChannelError, NOT_CONFIRMED } = require('./quoteDelivery');
@@ -18,20 +19,27 @@ const WINDOW_CLOSED = 'The 24-hour WhatsApp window is closed. Reopen the convers
 const AWAITING = 'A Reopen template was sent but the customer has not replied yet, so WhatsApp does not allow this message. Try again after they reply.';
 
 // A refusal from Meta, in plain words. 131047 is "more than 24 hours since the customer last replied": the window closed after
-// our own check (or the customer's clock and ours differ by a moment).
-function refusalText(e) {
+// our own check (or the customer's clock and ours differ by a moment). `what` is what we were sending.
+function refusalText(e, what = 'document') {
   const code = e && e.code;
   if (code === 131047) return WINDOW_CLOSED;
   if (code && FRIENDLY[code]) return `${FRIENDLY[code]} (code ${code})`;
-  return code ? `WhatsApp refused the document (code ${code}).` : 'WhatsApp is not set up to send documents.';
+  return code ? `WhatsApp refused the ${what} (code ${code}).` : `WhatsApp is not set up to send ${what === 'document' ? 'documents' : 'this template'}.`;
 }
-function metaError(e) {
-  if (e && e.definite === true) return new ChannelError(refusalText(e), { code: String((e && e.code) || 'refused'), definite: true });
+function metaError(e, what) {
+  if (e && e.definite === true) return new ChannelError(refusalText(e, what), { code: String((e && e.code) || 'refused'), definite: true });
   return new ChannelError(NOT_CONFIRMED, { code: 'not_confirmed', definite: false });          // 5xx, no message id, network failure, timeout
 }
 
-// cfg: { db, bucket, wa } and, for tests, now() and timeoutMs.
-function whatsappChannel({ db, bucket, wa, now = Date.now, timeoutMs = SEND_TIMEOUT_MS }) {
+// Which way a quote may go to WhatsApp RIGHT NOW (Phase 6.1 M7). The server decides at send time and never trusts the browser:
+//   window open    -> 'document': one document message, the staff's own text as its caption (M3)
+//   window closed  -> 'template': the approved quotation template with the exact stored PDF as its Document header, so a quote never
+//                     has to wait for a Reopen reply. Only when a template is configured: without one a closed window is refused (M3).
+// A Reopen template waiting for a reply changes nothing here: the window is still closed.
+//
+// cfg: { db, bucket, wa, quoteTemplate: { name, lang } | null } and, for tests, now() and timeoutMs.
+function whatsappChannel({ db, bucket, wa, quoteTemplate = null, now = Date.now, timeoutMs = SEND_TIMEOUT_MS }) {
+  const hasTemplate = !!(quoteTemplate && quoteTemplate.name && quoteTemplate.lang);
   return {
     id: 'whatsapp',
     maxMessage: 1024,                                                       // WhatsApp's limit for a document caption
@@ -41,11 +49,15 @@ function whatsappChannel({ db, bucket, wa, now = Date.now, timeoutMs = SEND_TIME
       if (!conv) return { ok: false, code: 'no_conversation', text: 'This customer has no WhatsApp conversation yet. Start one first.' };
       const w = conv.reopen && conv.reopen.wamid ? (await db.collection('conversations').doc(ctx.phone).collection('messages').doc(conv.reopen.wamid).get()) : null;
       const st = WS.windowStatus(conv, now(), w && w.exists ? w.data() : null);
-      if (st.state === 'open') return { ok: true };
+      if (st.state === 'open') return { ok: true, route: 'document' };
+      if (hasTemplate) return { ok: true, route: 'template' };
       return st.state === 'awaiting' ? { ok: false, code: 'awaiting_reply', text: AWAITING } : { ok: false, code: 'window_closed', text: WINDOW_CLOSED };
     },
 
-    async send(ctx) {
+    // check: what check() just returned (the route). Returns { providerId, route, message }: what was really sent, which can differ
+    // from what staff typed (a template has fixed words).
+    async send(ctx, check) {
+      const first = WS.firstName(ctx.customerName), label = WS.quoteLabel(ctx.quoteRef, ctx.version);
       // 1. hand WhatsApp the exact stored PDF. Nothing reaches the customer at this step, so any failure here is definite.
       let mediaId;
       try { mediaId = await wa.uploadMedia(ctx.pdf.bytes, 'application/pdf', ctx.filename, { timeoutMs }); }
@@ -53,30 +65,44 @@ function whatsappChannel({ db, bucket, wa, now = Date.now, timeoutMs = SEND_TIME
         log('warn', 'quote pdf upload to WhatsApp failed', { code: (e && e.code) || null });
         throw new ChannelError(`WhatsApp could not take the PDF${e && e.code ? ` (code ${e.code})` : ''}. Nothing was sent.`, { code: 'upload_failed', definite: true });
       }
-      // 2. the message itself: one document with the text as its caption
-      let wamid;
-      try { wamid = await wa.sendMedia(ctx.phone, 'document', mediaId, { caption: ctx.message, filename: ctx.filename }, { timeoutMs }); }
-      catch (e) { throw metaError(e); }
+      // 2. the message itself
+      const asTemplate = () => wa.sendTemplateWithDocument(ctx.phone, { name: quoteTemplate.name, lang: quoteTemplate.lang, mediaId, filename: ctx.filename, params: [first, label] }, { timeoutMs });
+      let wamid, route = (check && check.route) || 'document', text = ctx.message;
+      try {
+        if (route === 'template' && hasTemplate) wamid = await asTemplate();
+        else {
+          route = 'document';
+          try { wamid = await wa.sendMedia(ctx.phone, 'document', mediaId, { caption: ctx.message, filename: ctx.filename }, { timeoutMs }); }
+          catch (e) {
+            // 131047: Meta refused the free-form document because the window closed after our check. A refusal means nothing was
+            // sent, so the approved template is the right way now (the same exact PDF, already uploaded): no resend, no second message.
+            if (hasTemplate && e && e.definite === true && e.code === 131047) { route = 'template'; wamid = await asTemplate(); }
+            else throw e;
+          }
+        }
+      } catch (e) { throw metaError(e, route === 'template' ? 'quotation template' : 'document'); }
+      if (route === 'template') text = WS.quoteTemplateText(first, label);
       // 3. show it in the chat. Meta has accepted the message, so a problem here must never turn the success into a failure.
-      try { await recordInChat({ db, bucket }, ctx, wamid, mediaId); }
+      try { await recordInChat({ db, bucket }, ctx, wamid, mediaId, text, route); }
       catch (e) { log('error', 'quote document chat record failed', { wamid, kind: String((e && e.name) || 'Error') }); }
-      return { providerId: wamid };
+      return { providerId: wamid, route, message: text };
     },
   };
 }
 
 // The outgoing document in the existing conversation, labelled with the quote. The chat keeps its own copy of the PDF under
-// media/ so the existing media viewing, retention and erasure code is used unchanged; the quote keeps the original.
-async function recordInChat({ db, bucket }, ctx, wamid, mediaId) {
+// media/ so the existing media viewing, retention and erasure code is used unchanged; the quote keeps the original. `text` is
+// what the customer was actually sent (the caption, or the template's words).
+async function recordInChat({ db, bucket }, ctx, wamid, mediaId, text, route) {
   const finalPath = `media/${ctx.phone}/${wamid}/${ctx.filename}`;
-  let media = { mimeType: 'application/pdf', filename: ctx.filename, size: ctx.pdf.size, caption: ctx.message || null, storagePath: finalPath, status: 'stored', waMediaId: mediaId, sha256: ctx.pdf.sha256 };
+  let media = { mimeType: 'application/pdf', filename: ctx.filename, size: ctx.pdf.size, caption: text || null, storagePath: finalPath, status: 'stored', waMediaId: mediaId, sha256: ctx.pdf.sha256 };
   try { await bucket.file(ctx.pdf.path).copy(bucket.file(finalPath)); }
   catch (e) {
     log('error', 'quote document chat copy failed', { wamid });
     media = { ...media, storagePath: null, status: 'failed', error: 'The copy for this chat could not be made. The PDF is still on the quote.' };
   }
-  await store.storeOutbound(db, ctx.phone, { wamid, type: 'document', body: ctx.message || '[document]', media,
-    extra: { quote: { id: ctx.quoteId, ref: ctx.quoteRef, version: ctx.version, deliveryId: ctx.deliveryId } } });
+  await store.storeOutbound(db, ctx.phone, { wamid, type: 'document', body: text || '[document]', media,
+    extra: { quote: { id: ctx.quoteId, ref: ctx.quoteRef, version: ctx.version, deliveryId: ctx.deliveryId, ...(route === 'template' ? { template: true } : {}) } } });
 }
 
 // ================================================ Email (M4): the Gmail API, as info@elitekitchens.ie ============================

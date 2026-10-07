@@ -143,6 +143,11 @@ exports.reopenConversation = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 6
 // are set (the kill switch, like GCAL_SYNC). In the emulator, MAIL_API_BASE points at a local fake Gmail. Nothing above is touched.
 const quoteChannelLib = require('./lib/quoteChannels');
 const gmailLib = require('./lib/gmail');
+// The approved quotation template (M7): used instead of a free-form document when the customer's 24-hour window is closed. A blank name
+// switches that route off (a closed window is then refused, as in M3).
+const QUOTE_TEMPLATE = defineString('WHATSAPP_QUOTE_TEMPLATE_NAME', { default: 'elite_kitchens_quote_document' });
+const QUOTE_TEMPLATE_LANG = defineString('WHATSAPP_QUOTE_TEMPLATE_LANG', { default: 'en' });
+const quoteTemplate = () => { const name = QUOTE_TEMPLATE.value().trim(), lang = QUOTE_TEMPLATE_LANG.value().trim(); return name && lang ? { name, lang } : null; };
 const MAIL_SEND = defineString('MAIL_SEND', { default: 'off' });
 const MAIL_SENDER = defineString('MAIL_SENDER', { default: '' });
 const MAIL_SERVICE_ACCOUNT = defineString('MAIL_SERVICE_ACCOUNT', { default: '' });
@@ -162,11 +167,11 @@ function mailChannel() {
 const deliveryDeps = () => {
   const db = getFirestore(), bucket = getStorage().bucket(bucketName());
   const wa = createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim() });
-  return { db, bucket, cfg: { allowedEmails: ALLOWED_EMAILS.value() }, channels: { whatsapp: quoteChannelLib.whatsappChannel({ db, bucket, wa }), email: mailChannel().channel } };
+  return { db, bucket, cfg: { allowedEmails: ALLOWED_EMAILS.value() }, channels: { whatsapp: quoteChannelLib.whatsappChannel({ db, bucket, wa, quoteTemplate: quoteTemplate() }), email: mailChannel().channel } };
 };
 exports.deliverQuote = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 180, memory: '512MiB' }, (req) => h.deliverQuote(req.auth, req.data, deliveryDeps()));
 exports.retryQuoteDelivery = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 180, memory: '512MiB' }, (req) => h.retryQuoteDelivery(req.auth, req.data, deliveryDeps()));
 exports.resolveQuoteDelivery = onCall({}, (req) => h.resolveQuoteDelivery(req.auth, req.data, quoteDeps()));
 exports.cancelQuoteSend = onCall({}, (req) => h.cancelQuoteSend(req.auth, req.data, quoteDeps()));
 exports.markQuoteSent = onCall({}, (req) => h.markQuoteSent(req.auth, req.data, quoteDeps()));
-exports.quoteChannels = onCall({}, (req) => { const m = mailChannel(); return h.quoteChannels(req.auth, req.data, { ...quoteDeps(), mailEnabled: m.enabled, mailSender: m.sender }); });
+exports.quoteChannels = onCall({}, (req) => { const m = mailChannel(); return h.quoteChannels(req.auth, req.data, { ...quoteDeps(), mailEnabled: m.enabled, mailSender: m.sender, quoteTemplate: !!quoteTemplate() }); });

@@ -77,7 +77,9 @@ function cleanSubject(data) {
 const defaultSubject = (ctx) => `${(ctx.business && ctx.business.tradingName) || 'Elite Kitchens'} — Quote ${ctx.q.ref} v${ctx.n}`;
 function newDelivery(ctx, channel, message, actor, subject) {
   return { quoteId: ctx.ref.id, phone: ctx.q.phone, version: ctx.n, channel, requestId: ctx.requestId, state: 'queued', attempts: 0, attemptId: null, message,
-    to: channel === 'email' ? { email: ctx.customer.email || null } : null, subject: channel === 'email' ? (subject || defaultSubject(ctx)) : null,
+    to: channel === 'email' ? { email: ctx.customer.email || null } : null,
+    subject: channel === 'email' ? (subject || defaultSubject(ctx)) : null,
+    ...(channel === 'whatsapp' ? { customerName: ctx.customer.name || null } : {}),                  // M7: the name for the quotation template's first word (kept for a retry)
     pdf: ctx.pdf, provider: null, error: null, claimedAt: null, sentAt: null, failedAt: null,
     resolvedBy: null, history: [entry({ now: ctx.now, actor }, { event: 'queued' })], createdAt: ctx.now, createdBy: actor, updatedAt: ctx.now };
 }
@@ -121,12 +123,12 @@ async function attempt(deps, actor, id, did, { nowMs, retry = false, message = n
   try {
     if (!adapter) throw new ChannelError('That way of sending is not available.', { code: 'unavailable', definite: true });
     const pdf = await readPdf(bucket, claim.d.pdf);
-    const ctx = { quoteId: id, quoteRef: claim.quoteRef, version: claim.d.version, channel, phone: claim.phone, to: claim.d.to, message: claim.d.message, subject: claim.d.subject || null,
+    const ctx = { quoteId: id, quoteRef: claim.quoteRef, version: claim.d.version, channel, phone: claim.phone, to: claim.d.to, customerName: claim.d.customerName || null, message: claim.d.message, subject: claim.d.subject || null,
       requestId: claim.d.requestId, deliveryId: did, attempt: claim.attempt, pdf, filename: `EliteKitchens-${claim.quoteRef}-v${claim.d.version}.pdf` };
     const check = adapter.check ? await adapter.check(ctx) : null;
     if (check && check.ok === false) throw new ChannelError(check.text || 'This cannot be sent.', { code: check.code || 'not_possible', definite: true });
-    const r = await adapter.send(ctx);
-    outcome = { state: 'sent', providerId: (r && r.providerId) || null };
+    const r = await adapter.send(ctx, check);
+    outcome = { state: 'sent', providerId: (r && r.providerId) || null, route: (r && r.route) || null, message: (r && r.message) || null };
   } catch (e) {
     outcome = classify(e);
     // Codes only: an unexpected error's own message could hold anything (a name, a number, the text), so only its kind is logged.
@@ -146,7 +148,7 @@ async function attempt(deps, actor, id, did, { nowMs, retry = false, message = n
       const st = outcome.state === 'sent' ? await quotes.readState(tx, db, id, d.version) : null;     // all reads first
       const now = at(nowMs), ev = entry({ now, actor }, { event: outcome.state, attempt: claim.attempt, ...(outcome.error ? { code: outcome.error.code } : {}) });
       tx.update(dRef, outcome.state === 'sent'
-        ? { state: 'sent', sentAt: now, provider: { id: outcome.providerId }, error: null, history: capped(d.history, ev, HISTORY_MAX), updatedAt: now }
+        ? { state: 'sent', sentAt: now, provider: { id: outcome.providerId }, error: null, ...(outcome.route ? { route: outcome.route } : {}), ...(outcome.message ? { message: outcome.message } : {}), history: capped(d.history, ev, HISTORY_MAX), updatedAt: now }
         : { state: outcome.state, ...(outcome.state === 'failed' ? { failedAt: now } : {}), error: outcome.error, history: capped(d.history, ev, HISTORY_MAX), updatedAt: now });
       if (st) committed = quotes.commitPrepared(tx, st, actor, nowMs, d.requestId, d.channel);
     });
@@ -165,7 +167,7 @@ async function summary(deps, id, requestId, nowMs, extra = {}) {
   if (!qSnap.exists) throw new HttpsError('not-found', 'Quote not found.');                 // erased while it was being sent
   const q = qSnap.data();
   const deliveries = dSnaps.docs.map((d) => ({ id: d.id, ...d.data() })).sort(byChannel).map((d) => ({
-    id: d.id, channel: d.channel, version: d.version, state: effectiveState(d, nowMs), attempts: d.attempts, error: d.error || null, sentAt: ms(d.sentAt) }));
+    id: d.id, channel: d.channel, version: d.version, state: effectiveState(d, nowMs), attempts: d.attempts, error: d.error || null, sentAt: ms(d.sentAt), route: d.route || null }));
   // sent: at least one channel of THIS request has confirmed delivery (for a draft that is exactly when the quote was committed)
   return { ok: true, ...view(ref.id, q), requestId, sent: deliveries.some((d) => d.state === 'sent'), deliveries, ...extra };
 }

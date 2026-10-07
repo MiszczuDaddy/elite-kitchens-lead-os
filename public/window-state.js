@@ -67,5 +67,11 @@
   // this copy is what staff see before sending and in the chat afterwards, so keep it in step with the approved template.
   const reopenText = (first) => `Hi ${first}, it's Elite Kitchens. We have a quick question regarding your project. When you have a moment, please reply here and we'll continue the conversation.`;
 
-  return { WINDOW_MS, REOPEN_CAP_MS, STUCK_MS, isOpen, windowStatus, reopenOutcome, firstName, reopenText };
+  // The approved QUOTATION template (Phase 6.1 M7): a Utility template with the quote PDF as its Document header. Sent when the
+  // 24-hour window is closed, so a quote never has to wait for a Reopen reply. {{1}} is the first name, {{2}} the quote label.
+  // As with reopenText, the real words live at Meta: this copy is what staff see before sending and in the chat afterwards.
+  const quoteLabel = (ref, version) => (version > 1 ? `${ref} v${version}` : ref);
+  const quoteTemplateText = (first, label) => `Hi ${first}, as discussed, please find attached your Elite Kitchens quotation ${label}. If you have any questions or would like to make any changes, just reply here.`;
+
+  return { WINDOW_MS, REOPEN_CAP_MS, STUCK_MS, isOpen, windowStatus, reopenOutcome, firstName, reopenText, quoteLabel, quoteTemplateText };
 });

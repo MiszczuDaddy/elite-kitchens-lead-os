@@ -374,6 +374,7 @@ test('quoteChannels (what the Send dialog asks before staff press Send) is staff
   for (const who of [null, { uid: 'x', token: { email: 'stranger@gmail.com', email_verified: true, staff: true } }, { uid: 'x', token: { email: 'thomas@example.com', email_verified: true } }]) {
     await assert.rejects(h.quoteChannels(who, {}, { ...deps, mailEnabled: true, mailSender: SENDER }), (e) => e.code === 'unauthenticated' || e.code === 'permission-denied');
   }
-  assert.deepEqual(await h.quoteChannels(staff, {}, { ...deps, mailEnabled: true, mailSender: SENDER }), { whatsapp: { enabled: true }, email: { enabled: true, sender: SENDER } });
-  assert.deepEqual(await h.quoteChannels(staff, {}, { ...deps, mailEnabled: false, mailSender: SENDER }), { whatsapp: { enabled: true }, email: { enabled: false, sender: null } });
+  assert.deepEqual(await h.quoteChannels(staff, {}, { ...deps, mailEnabled: true, mailSender: SENDER }), { whatsapp: { enabled: true, template: false }, email: { enabled: true, sender: SENDER } });
+  assert.deepEqual(await h.quoteChannels(staff, {}, { ...deps, mailEnabled: false, mailSender: SENDER }), { whatsapp: { enabled: true, template: false }, email: { enabled: false, sender: null } });
+  assert.deepEqual(await h.quoteChannels(staff, {}, { ...deps, mailEnabled: false, quoteTemplate: true }), { whatsapp: { enabled: true, template: true }, email: { enabled: false, sender: null } });   // M7: a closed window can still take a quote through the approved template
 });

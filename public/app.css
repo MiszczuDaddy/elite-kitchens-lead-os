@@ -797,3 +797,5 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .qv-vnote { margin: 0 0 6px 8px; font-size: 12px; color: var(--muted); }
 .quote-chip { display: inline-block; margin: 0 0 4px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--ink); font-size: 12px; font-weight: 600; text-decoration: none; }
 @media (max-width: 899px) { .qsend-res-actions { flex-wrap: wrap; } .qsend-chan-state, .qsend-chan > .btn { margin-left: 0; } }
+/* M7: the approved template's words are fixed, so the box that shows them looks read-only */
+.qsend-chan textarea[readonly] { background: var(--nav); color: var(--muted); cursor: default; }
