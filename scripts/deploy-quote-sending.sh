@@ -5,13 +5,17 @@
 #                                                own access, the one-time email setup, and what "backend" would deploy. Changes nothing.
 #   ./scripts/deploy-quote-sending.sh backend    the 7 new functions, and the 14 quote functions (they share the quote code that now
 #                                                locks a draft while a send is prepared). Email stays OFF. The live screen is unaffected.
+#   ./scripts/deploy-quote-sending.sh channels   M7 only: redeploy the 3 functions that send (deliverQuote, retryQuoteDelivery, quoteChannels) so a
+#                                                closed-window quote goes in the approved quotation template. Email stays as it is.
 #   ./scripts/deploy-quote-sending.sh preview    the new screen on Hosting PREVIEW channel phase61 (live data; production untouched)
 #   ./scripts/deploy-quote-sending.sh mail on    switch email sending ON (writes MAIL_SEND=on, the sender and the mailer service account
 #                                                to the settings file) and redeploy the 3 functions that read it. Needs setup-mailer.sh
 #                                                and the Workspace approval first.
 #   ./scripts/deploy-quote-sending.sh mail off   the kill switch: email sending off again.
 #   ./scripts/deploy-quote-sending.sh live       the new screen on production Hosting. ONLY after the owner approved the preview.
-# Every functions deploy first saves the revisions it replaces, so ./scripts/rollback-quote-sending.sh can undo it in seconds.
+# Every functions deploy first saves the revisions it replaces, so ./scripts/rollback-quote-sending.sh can undo it in seconds. The very
+# first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
+# them, so a repeated run cannot lose the way back. A deploy that Google throttles is retried by itself (up to 3 times).
 # Never deploys the webhook, leadIntake, calendarSweep or any other function; never changes rules, indexes, secrets, DNS, the
 # Google Calendar settings, Make or Meta. Do NOT use scripts/deploy-preview.sh: it deploys every function and makes them public.
 set -euo pipefail
@@ -23,24 +27,37 @@ MAIL_SA="ek-mailer@$PROJECT.iam.gserviceaccount.com"
 MAIL_SENDER_DEFAULT="info@elitekitchens.ie"
 ENVF="functions/.env.$PROJECT"
 SAVED="$HOME/.previous-revisions-phase61"               # the last Phase 6.1 functions deploy (rollback-quote-sending.sh)
+ORIGINALS="$HOME/.previous-revisions-phase61.original"   # the revisions from BEFORE Phase 6.1: written once, never overwritten (rollback-quote-sending.sh --originals)
 # The same lists are in rollback-quote-sending.sh.
 NEW_FUNCS="reopenConversation deliverQuote retryQuoteDelivery resolveQuoteDelivery cancelQuoteSend markQuoteSent quoteChannels"
 QUOTE_FUNCS="createCustomer saveQuoteSettings setQuoteNumbering createQuote saveQuoteDraft sendQuote acceptQuote declineQuote reopenQuote reviseQuote discardQuoteDraft deleteQuoteDraft setQuoteNotes quotePdfUrl"
 MAIL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"          # the functions that read the MAIL_* settings
+CHANNEL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"       # the functions that send (M7: they read the quotation template settings too)
 BACKEND_FUNCS="$NEW_FUNCS $QUOTE_FUNCS"
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,19p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
 setting() { local f="$1" k="$2" v="$3"; if has "$f" "$k"; then sed -i "s|^$k=.*|$k=$v|" "$f"; else printf '%s=%s\n' "$k" "$v" >> "$f"; fi; }
 confirm() { read -r -p "$1 Type yes: " a; [ "$a" = "yes" ] || { echo "Cancelled. Nothing was deployed."; exit 1; }; }
 install() { npm --prefix functions install --omit=dev --no-audit --no-fund >/dev/null 2>&1 || npm --prefix functions install --omit=dev; }
-deploy_functions() { local only=""; for f in "$@"; do only="${only:+$only,}functions:$f"; done; firebase deploy --project "$PROJECT" --only "$only"; }
+# Google sometimes throttles a burst of function updates ("Failed to update function"): the deploy is repeated, and Firebase skips what is
+# already up to date, so a repeat only does what is left.
+deploy_functions() {
+  local only="" f try
+  for f in "$@"; do only="${only:+$only,}functions:$f"; done
+  for try in 1 2 3; do
+    if firebase deploy --project "$PROJECT" --only "$only"; then return 0; fi
+    [ "$try" = 3 ] && break
+    echo "   The deploy did not finish (try $try of 3). Waiting 60 s, then repeating what is left..."; sleep 60
+  done
+  echo "The deploy did not finish after 3 tries. Nothing is lost: run the same command again, or undo with ./scripts/rollback-quote-sending.sh --originals"; return 1
+}
 serving_revision() {
   { gcloud run services describe "$1" --region "$REGION" --project "$PROJECT" --format=json 2>/dev/null || true; } | node -e '
     let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
@@ -82,8 +99,11 @@ check_settings() {
     echo "Refusing to deploy: $ENVF does not match the live functions for:$bad. Nothing was changed. Stop here and report which setting differs."
     exit 1
   fi
-  echo "   email: MAIL_SEND=$(value "$ENVF" MAIL_SEND | sed 's/^$/(not set: off)/')  (the deploy keeps it as it is; \"mail on\" switches it)"
-  echo "   Reopen template: $(value "$ENVF" WHATSAPP_REOPEN_TEMPLATE_NAME | sed 's/^$/elite_kitchens_reopen (default)/') / $(value "$ENVF" WHATSAPP_REOPEN_TEMPLATE_LANG | sed 's/^$/en (default)/')"
+  local ms rt rl qt ql; ms=$(value "$ENVF" MAIL_SEND); rt=$(value "$ENVF" WHATSAPP_REOPEN_TEMPLATE_NAME); rl=$(value "$ENVF" WHATSAPP_REOPEN_TEMPLATE_LANG)
+  qt=$(value "$ENVF" WHATSAPP_QUOTE_TEMPLATE_NAME); ql=$(value "$ENVF" WHATSAPP_QUOTE_TEMPLATE_LANG)
+  echo "   email: MAIL_SEND=${ms:-(not set: off)}  (the deploy keeps it as it is; \"mail on\" switches it)"
+  echo "   Reopen template: ${rt:-elite_kitchens_reopen (default)} / ${rl:-en (default)}"
+  echo "   Quotation template (closed-window quotes): ${qt:-elite_kitchens_quote_document (default)} / ${ql:-en (default)}"
 }
 has_binding() {
   node -e '
@@ -138,6 +158,7 @@ case "${1:-}" in
     install
     echo "==> saving the revisions this replaces"
     save_revisions $BACKEND_FUNCS
+    if [ -s "$ORIGINALS" ]; then echo "   (keeping $ORIGINALS: the revisions from before Phase 6.1 are never overwritten)"; else cp "$SAVED" "$ORIGINALS"; echo "   (kept a copy of these as the originals: $ORIGINALS)"; fi
     deploy_functions $BACKEND_FUNCS
     echo "==> making the 7 new functions reachable (each checks the signed-in staff account itself)"
     for f in $NEW_FUNCS; do
@@ -145,6 +166,17 @@ case "${1:-}" in
     done
     check_reachable "$NEW_FUNCS $QUOTE_FUNCS"
     echo "Done. The live screen is unchanged (it does not call the new functions). Undo in seconds with: ./scripts/rollback-quote-sending.sh"
+    ;;
+  channels)
+    check_settings; check_access
+    echo "Functions: $CHANNEL_FUNCS"
+    confirm "Redeploy the 3 sending functions to the LIVE project (M7: closed-window quotes go in the approved quotation template)? Email stays as it is."
+    install
+    echo "==> saving the revisions this replaces"
+    save_revisions $CHANNEL_FUNCS
+    deploy_functions $CHANNEL_FUNCS
+    check_reachable "$CHANNEL_FUNCS"
+    echo "Done. The live screen is unchanged. Undo in seconds with: ./scripts/rollback-quote-sending.sh"
     ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }

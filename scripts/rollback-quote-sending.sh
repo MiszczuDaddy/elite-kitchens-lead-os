@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Undo Phase 6.1 functions deploys in seconds (no rebuild).
-#   ./scripts/rollback-quote-sending.sh              undo the LAST "backend" deploy: every function it replaced goes back to the
-#                                                    revision it had (~/.previous-revisions-phase61)
+#   ./scripts/rollback-quote-sending.sh              undo the LAST functions deploy (backend, channels or mail): every function it replaced goes back
+#                                                    to the revision it had (~/.previous-revisions-phase61)
+#   ./scripts/rollback-quote-sending.sh --originals  put the 14 quote functions back to how they were BEFORE Phase 6.1 (the list the first
+#                                                    "backend" deploy kept: ~/.previous-revisions-phase61.original). Run --close separately for the 7 new ones
 #   ./scripts/rollback-quote-sending.sh --close      the 7 new functions stop answering browsers (public access removed). Sent quotes,
 #                                                    delivery records and stored PDFs stay as they are; the old screen never calls them
 #   ./scripts/rollback-quote-sending.sh --open       undo --close
@@ -29,12 +31,13 @@ case "${1:-}" in
     [ "$1" = "--close" ] && echo "Sending a quote and Reopen conversation now get errors; everything else is unaffected. Undo: $0 --open"
     exit 0
     ;;
+  --originals) ;;
   --mail-off) exec "$(dirname "$0")/deploy-quote-sending.sh" mail off ;;
   "") ;;
-  *) sed -n '2,8p' "$0" | sed 's/^# *//'; exit 1 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# *//'; exit 1 ;;
 esac
 
-F="$HOME/.previous-revisions-phase61"
+F="$HOME/.previous-revisions-phase61"; [ "${1:-}" = "--originals" ] && F="$HOME/.previous-revisions-phase61.original"
 [ -s "$F" ] || { echo "No saved revisions ($F). Nothing to roll back to."; exit 1; }
 while IFS='=' read -r s rev; do
   [ -n "$s" ] && [ -n "$rev" ] || continue
