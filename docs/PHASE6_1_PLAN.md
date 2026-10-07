@@ -35,7 +35,7 @@ Reopening a closed WhatsApp conversation is **a general WhatsApp capability, not
 | 2 | Keep **Download PDF**, **Email draft** and manual **Mark as sent** as secondary / fallback options. |
 | 3 | Email goes through the **Gmail API with keyless Google Workspace delegation**, sent as `info@elitekitchens.ie`. The owner does the one-time Workspace admin approval. Emails remaining in `info@`'s Sent folder is accepted. DNS records are inspected first and changed only if actually required (see "Email"). |
 | 4 | Build **Reopen conversation** as a general capability, with the proposed template wording. A quick-reply button is preferred. The owner creates the Meta template from the exact instructions below. |
-| 5 | **Quote-by-approved-template outside the 24-hour window** is an optional later milestone (M7). The owner may submit its template now so Meta's approval runs in parallel. |
+| 5 | **Quote-by-approved-template outside the 24-hour window** (M7). First an optional later milestone; **made REQUIRED by the owner on 2026-10-07** after the first preview showed that having to Reopen and wait for a reply before sending a quote is awkward. Built (see "M7" below). |
 | 6 | At most **one Reopen template per customer per 24 hours**. |
 | 7 | Default WhatsApp wording and the existing email wording are approved; both are editable before sending. |
 | 8 | Architecture and milestone order approved. Branch `phase-6-1-quote-sending`. **Nothing is deployed to production without the owner's explicit approval.** |
@@ -245,7 +245,7 @@ commits and never weaken an assertion.
 | **M4** | **Email**: Gmail adapter (keyless), message builder, setup script, `MAIL_SEND` switch, tests with a fake Google. Owner's one-time Workspace approval and the DNS read-only check | Preview only |
 | **M5** | **Screens**: the Send dialog (channels, editable text, per-channel results, retry / unsure / cancel), the history on the quote, the sent versions and the customer profile; desktop and phone browser tests | Preview only |
 | **M6** | `scripts/deploy-quote-sending.sh` and rollback, docs, preview channel `phase61` with a controlled test customer, owner review, **live (approval)**, **merge and tag (approval)** | Controlled |
-| **M7 (optional, later)** | Quote PDF inside an approved template outside the window (adapter + template settings) | Later |
+| **M7 (required from 2026-10-07)** | Quote PDF inside the approved quotation template when the 24-hour window is closed: another route of the WhatsApp channel, no second delivery system | Built and tested; needs a backend redeploy of the 3 sending functions (approval) |
 
 Rollback: close the new functions (like Phase 6's `--close`) and roll Hosting back; data stays; the old screen simply does not
 show it. The 14 Phase 6 functions and the manual path keep working throughout.
@@ -279,7 +279,7 @@ message. A single button is also fine.
 every template sent to a phone that is off or out of signal, so both templates are set to 12 hours. If Meta reclassifies a
 template as Marketing the setting may not apply (Marketing messages are retried for far longer).
 
-**2. Quote document (optional, M7; may be submitted now)**
+**2. Quote document (M7: required; submitted by the owner, Active and Utility since 2026-10-07)**
 
 | Field | Value |
 |---|---|
@@ -562,6 +562,80 @@ recorded". The quote's **Sent versions** list shows every version's deliveries c
 channel has since delivered), the **activity** says "sent v1 via WhatsApp", the quote row and the customer's profile say "Sent 3 Oct via
 WhatsApp", and the chat shows the document labelled with the quote number. PDF v1 stays exactly as it was when v2 is sent.
 
+### M7: the quote inside the approved quotation template (closed window)
+
+Required by the owner on 2026-10-07; built and tested the same day. **Not deployed.**
+
+**The rule.** When staff tick WhatsApp in **Send quote** (or **Send this version…**), the **server** decides the route at the moment of sending:
+
+* window **open**: the existing document message with the staff's own caption (M3), unchanged;
+* window **closed** (or only a Reopen template waiting for a reply): the approved template `elite_kitchens_quote_document` (`en`) with the
+  **exact stored PDF** as its **Document header** and two variables, {{1}} the customer's first name (the customer on the quote; "there" when
+  there is no usable first name) and {{2}} the quote number (`EK-0104`, with ` v2` after v1). No Reopen, no waiting for a reply.
+
+The template's words (fixed by Meta; Elite OS shows and records this copy, kept next to the Reopen wording in `windowState.js`):
+*Hi {{1}}, as discussed, please find attached your Elite Kitchens quotation {{2}}. If you have any questions or would like to make any changes, just reply here.*
+with one quick-reply button, "I have a question". A tap on it is the customer's reply and opens the 24-hour window like any reply.
+
+**On the screen.** The WhatsApp row says: "24-hour window closed: WhatsApp only allows an approved template now, so the quote is sent with the approved
+quotation template, PDF attached. The customer can reply to it." It stays ticked and usable; there is **no Reopen button** in the Send dialog. The
+message box shows the template's words **read-only** (they cannot be changed). If the window closes while the dialog is open the box switches at
+once; if the customer replies it becomes the editable caption again. The result line says it went as the template, and the chat shows the document
+with the template's words and the usual **Quote EK-… v1** label. **Reopen conversation** in the chat is unchanged and is for ordinary conversations.
+
+**How it fits the system already built (no second architecture).** It is another route inside the WhatsApp channel: the same prepare, the same
+claim before sending, the same one delivery record per channel (it now also records `route`: `document` or `template`, and the words really sent),
+the same "accepted by Meta = sent" meaning, the same single `applySent` (Quote Sent, CRM stage and value), the same retry/unsure/resolve rules, the
+same erasure. Specific rules:
+
+* the PDF is uploaded once and that media id is the template header; the PDF sent is the stored one, checked against its SHA-256 first;
+* if a free-form document is refused with **131047 ("window closed")** after our own check passed (the window closed in between), that refusal
+  sent nothing, so the template follows with the same already-uploaded PDF: one message reaches the customer. **Only** 131047 does this: any
+  other answer, including an unclear one, is never followed by a second message (tested);
+* a refused template is a plain failure (the quote stays a locked draft, nothing marked Sent, retry allowed once fixed); no answer, a server
+  error or an answer without a message id is **not confirmed** and is never retried by itself;
+* the quote template does **not** use the Reopen allowance and does not open the window; a Reopen waiting for a reply does not block it;
+* settings (not secrets): `WHATSAPP_QUOTE_TEMPLATE_NAME` (default `elite_kitchens_quote_document`) and `WHATSAPP_QUOTE_TEMPLATE_LANG` (default `en`).
+  Blank name = the route is off and a closed window is refused exactly as in M3 (a switch, tested). `quoteChannels` tells the screen which applies;
+* the customer's name is kept on the delivery record (like the email address) so a retry uses the same first name; it is erased with the customer.
+
+| File | What |
+|---|---|
+| `functions/lib/quoteChannels.js` | the route: `check` returns `route`, `send` uploads once and sends the document or the template, with the 131047 fallback |
+| `functions/lib/whatsapp.js` | additive: `sendTemplateWithDocument` |
+| `functions/lib/windowState.js` + `public/window-state.js` | `quoteLabel`, `quoteTemplateText` (identical copies, parity-tested) |
+| `functions/lib/quoteDelivery.js` | the delivery keeps the customer's name (`customerName`), `route` and the words really sent |
+| `functions/index.js`, `functions/lib/handlers.js` | the two settings; `quoteChannels` answers `whatsapp: { template }` |
+| `public/quote-send-model.js`, `public/quotes.js`, `public/index.html`, `public/app.css` | the template state, the read-only box, the wording of the result |
+| `functions/test/quote-template.test.js` | 27 backend tests |
+| `scripts/deploy-quote-sending.sh` | new stage `channels` (redeploys only the 3 sending functions); retries a throttled deploy; keeps the pre-Phase-6.1 revisions in `.original`; `rollback-quote-sending.sh --originals` |
+
+**M7 results (2026-10-07/08; emulators and fake Meta only: nothing real sent, nothing deployed).**
+
+| Suite | Result |
+|---|---|
+| Backend (`npm test`) | **349 tests** (317 before M7: +27 template tests in `quote-template.test.js`, +5 model tests). 349 of 349 in one full run; in a second full run, under load, the Phase 5 `calendar.test.js` timing test failed once (2 vs 1), which passed 5 of 5 on its own straight afterwards: the same known flake as in M1, unrelated to Phase 6.1 |
+| Browser: `ui` 57, `lead` 11, `crm` 14, `dnd` 13, `conversion` 10, `appointments` 17, `quotes` 20, `quote-send` 9, `reopen` 14, `theme` 10 (Chrome) | all passed, unchanged |
+| `quote-delivery.e2e.js` | **18 of 18** (was 16: the closed-window scenarios were rewritten for the template route, plus "the window closes while the dialog is open" and "the customer replies while the dialog is open") |
+
+What the tests prove (each with a planted error): open window sends the normal document with the staff's words; closed window sends the template with the exact stored PDF
+as its header, the right first name and quote number (v2 gets ` v2`); an older version re-sent through the template carries that version's own PDF; customer A can
+never get customer B's PDF or name, even sent at the same moment; a window that closes between opening the dialog and pressing Send uses the template instead of failing;
+a "window closed" refusal after our check is followed by the template (one message reaches the customer) but **no other answer is ever followed by a second message**;
+a refused template is a plain failure (the quote stays an unsent locked draft, CRM untouched, nothing in the chat) and a retry works once fixed; no answer / 5xx / no message
+id is "not confirmed" and never retried by itself; double click, refresh and two staff sending together send **one** template; both routes mark the quote Sent through the same
+central rules; Reopen conversation is unchanged and a pending Reopen does not block a quote; logs hold no names, numbers or wording; customer deletion erases it all; staff-only.
+
+**Planted errors for M7: 18 of 18 backend and 7 of 7 screen caught** (template used when the window is open; closed window still refused; wrong PDF in the header; name and number
+swapped; version missing from the number; a failed template recorded as sent; an unsure template treated as refused; a template sent after any document failure; the route ignored;
+the chat showing the typed words instead of the sent ones; the name not kept or not passed; the route not recorded; the window race not handled; the wrong template name; the staff
+check skipped; the template sent to the wrong number; the header document missing. Screen: the route offered when the server says it is off; the template words editable; the
+caption not restored when the customer replies; Reopen shown in the template state; the wrong name in the words; the result not saying it went as the template; the server's answer
+ignored). A first attempt at one change of mine commented out the email subject by accident; the older M4 email test caught it at once and it was fixed before anything was committed.
+
+Only my own tests changed where behaviour genuinely changed: `quote-email.test.js` (the `quoteChannels` answer now also says `template`), and my M5 browser test (a closed window no
+longer blocks WhatsApp). No Phase 2 to Phase 6 test was changed.
+
 ### Results at the end of M5 (2026-10-05)
 
 All on emulators with fake providers: nothing real was sent, nothing was deployed, nothing outside the repository was changed.
@@ -618,7 +692,7 @@ flake of a Phase 5 test, unrelated to Phase 6.1.
    customer's Details does not change a retry that is already queued: **Cancel this send** and send again (a new send uses the corrected address, as
    does **Send this version…**). Not changed here: it is safe, only less convenient. Candidate for a later small change.
 3. The two deploy and rollback scripts and the one-time mailer setup script were written in M4/M5 (the plan placed deploy scripts in M6). **None has been run.**
-4. The optional M7 (quote document inside an approved template outside the 24-hour window) is **not built**, as instructed.
+4. M7 (the quote PDF inside the approved quotation template when the window is closed) was first optional and not built; the owner made it **required on 2026-10-07** and it is now built (below). Consequence: my own M5 browser test changed where it had asserted that a closed window blocks WhatsApp and needs Reopen (the product behaviour genuinely changed; the assertions were replaced by stronger ones, not weakened; every older suite passes unchanged).
 
 ### Technical debt (documented, not fixed: out of scope)
 
@@ -630,7 +704,7 @@ flake of a Phase 5 test, unrelated to Phase 6.1.
 ### Still needed from the owner before the preview
 
 * **Meta: done (2026-10-07).** WhatsApp Manager shows `elite_kitchens_reopen` (Utility, English `en`) as **Active**, with the quality rating still "pending" (normal until it has been sent). The name and language are the plan defaults, so no setting changes. The second
-  template (`elite_kitchens_quote_document`, Utility, Active) is not used by anything built so far (it is for the optional M7).
+  template (`elite_kitchens_quote_document`, Utility, Active) is the one M7 uses: **please check in WhatsApp Manager that its body text is exactly the wording in the M7 section below** (Elite OS shows and records that wording; Meta sends the approved text).
 * **Google Workspace:** run `./scripts/setup-mailer.sh` in Cloud Shell, then authorise the printed client ID for the single scope `gmail.send` in the
   Admin console (steps above). Not done.
 * **DNS:** nothing needs changing now. SPF, DKIM and DMARC are decided by the header test in "Testing the preview"; any change needs approval first.
@@ -652,15 +726,17 @@ Nothing here has been run. **No real customer is used.** The test customer is th
 (ideally a second phone or a family member's who has agreed), created as a normal customer called, for example, **Test Customer**. The
 preview (Hosting channel `phase61`) uses the live data and the live backend, so everything below really sends.
 
-**Before starting (all from the owner; none is done yet)**
+**Before starting (status on 2026-10-07)**
 
-| Needed | Why | Status at the end of M5 |
+| Needed | Why | Status |
 |---|---|---|
 | Meta template `elite_kitchens_reopen` approved (name and language code sent to me) | "Reopen conversation" | **done**: Active, Utility, English (owner's WhatsApp Manager screenshot, 2026-10-07) |
-| Cloud Shell: `./scripts/setup-mailer.sh`, then the Workspace approval (see "One-time Google Workspace setup") | email | not done |
+| Meta template `elite_kitchens_quote_document` (the quotation template, M7) | quotes to closed windows | **done**: Active, Utility, English (same screenshot) |
+| Cloud Shell: `./scripts/setup-mailer.sh`, then the Workspace approval (see "One-time Google Workspace setup") | email | **done 2026-10-07** (client ID authorised for `gmail.send` only; email still switched off) |
 | An email address the owner can read, different from info@ (their own Gmail, ideally also an Outlook one) | the email test and the header check | to be given |
 | A phone for the test customer that has WhatsApp and can message the business number | WhatsApp tests | to be given |
-| Approval to deploy the backend, then the preview | the whole test | not given |
+| Approval to deploy the backend, then the preview | the whole test | **given and done 2026-10-07** (21 functions, email off; preview channel `phase61`) |
+| Approval to redeploy the 3 sending functions for M7 (`./scripts/deploy-quote-sending.sh channels`) | closed-window quotes in the template | pending (needs the owner's go-ahead after the M7 report) |
 
 **The test** (each line is a tick box; tell me what you see, with a screenshot of anything odd)
 
@@ -678,8 +754,13 @@ preview (Hosting channel `phase61`) uses the live data and the live backend, so 
    Do the same in an Outlook address. Tell me the six words. (Nothing in DNS is changed without your approval: "Email authentication" below.)
 5. **Both at once.** Revise to v2 and send by WhatsApp and email together. Both arrive; the quote page lists both under v2; v1's PDF is unchanged.
 6. **Send this version.** On the sent quote press **Send this version…** for v1, email only: v1 arrives again, no new version appears.
-7. **Window closed while sending.** With the test customer's window closed (after 24 hours of silence), open **Send quote**: WhatsApp is
-   greyed with "24-hour window closed" and **Reopen conversation** inside the dialog; email still works.
+7. **Window closed: the quote goes in the quotation template (M7).** With the test customer's window closed (24 hours since their last message),
+   open **Send quote**: WhatsApp stays ticked and says the quote will be sent with the approved quotation template, PDF attached; the message box
+   shows the template's words (read-only); there is no Reopen step. Send. The phone receives the quotation template message with the **PDF
+   attached as its header**, "Hi <first name>, as discussed, please find attached your Elite Kitchens quotation <number>..." and an "I have a
+   question" button. Open the PDF: it is the quote. In Elite OS the result says it went as the template, the quote is Sent, and the chat shows the
+   document labelled with the quote. The chat's closed-window band still offers Reopen conversation. Tap **I have a question** on the phone: the
+   chat opens (the window is open again). Check the exact words in WhatsApp against the template in WhatsApp Manager and tell me if they differ.
 8. **No email address.** For a customer without one the Email row says so and cannot be ticked.
 9. **Email switched off.** `./scripts/deploy-quote-sending.sh mail off`: the Email row says "not switched on yet"; WhatsApp still works.
    Switch it back on if you want to continue.
@@ -693,24 +774,32 @@ preview (Hosting channel `phase61`) uses the live data and the live backend, so 
 **Stop at once** if anything is sent to a number or address that is not your own, if a quote is marked Sent when nothing arrived, or if
 a message arrives twice: run `./scripts/rollback-quote-sending.sh --close` and tell me.
 
-## Rollout (M6, not started)
+## Rollout (M6, in progress)
 
 Every step is run by the owner in Cloud Shell, after approval, one stage at a time; each functions step asks for "yes" and saves the
-revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollback-quote-sending.sh`). Nothing below has been run.
+revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollback-quote-sending.sh`). **Done so far (2026-10-07, owner's Cloud Shell, with approval):** steps 1 to 5. Steps 4b, 6, 7 and 8 are not done.
 
 1. **Clone on the Phase 6.1 branch:** `cd ~/elite-kitchens-lead-os && git fetch && git checkout phase-6-1-quote-sending && git pull`.
 2. **Check (changes nothing):** `./scripts/deploy-quote-sending.sh check`.
 3. **Email setup (once, only needed before email is switched on):** `./scripts/setup-mailer.sh`, then the Workspace approval below.
 4. **Backend:** `./scripts/deploy-quote-sending.sh backend`: the 7 new functions and the 14 quote functions (they share the quote code
    that now locks a draft while a send is prepared). Email stays **off**. The live screen is unchanged: it does not call the new functions.
+   *What the real deploy taught* (all fixed in the script afterwards): the Firebase login in Cloud Shell had expired (`firebase login --reauth
+   --no-localhost`); Google throttled a burst of 21 function updates, so the deploy needed three runs (the script now repeats a throttled deploy up
+   to 3 times, and Firebase skips what is already up to date); a repeated run overwrote the "undo" list (the script now keeps the pre-Phase-6.1
+   revisions in `~/.previous-revisions-phase61.original` and never overwrites them); the Firebase CLI asks to confirm each new setting once
+   (Enter accepts the default).
+4b. **M7, the quotation template route:** `./scripts/deploy-quote-sending.sh channels` redeploys only the 3 sending functions (`deliverQuote`,
+   `retryQuoteDelivery`, `quoteChannels`), then `preview` again for the new screen. Needs the owner's approval after the M7 report. Until it is
+   done the screen and backend behave as before M7 (the new screen works with the old backend and the other way round).
 5. **Preview:** `./scripts/deploy-quote-sending.sh preview` (Hosting channel `phase61`, live data and live backend). Test as in "Testing
    the preview".
 6. **Email on, when the test plan reaches it:** `./scripts/deploy-quote-sending.sh mail on` (kill switch: `mail off`).
 7. **Live (approval):** `./scripts/deploy-quote-sending.sh live`. Then reload Elite OS.
 8. **Merge and tag (approval), after live is confirmed:** merge `phase-6-1-quote-sending` into `main` and tag it.
 
-Rollback: `./scripts/rollback-quote-sending.sh` (the last backend deploy back to the saved revisions, in seconds), `--close` (the 7 new
-functions stop answering browsers; data stays), `--mail-off`; the screen: Firebase console > Hosting > Release history > Rollback.
+Rollback: `./scripts/rollback-quote-sending.sh` (the last functions deploy back to the saved revisions, in seconds), `--originals` (the 14
+quote functions back to before Phase 6.1), `--close` (the 7 new functions stop answering browsers; data stays), `--mail-off`; the screen: Firebase console > Hosting > Release history > Rollback.
 
 ## One-time Google Workspace setup (email)
 
