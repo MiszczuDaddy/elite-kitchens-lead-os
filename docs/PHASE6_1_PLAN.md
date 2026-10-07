@@ -636,6 +636,24 @@ ignored). A first attempt at one change of mine commented out the email subject 
 Only my own tests changed where behaviour genuinely changed: `quote-email.test.js` (the `quoteChannels` answer now also says `template`), and my M5 browser test (a closed window no
 longer blocks WhatsApp). No Phase 2 to Phase 6 test was changed.
 
+### Follow-up: the Quote Details page uses the width of a desktop screen (2026-10-08)
+
+Reported by the owner from the preview: on a wide screen the quote page sat in a narrow strip with a lot of empty space on the right, and the PDF link under
+Sent versions looked cut off. **Layout only: no behaviour, wording or function changed.** Causes found in `public/app.css`:
+
+| What | Before | Now |
+|---|---|---|
+| Width of the whole quote page (`.qv`) | capped at 1240px, however wide the screen | uses the room there is, up to a reading limit of **1680px** |
+| Right-hand column (status, actions, customer, Sent versions) | fixed 320px | **340px to 460px**, growing with the screen (`clamp(340px, 26vw, 460px)`); its action buttons never wrap inside a label |
+| The draft form (`.qb`) | capped at 780px, leaving a gap before the right column | up to **980px** |
+| PDF link and delivery lines | in a column that scrolls inside itself, flush against its edge: on Windows 11 Chrome the thin scrollbar *floats over* that edge and covered them | the column keeps 14px clear on the right, so nothing sits under the scrollbar |
+
+Tablet (900 to 1279px: right column 280px) and phone (one column in working order) are unchanged. New browser check `test-ui/quote-layout.e2e.js` builds a draft, a quote sent by
+WhatsApp and email with two versions, and a send in progress, and measures each at 1280, 1366, 1440, 1536, 1920, 2560 and a short 1366x600 window (desktop), 1024 and 768 (tablet) and
+390 (phone): no sideways scroll, nothing sticking out or clipped, the right column's content clear of its edge while it scrolls, the PDF and delivery lines whole, button labels on one line,
+the page and the form using the width up to their limits, a single field never wider than the form limit. The test browser draws floating scrollbars like Windows 11 Chrome (Playwright hides
+scrollbars by default, which would hide this exact problem). It was written first and **failed on the old CSS for each cause above**, then passed after the fix.
+
 ### Results at the end of M5 (2026-10-05)
 
 All on emulators with fake providers: nothing real was sent, nothing was deployed, nothing outside the repository was changed.

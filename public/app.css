@@ -576,10 +576,12 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .qchip[data-qstatus=declined] { --qs: var(--st-closed); }
 
 /* One quote: the builder (or what was sent) on the left; status, totals and actions on the right. */
-.qv { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: 28px; align-items: start; max-width: 1240px; margin-top: 16px; }
+/* The quote page uses the width of the screen up to a reading limit: the right-hand column grows with the screen (never narrower than 340px on a desktop). */
+.qv { display: grid; grid-template-columns: minmax(0,1fr) clamp(340px, 26vw, 460px); gap: clamp(24px, 2.2vw, 36px); align-items: start; max-width: 1680px; margin-top: 16px; }
 .qv-msg { margin: 0 0 10px; padding: 10px 12px; border-radius: 4px; background: var(--hover); font-size: 13px; line-height: 1.5; }
 .qv-msg.warn { background: #f7f0dc; color: #655420; }
-.qv-side { position: sticky; top: 0; max-height: calc(100dvh - 140px); overflow-y: auto; display: flex; flex-direction: column; }
+/* The column scrolls inside itself when it is taller than the window. Its right padding keeps text, the PDF link and the delivery lines clear of the scrollbar, which on Windows 11 floats over the edge instead of taking room. */
+.qv-side { position: sticky; top: 0; max-height: calc(100dvh - 140px); overflow-y: auto; padding-right: 14px; scrollbar-width: thin; display: flex; flex-direction: column; }
 .qv-sec { padding: 14px 0; border-top: 1px solid var(--line); }
 .qv-sec:first-child { border-top: 0; padding-top: 0; }
 .qv-sec:empty { display: none; }
@@ -592,6 +594,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .qv-problems { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--err); }
 .qv-warn-line { margin: 6px 0 0; font-size: 12px; color: #8a6d1f; }
 .qv-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.qv-buttons .btn { white-space: nowrap; }
 .qv-danger { color: var(--err); }
 .qv-cust { font-size: 15px; font-weight: 600; color: var(--ink); margin-right: 8px; }
 .qv-cust-sub { margin: 4px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
@@ -616,7 +619,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .qv-figs summary { color: var(--muted); cursor: pointer; }
 
 /* The builder and Quote Settings: fields like the profile's, grouped by fieldset (no boxes). */
-.qb { max-width: 780px; }
+.qb { max-width: 980px; }
 .qb-sec { margin: 0 0 22px; }
 .qb-sec legend { font-size: 14px; }
 .qb-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px 14px; align-items: start; }
