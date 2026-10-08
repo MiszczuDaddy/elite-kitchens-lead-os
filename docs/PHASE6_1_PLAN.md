@@ -750,7 +750,7 @@ preview (Hosting channel `phase61`) uses the live data and the live backend, so 
 |---|---|---|
 | Meta template `elite_kitchens_reopen` approved (name and language code sent to me) | "Reopen conversation" | **done**: Active, Utility, English (owner's WhatsApp Manager screenshot, 2026-10-07) |
 | Meta template `elite_kitchens_quote_document` (the quotation template, M7) | quotes to closed windows | **done**: Active, Utility, English (same screenshot) |
-| Cloud Shell: `./scripts/setup-mailer.sh`, then the Workspace approval (see "One-time Google Workspace setup") | email | **done 2026-10-07** (client ID authorised for `gmail.send` only; email still switched off) |
+| Cloud Shell: `./scripts/setup-mailer.sh`, then the Workspace approval (see "One-time Google Workspace setup") | email | **done 2026-10-07** (client ID authorised for `gmail.send` only). **Email switched on 2026-10-08** (`mail on`); the owner's first real test email, sent from Elite OS as info@elitekitchens.ie to their own address, **arrived** |
 | An email address the owner can read, different from info@ (their own Gmail, ideally also an Outlook one) | the email test and the header check | to be given |
 | A phone for the test customer that has WhatsApp and can message the business number | WhatsApp tests | to be given |
 | Approval to deploy the backend, then the preview | the whole test | **given and done 2026-10-07** (21 functions, email off; preview channel `phase61`) |
