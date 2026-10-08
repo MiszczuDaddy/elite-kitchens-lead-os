@@ -792,6 +792,85 @@ preview (Hosting channel `phase61`) uses the live data and the live backend, so 
 **Stop at once** if anything is sent to a number or address that is not your own, if a quote is marked Sent when nothing arrived, or if
 a message arrives twice: run `./scripts/rollback-quote-sending.sh --close` and tell me.
 
+## Audit (independent review by "Astra", 2026-10-08): every finding verified, fixed and tested
+
+The owner asked for every finding to be **verified independently** (not taken on trust), the confirmed ones fixed, and a regression test added for
+each. Method for every finding: read the code the audit names, then **reproduce the claim against the unchanged code with a test that fails**, and
+only then fix it and watch the same test pass. Where a claim did not hold as stated, this says so. The audit itself ran only the 69 tests that need
+no emulator; the emulator and browser suites were run here. Nothing was deployed, merged or tagged for this work.
+
+| # | Audit rating | Verdict | What was reproduced on the unchanged code | The fix | Tests that now guard it |
+|---|---|---|---|---|---|
+| 1 | High | **Confirmed** | Two calls with the same request id but different PDFs: the later writer **overwrote the first PDF** (record and file disagreed), in `prepare` and in Phase 6's own `send`; the PDF link served a replaced file as if genuine | The stored PDF is **immutable**: its path carries the SHA-256 and the request, it is written create-only; a request id is bound to ONE document (a different PDF under it is refused); cleanup removes only the object this call created (that exact version); the PDF link re-checks size and SHA-256 before offering it | `audit.test.js` (5), planted errors |
+| 2 | High | **Confirmed** | Staff A types 12 doors, B saves 7: A's Save stayed enabled and the server ended at **12**. Same for notes and for Quote Settings (whose own message "saving would be refused" was untrue) | Each form keeps the revision it was LOADED from; a change by someone else while you have unsaved edits shows a notice and disables Save until you choose "load their version" or "keep mine and replace theirs"; notes refuse once with an explanation; your own saves never look like a conflict | `quote-recovery.e2e.js` (5 checks) |
+| 3 | High | **Confirmed** | Reviewed `anna@…`, the address changed: the resend went to the **new** address. The address removed: it went to the **old address frozen on the version** | A resend must name the address that was reviewed; the server compares it with the current one and refuses if it changed or is gone; no fallback to an old address | `audit.test.js` (5) |
+| 4 | High | **Confirmed** | Erasing a customer while a document was in flight: the **conversation and a message came back**. Also a quote was still sent to a customer erased while the PDF uploaded | A check just before the provider call; the chat record is written only if the conversation exists, re-checked afterwards, removing its own message and file if the customer went in between | `audit.test.js` (3) |
+| 5 | High (inherited, Phase 2) | **Confirmed** | A token carrying only `staff: true` (never expires, never re-checked) **reads customer data** in Firestore and Storage; the claim is cleared only if the removed person calls `claimAccess` themselves | The staff claim carries an expiry (`staffUntil`, 12 hours), the rules refuse an expired, missing or malformed one, the app renews it every 30 minutes while the person is still allowed and signs out one who is not; `scripts/revoke-staff.js` ends access (within about an hour) at once | `access.test.js` (5), `access.e2e.js` (6, with the real rules) |
+| 6 | High (inherited, Phases 2 and 3) | **Confirmed** | WhatsApp accepted a text but the chat record failed: reported as **failed** (invites a duplicate). Three identical concurrent requests sent **three** messages. A Meta 5xx on a lead welcome was retried automatically | One request = one message (a durable claim under the conversation); "accepted" is final and nothing after it can turn it into a failure; an unclear answer is "not confirmed" and never resent by itself; logs carry codes only. Lead intake: a Meta 5xx is now "unknown", flagged for a human (a 429 rate limit is still retried) | `audit.test.js` (8), `leads.test.js` (changed, see below), `quote-recovery.e2e.js` |
+| 7 | High | **Confirmed** | `--close` printed "no change (not deployed, or already closed)" for an expired login or denied permission, and exited 0 | Every change is **verified by reading the policy back**; a failure, an unverifiable state or a command that "succeeded" without effect exits non-zero and names the function. Same for Phase 6's `rollback-quotes.sh`. Rolling back functions is **refused while a quote send is in progress** (the older functions do not know the lock) unless `--ignore-prepared` | `scripts.test.js` (21, with a fake `gcloud`) |
+| 8 | High (conditional) | **Confirmed** | `deploy-preview.sh` granted `allUsers` to **every** Cloud Run service, including the private calendar sweeper | Only the `onCall`/`onRequest` functions listed in `index.js` are opened (`scripts/public-functions.js`); scheduled functions are made private and asserted private afterwards | `scripts.test.js` |
+| 9 | Medium | **Confirmed** | A provider that sent headers promptly and then stalled on the body was accepted late (the timer was cleared too early): WhatsApp, the PDF upload, Gmail, and the Phase 5 calendar client | The limit covers the whole answer; a lost body after a "success" is NOT confirmed, a lost body after a refusal is still a refusal | `provider-timeouts.test.js` (9) |
+| 10 | Medium | **Confirmed** | After a dropped connection "Send quote" and the channel boxes stayed **disabled** while the message told staff to press them | The "working" flag is cleared before the controls are redrawn; an unsure resend keeps its request id when the dialog is reopened | `quote-recovery.e2e.js` |
+| 11 | Medium | **Partly** | The backend was already right: a channel left queued can be retried once, and two presses send once (tested). The gap was real but on the screen: no action for a waiting channel, and a stalled send was never redrawn without other data changing | A waiting channel offers "Send Email now" (after 45 s); the quote page redraws every 15 s so a stalled send turns into "not confirmed" by itself | `audit.test.js` (3), `quote-send-model.test.js`, `quote-recovery.e2e.js` |
+| 12 | Medium | **Confirmed** | A Meta refusal with 131049 or 131050 given immediately did not block the next Reopen (the same codes arriving later did) | The structured code is stored and the same decision is applied to both | `reopen.test.js` (3) |
+| 13 | Medium | **Confirmed** | The Reopen log sanitiser removed only runs of 7+ digits: a name, email or formatted number got through | Logs carry a code or the KIND of an error, never a provider or database message (also in the new send paths) | `reopen.test.js`, `audit.test.js` |
+| 14 | Medium | **Confirmed** | Earlier versions had a PDF link only; "Send this version" always chose the latest | Every sent version has its own "Send…" | `quote-recovery.e2e.js` |
+
+**Results** (emulators and fake providers: nothing real was sent, nothing was deployed, nothing outside the repository was changed).
+
+| Suite | Result |
+|---|---|
+| Backend (`npm test`) | **413 of 413** (349 at the end of M7, +64: audit 25, access 5, provider timeouts 9, scripts 21, Reopen 3, send model 1) |
+| `ui` / `lead` / `crm` / `dnd` / `conversion` / `appointments` | 57 of 57 / 11 of 11 / 14 of 14 / 13 of 13 / 10 of 10 / 17 of 17 |
+| `quotes` / `quote-send` (Phase 6) / `reopen` / `quote-delivery` / `quote-layout` | 20 of 20 / 9 of 9 / 14 of 14 / 18 of 18 / 4 of 4 |
+| `quote-recovery` (new: findings 2, 6, 10, 11, 14) / `access` (new: finding 5, with the real security rules) | 12 of 12 / 6 of 6 |
+| `theme` (Google Chrome) | 10 of 10 |
+
+**Planted errors** (a deliberate bug is put into the code and the tests must fail; every file was restored byte-for-byte afterwards, checked with `cmp`).
+Backend: **22 valid planted errors, all caught** (a plan that overwrites a stored PDF, a request id not tied to its document, a PDF link that serves any file, a resend to a changed or a removed address,
+a chat record that recreates an erased customer, a message sent to an erased customer, no claim before sending, a recording failure turned into a failed send, an unclear answer treated as a refusal, a
+Meta 5xx retried on a lead welcome, an immediate 131049 that does not block, a log that carries the provider's words, a staff claim that never expires, rules that ignore the expiry (Firestore and
+Storage), a late WhatsApp or Gmail answer accepted, a close that is not verified, a failed command ignored, a rollback that ignores a send in progress, a scheduled function made public).
+My first round of 22 had **five that were not caught**, and each was looked at rather than ignored: (1) **A1c** was an invalid planted error: because of operator precedence it switched off only the size check
+and the SHA-256 check beside it still fired, so it changed nothing; redone properly, caught. (2) **A9** was an equivalent one: the line it removed is redundant with the "no message id" path, which also ends as
+"not confirmed"; replaced by the audit's own original bug (the timer cleared once the headers arrive), caught. (3) **A7c**: the rollback still refused, but for the wrong reason ("could not check" instead of
+"a send is in progress") and my assertion accepted either; it now requires the right reason, caught. (4) and (5) **A4 and A4b were real test gaps**: nothing checked that no message goes to a customer who
+is erased while the PDF uploads, and the narrow window between "is the customer still there?" and the write was never exercised; I added that check and a new test (erase while the chat copy is made), both caught.
+Screen: **12 valid planted errors, all caught** (controls left disabled after a dropped connection, a reopened resend that starts a new request, no Send on each version, no "send now" on a waiting channel, a stalled
+send that is never redrawn, a resend that ignores the chosen version, Save still enabled on a stale draft, a form whose base revision follows the live one while you edit, Quote Settings conflict not detected, access
+never renewed, a failed renewal that signs the person out, the same message resent as a new request). One more attempt (the form saving with the live revision instead of its own) is equivalent, not a gap: the guard
+that blocks a stale save runs in the same step, so the mutant changes nothing observable; the mutant above it, which does change behaviour, is caught.
+
+**Problems found in my own tests during the final run** (not in the product): (1) a Phase 2 test, `e2e.test.js` "claimAccess grants the claim", asserted that the claim is exactly `{ staff: true }`. That behaviour changed
+on purpose (finding 5), so it now asserts the claim plus an expiry about 12 hours ahead and nothing else (stronger, not weaker); I had missed it when I listed the changed old tests above, and the list now includes it.
+(2) `quote-recovery` failed once in the full run because it waited for the words "not sent" anywhere on the page and the customer panel already said "Draft, not sent"; the screenshot showed the app had done the right
+thing. It now waits for the send error itself; 3 of 3 runs, then the full run, pass.
+
+**Not changed, for the owner's decision.** The audit's note on PDF trust: the PDF is made in the browser and stored as it arrives, so a signed-in
+staff member's modified browser could upload a PDF that does not match the quote (the SHA-256 proves the bytes did not change afterwards, not that
+they are the right document). The only complete fix is to render the PDF on the server from the frozen quote, a redesign of how PDFs are made. I have
+**not** done it; the people who can do this are the staff you trust with the system, and every send is recorded with who did it. It is a trust
+assumption you can accept, or ask to be replaced.
+
+**Behaviour changes to be aware of.** (a) A resend by email needs the address on screen to still be the customer's current address. (b) A lead
+welcome that gets a Meta 5xx is no longer retried automatically: it is flagged "status unknown: check WhatsApp, send manually if needed" (a 429 is
+still retried). I changed the lead test that asserted the old behaviour. (c) Staff access now expires after 12 hours unless renewed: the new screen renews it
+by itself; the **old** screen does not, which is why the rules must be deployed only after the Phase 6.1 screen is live. (d) Existing tests that changed, and why (nothing
+else in the older suites was touched, and no assertion was weakened): seven security-rules fixtures built a "staff" user as `{ staff: true }`; they now also carry the expiry, because that is what a
+real staff token now is (`appointments`, `crm`, `e2e` x2, `leads`, `quotes` x2), and one Phase 2 assertion in `e2e.test.js` ("claimAccess grants the claim" expected exactly `{ staff: true }`; it now expects the claim plus an expiry). Six resend-by-email calls in `delivery.test.js` and `quote-email.test.js` now pass the address the dialog shows, because (a) is the new
+rule (`quote-email.test.js` also gained a check that the OLD address is refused). `leads.test.js`, test 12, asserted that a Meta 5xx on the welcome is retried by Make; it now asserts (b): flagged "unknown", not
+sent again, while the 429 case below it is unchanged.
+
+**How the audit fixes reach the live system (all need the owner's approval; none done).** The Phase 6.1 functions: `./scripts/deploy-quote-sending.sh
+backend` (they share the changed code). The four older functions: `./scripts/deploy-quote-sending.sh older`. The new screen: `preview`, then `live`.
+**Last of all** the security rules: `./scripts/deploy-quote-sending.sh rules`, only after `older` and the new screen are live and Elite OS has been reloaded
+once (otherwise a session that has not renewed its access loses it until the page is reloaded). Someone leaving: `node scripts/revoke-staff.js
+their@address`, and remove them from `ALLOWED_EMAILS`. The provider-timeout fix (finding 9) also sits in code shared with functions that no stage above redeploys: the Phase 5 calendar functions, `startConversation`,
+`retryMedia` and the **webhook** (its media download). They pick it up when they are next deployed; none of them needs an urgent redeploy, and the webhook is deliberately left alone.
+
+**What this review could not verify** (as the audit said, and still true): Meta and Google behaviour with real accounts (the closed-window template, email
+bounces and delivery), the shell scripts against a real `gcloud` (they are tested against a pretend one), and the live IAM state of the production services.
+
 ## Rollout (M6, in progress)
 
 Every step is run by the owner in Cloud Shell, after approval, one stage at a time; each functions step asks for "yes" and saves the
@@ -810,13 +889,15 @@ revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollbac
 4b. **M7, the quotation template route:** `./scripts/deploy-quote-sending.sh channels` redeploys only the 3 sending functions (`deliverQuote`,
    `retryQuoteDelivery`, `quoteChannels`), then `preview` again for the new screen. Needs the owner's approval after the M7 report. Until it is
    done the screen and backend behave as before M7 (the new screen works with the old backend and the other way round).
+4c. **The audit fixes (2026-10-08, not deployed; each stage needs its own approval):** `./scripts/deploy-quote-sending.sh backend` again (the Phase 6.1 and quote functions share the changed code),
+   then `older` (sendReply, sendMedia, claimAccess, leadIntake), then the screen (`preview`, then `live`), and **last** `rules`. See "Audit" above for why the order matters.
 5. **Preview:** `./scripts/deploy-quote-sending.sh preview` (Hosting channel `phase61`, live data and live backend). Test as in "Testing
    the preview".
 6. **Email on, when the test plan reaches it:** `./scripts/deploy-quote-sending.sh mail on` (kill switch: `mail off`).
 7. **Live (approval):** `./scripts/deploy-quote-sending.sh live`. Then reload Elite OS.
 8. **Merge and tag (approval), after live is confirmed:** merge `phase-6-1-quote-sending` into `main` and tag it.
 
-Rollback: `./scripts/rollback-quote-sending.sh` (the last functions deploy back to the saved revisions, in seconds), `--originals` (the 14
+Rollback: `./scripts/rollback-quote-sending.sh` (the last functions deploy back to the saved revisions, in seconds; refused while a quote send is in progress unless `--ignore-prepared`), `--originals` (the 14
 quote functions back to before Phase 6.1), `--close` (the 7 new functions stop answering browsers; data stays), `--mail-off`; the screen: Firebase console > Hosting > Release history > Rollback.
 
 ## One-time Google Workspace setup (email)
