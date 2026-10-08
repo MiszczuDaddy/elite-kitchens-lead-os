@@ -17,17 +17,19 @@ REGION=europe-west1
 # The same list is in deploy-quotes.sh.
 QUOTE_FUNCS="createCustomer saveQuoteSettings setQuoteNumbering createQuote saveQuoteDraft sendQuote acceptQuote declineQuote reopenQuote reviseQuote discardQuoteDraft deleteQuoteDraft setQuoteNotes quotePdfUrl"
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
+. "$(cd "$(dirname "$0")" && pwd)/lib-run-iam.sh"
 
 case "${1:-}" in
   --close|--open)
     action=remove; [ "$1" = "--open" ] && action=add
-    for f in $QUOTE_FUNCS; do
-      gcloud run services "$action-iam-policy-binding" "$(svc "$f")" --region "$REGION" --project "$PROJECT" \
-        --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 && echo "$([ "$action" = add ] && echo opened || echo closed): $f" \
-        || echo "$f: no change (not deployed, or already $([ "$action" = add ] && echo open || echo closed))"
-    done
-    [ "$1" = "--close" ] && echo "The Quotes screen and \"Add customer\" now get errors; everything else is unaffected. Undo: $0 --open"
-    exit 0
+    # Every function is checked afterwards; a failed command is a failure, never "no change" (audit finding 7).
+    if iam_public "$action" $QUOTE_FUNCS; then
+      [ "$1" = "--close" ] && echo "Closed and checked: the Quotes screen and \"Add customer\" now get errors; everything else is unaffected. Undo: $0 --open"
+      exit 0
+    fi
+    echo
+    echo "NOT $([ "$action" = add ] && echo OPENED || echo CLOSED):$IAM_FAILED. Fix the error shown above (for example sign in again with: gcloud auth login) and run this again."
+    exit 1
     ;;
   ""|--before-phase6) ;;
   *) sed -n '2,10p' "$0" | sed 's/^# *//'; exit 1 ;;

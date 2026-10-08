@@ -7,6 +7,12 @@
 #                                                locks a draft while a send is prepared). Email stays OFF. The live screen is unaffected.
 #   ./scripts/deploy-quote-sending.sh channels   M7 only: redeploy the 3 functions that send (deliverQuote, retryQuoteDelivery, quoteChannels) so a
 #                                                closed-window quote goes in the approved quotation template. Email stays as it is.
+#   ./scripts/deploy-quote-sending.sh older      the audit fixes in the four OLDER functions (sendReply, sendMedia, claimAccess, leadIntake): one request =
+#                                                one message, a Meta 5xx is never retried by itself, and staff access that expires and is renewed.
+#                                                Run it BEFORE "rules". It saves the revisions it replaces.
+#   ./scripts/deploy-quote-sending.sh rules      the Firestore and Storage SECURITY RULES that refuse an expired staff claim (audit finding 5). LAST, and
+#                                                only after "older" and the new screen are live (docs/PHASE6_1_PLAN.md, "Audit"): a session that has not
+#                                                renewed its access loses it until the page is reloaded. Cannot be rolled back by revision: redeploy the old rules.
 #   ./scripts/deploy-quote-sending.sh preview    the new screen on Hosting PREVIEW channel phase61 (live data; production untouched)
 #   ./scripts/deploy-quote-sending.sh mail on    switch email sending ON (writes MAIL_SEND=on, the sender and the mailer service account
 #                                                to the settings file) and redeploy the 3 functions that read it. Needs setup-mailer.sh
@@ -16,8 +22,8 @@
 # Every functions deploy first saves the revisions it replaces, so ./scripts/rollback-quote-sending.sh can undo it in seconds. The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
 # them, so a repeated run cannot lose the way back. A deploy that Google throttles is retried by itself (up to 3 times).
-# Never deploys the webhook, leadIntake, calendarSweep or any other function; never changes rules, indexes, secrets, DNS, the
-# Google Calendar settings, Make or Meta. Do NOT use scripts/deploy-preview.sh: it deploys every function and makes them public.
+# Never deploys the webhook, calendarSweep or any function not named above; changes security rules ONLY in the explicit "rules" stage; never
+# changes indexes, secrets, DNS, the Google Calendar settings, Make or Meta. Do NOT use scripts/deploy-preview.sh: it deploys every function and makes them public.
 set -euo pipefail
 PROJECT=elite-kitchens-lead-os
 REGION=europe-west1
@@ -33,13 +39,14 @@ NEW_FUNCS="reopenConversation deliverQuote retryQuoteDelivery resolveQuoteDelive
 QUOTE_FUNCS="createCustomer saveQuoteSettings setQuoteNumbering createQuote saveQuoteDraft sendQuote acceptQuote declineQuote reopenQuote reviseQuote discardQuoteDraft deleteQuoteDraft setQuoteNotes quotePdfUrl"
 MAIL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"          # the functions that read the MAIL_* settings
 CHANNEL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"       # the functions that send (M7: they read the quotation template settings too)
+OLDER_FUNCS="sendReply sendMedia claimAccess leadIntake"           # older functions that the audit fixes touch (finding 5 and 6); all four are public already
 BACKEND_FUNCS="$NEW_FUNCS $QUOTE_FUNCS"
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,19p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,25p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -177,6 +184,29 @@ case "${1:-}" in
     deploy_functions $CHANNEL_FUNCS
     check_reachable "$CHANNEL_FUNCS"
     echo "Done. The live screen is unchanged. Undo in seconds with: ./scripts/rollback-quote-sending.sh"
+    ;;
+  older)
+    check_settings; check_access
+    echo "Functions: $OLDER_FUNCS"
+    echo "These are LIVE functions from earlier phases: staff replies and files, the staff sign-in check, and the Meta lead form intake."
+    confirm "Redeploy these 4 older functions to the LIVE project?"
+    install
+    echo "==> saving the revisions this replaces"
+    save_revisions $OLDER_FUNCS
+    deploy_functions $OLDER_FUNCS
+    check_reachable "$OLDER_FUNCS"
+    echo "Done. Staff access now carries an expiry and is renewed by the new screen. Do NOT run \"rules\" until the new screen (Phase 6.1) is live and you have reloaded Elite OS once."
+    echo "Undo in seconds with: ./scripts/rollback-quote-sending.sh"
+    ;;
+  rules)
+    [ -n "$(serving_revision claimaccess)" ] || { echo "Deploy the functions first: $0 older"; exit 1; }
+    echo "This publishes security rules that REFUSE a staff sign-in whose claim has expired or has no expiry (audit finding 5)."
+    echo "Before you do: (1) './scripts/deploy-quote-sending.sh older' must be done; (2) the Phase 6.1 screen must be live (it renews access every 30 minutes;"
+    echo "the old screen does not, so it would lose access after about 12 hours); (3) reload Elite OS once so your session carries the new kind of claim."
+    echo "If you are locked out afterwards: reload the page (it asks for a new claim). To go back: redeploy the previous rules (git show phase-6-quotes-complete:firestore.rules)."
+    confirm "Publish the new security rules to the LIVE project?"
+    firebase deploy --project "$PROJECT" --only firestore:rules,storage
+    echo "Done. Reload Elite OS to confirm you can still read your conversations."
     ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }

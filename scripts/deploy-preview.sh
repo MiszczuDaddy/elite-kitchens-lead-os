@@ -3,7 +3,7 @@
 #   - Storage security rules (customer media is private; staff may only drop files into their own uploads folder)
 #   - all Cloud Functions EXCEPT the live webhook, unless you pass --with-webhook
 #   - the IAM permissions those functions need (idempotent)
-#   - makes every function publicly reachable (they authenticate callers themselves)
+#   - makes the functions that authenticate callers themselves publicly reachable (the onCall and onRequest ones in functions/index.js; scheduled functions such as calendarSweep stay private)
 #   - the Hosting preview channel "phase2" (production hosting is never touched)
 # Usage:  ./scripts/deploy-preview.sh                 (Stage A: webhook untouched)
 #         ./scripts/deploy-preview.sh --with-webhook  (Stage B: ONLY after the owner approved; saves the old revision for rollback)
@@ -48,11 +48,14 @@ console.log(names.filter(n=>withHook||n!=='webhook').map(n=>'functions:'+n).join
 echo "==> deploying: $FUNCS"
 firebase deploy --project "$PROJECT" --only "$FUNCS"
 
-echo "==> making functions reachable (idempotent)"
-for svc in $(gcloud run services list --region "$REGION" --project "$PROJECT" --format='value(name)'); do
-  gcloud run services add-iam-policy-binding "$svc" --region "$REGION" --project "$PROJECT" \
-    --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $svc"
-done
+echo "==> making the callable and web functions reachable (idempotent)"
+# Not every service: the list comes from functions/index.js (audit finding 8). The old loop opened EVERY Cloud Run service, including the
+# calendar sweeper that only Cloud Scheduler may call.
+. scripts/lib-run-iam.sh
+iam_public add $(node scripts/public-functions.js) || { echo "Some functions could not be opened:$IAM_FAILED"; exit 1; }
+echo "==> keeping the scheduled functions private"
+iam_public remove calendarSweep >/dev/null 2>&1 || true
+iam_assert_private calendarSweep || { echo "calendarSweep must not be public. Stop here and report it."; exit 1; }
 
 echo "==> publishing the preview page"
 firebase hosting:channel:deploy phase2 --expires 30d --project "$PROJECT"

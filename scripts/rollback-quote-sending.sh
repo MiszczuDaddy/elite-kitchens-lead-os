@@ -5,39 +5,71 @@
 #   ./scripts/rollback-quote-sending.sh --originals  put the 14 quote functions back to how they were BEFORE Phase 6.1 (the list the first
 #                                                    "backend" deploy kept: ~/.previous-revisions-phase61.original). Run --close separately for the 7 new ones
 #   ./scripts/rollback-quote-sending.sh --close      the 7 new functions stop answering browsers (public access removed). Sent quotes,
-#                                                    delivery records and stored PDFs stay as they are; the old screen never calls them
+#                                                    delivery records and stored PDFs stay as they are; the old screen never calls them.
+#                                                    Every function is CHECKED afterwards: the script exits with an error unless all are closed
 #   ./scripts/rollback-quote-sending.sh --open       undo --close
 #   ./scripts/rollback-quote-sending.sh --mail-off   email sending off (the same as "deploy-quote-sending.sh mail off")
+#   --ignore-prepared                                 with the two restoring forms: go on although a quote send is in progress (see below)
+# Restoring older versions is REFUSED while a quote send is in progress (a quote whose PDF was prepared and whose draft is locked, with
+# nothing delivered yet): the older quote functions do not know about that lock, so the draft would stay locked. Finish or cancel such
+# sends first (the quote page shows a "send in progress" box), or use --ignore-prepared if you accept that.
 # Not done here (docs/PHASE6_1_PLAN.md, Rollback):
 #   - the screen: Firebase console > Hosting > Release history > Rollback (or redeploy tag phase-6-quotes-complete)
 #   - the 7 new functions did not exist before Phase 6.1, so their first revision has nothing older to go back to; --close shuts them.
-#   - a quote whose send is "in progress" when the backend is rolled back keeps its locked draft: the old quote functions do not know
-#     about the lock. Finish or cancel such sends first (the quote page shows them), or edit the draft only after the lock is cleared.
 set -euo pipefail
 PROJECT=elite-kitchens-lead-os
 REGION=europe-west1
+HERE="$(cd "$(dirname "$0")" && pwd)"
 # The same list is in deploy-quote-sending.sh.
 NEW_FUNCS="reopenConversation deliverQuote retryQuoteDelivery resolveQuoteDelivery cancelQuoteSend markQuoteSent quoteChannels"
-svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
+. "$HERE/lib-run-iam.sh"
 
-case "${1:-}" in
+ACT=""; ORIG=0; IGNORE=0
+for a in "$@"; do
+  case "$a" in
+    --close|--open|--mail-off) ACT="$a" ;;
+    --originals) ORIG=1 ;;
+    --ignore-prepared) IGNORE=1 ;;
+    *) sed -n '2,16p' "$0" | sed 's/^# *//'; exit 1 ;;
+  esac
+done
+
+case "$ACT" in
   --close|--open)
-    action=remove; [ "$1" = "--open" ] && action=add
-    for f in $NEW_FUNCS; do
-      gcloud run services "$action-iam-policy-binding" "$(svc "$f")" --region "$REGION" --project "$PROJECT" \
-        --member=allUsers --role=roles/run.invoker --quiet >/dev/null 2>&1 && echo "$([ "$action" = add ] && echo opened || echo closed): $f" \
-        || echo "$f: no change (not deployed, or already $([ "$action" = add ] && echo open || echo closed))"
-    done
-    [ "$1" = "--close" ] && echo "Sending a quote and Reopen conversation now get errors; everything else is unaffected. Undo: $0 --open"
-    exit 0
+    action=remove; [ "$ACT" = "--open" ] && action=add
+    if iam_public "$action" $NEW_FUNCS; then
+      [ "$ACT" = "--close" ] && echo "Closed and checked: sending a quote and Reopen conversation now get errors; everything else is unaffected. Undo: $0 --open"
+      exit 0
+    fi
+    echo
+    if [ "$ACT" = "--close" ]; then
+      echo "NOT CLOSED: these functions may still answer browsers:$IAM_FAILED"
+      echo "Do not assume sending is stopped. Fix the error shown above (for example sign in again with: gcloud auth login) and run this again."
+    else
+      echo "NOT OPENED:$IAM_FAILED. Fix the error shown above and run this again."
+    fi
+    exit 1
     ;;
-  --originals) ;;
-  --mail-off) exec "$(dirname "$0")/deploy-quote-sending.sh" mail off ;;
-  "") ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# *//'; exit 1 ;;
+  --mail-off) exec "$HERE/deploy-quote-sending.sh" mail off ;;
 esac
 
-F="$HOME/.previous-revisions-phase61"; [ "${1:-}" = "--originals" ] && F="$HOME/.previous-revisions-phase61.original"
+# Restoring older revisions. First: no send may be half done (the old functions do not understand the lock).
+if [ "$IGNORE" != 1 ]; then
+  check="${PREPARED_SENDS_CMD:-node \"$HERE/prepared-sends.js\"}"          # PREPARED_SENDS_CMD is only for the tests of this script
+  rc=0; found=$(eval "$check" 2>&1) || rc=$?
+  if [ "$rc" = 3 ]; then
+    echo "REFUSED: a quote send is in progress (its draft is locked and nothing has been delivered yet):"; echo "$found" | sed 's/^/   /'
+    echo "The older quote functions do not know about that lock. Finish or cancel each send first (open the quote: the page shows a \"send in progress\" box),"
+    echo "or run this again with --ignore-prepared if you accept that those drafts stay locked."
+    exit 1
+  elif [ "$rc" != 0 ]; then
+    echo "REFUSED: could not check whether a quote send is in progress: $found"
+    echo "Fix that (it needs access to Firestore), or run this again with --ignore-prepared to go on without the check."
+    exit 1
+  fi
+fi
+
+F="$HOME/.previous-revisions-phase61"; [ "$ORIG" = 1 ] && F="$HOME/.previous-revisions-phase61.original"
 [ -s "$F" ] || { echo "No saved revisions ($F). Nothing to roll back to."; exit 1; }
 while IFS='=' read -r s rev; do
   [ -n "$s" ] && [ -n "$rev" ] || continue
