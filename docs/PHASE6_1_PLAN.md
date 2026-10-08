@@ -711,6 +711,7 @@ flake of a Phase 5 test, unrelated to Phase 6.1.
    does **Send this version…**). Not changed here: it is safe, only less convenient. Candidate for a later small change.
 3. The two deploy and rollback scripts and the one-time mailer setup script were written in M4/M5 (the plan placed deploy scripts in M6). **None has been run.**
 4. M7 (the quote PDF inside the approved quotation template when the window is closed) was first optional and not built; the owner made it **required on 2026-10-07** and it is now built (below). Consequence: my own M5 browser test changed where it had asserted that a closed window blocks WhatsApp and needs Reopen (the product behaviour genuinely changed; the assertions were replaced by stronger ones, not weakened; every older suite passes unchanged).
+5. **The quote PDF is made in the browser (accepted limitation, owner, 2026-10-08).** The server checks that the PDF it stores and sends is byte-for-byte what the browser uploaded (SHA-256) and that it belongs to this request, but it cannot check that those bytes are the right document for the quote. Revisit with server-side PDF generation when the AI quote automation is built.
 
 ### Technical debt (documented, not fixed: out of scope)
 
@@ -846,11 +847,10 @@ on purpose (finding 5), so it now asserts the claim plus an expiry about 12 hour
 (2) `quote-recovery` failed once in the full run because it waited for the words "not sent" anywhere on the page and the customer panel already said "Draft, not sent"; the screenshot showed the app had done the right
 thing. It now waits for the send error itself; 3 of 3 runs, then the full run, pass.
 
-**Not changed, for the owner's decision.** The audit's note on PDF trust: the PDF is made in the browser and stored as it arrives, so a signed-in
-staff member's modified browser could upload a PDF that does not match the quote (the SHA-256 proves the bytes did not change afterwards, not that
-they are the right document). The only complete fix is to render the PDF on the server from the frozen quote, a redesign of how PDFs are made. I have
-**not** done it; the people who can do this are the staff you trust with the system, and every send is recorded with who did it. It is a trust
-assumption you can accept, or ask to be replaced.
+**Accepted limitation (owner decision, 2026-10-08): the quote PDF is made in the browser.** The audit noted that the PDF is made in the browser and stored as it arrives, so a signed-in
+staff member's modified browser could upload a PDF that does not match the quote (the SHA-256 proves the bytes did not change afterwards, not that they are the right document). The only
+complete fix is to render the PDF on the server from the frozen quote, which is a redesign of how PDFs are made. **The owner accepted the current architecture for now**; the people who can
+do this are the staff the owner trusts with the system, and every send is recorded with who did it. **To revisit: server-side PDF generation, when the AI quote automation is built.**
 
 **Behaviour changes to be aware of.** (a) A resend by email needs the address on screen to still be the customer's current address. (b) A lead
 welcome that gets a Meta 5xx is no longer retried automatically: it is flagged "status unknown: check WhatsApp, send manually if needed" (a 429 is
@@ -889,7 +889,7 @@ revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollbac
 4b. **M7, the quotation template route:** `./scripts/deploy-quote-sending.sh channels` redeploys only the 3 sending functions (`deliverQuote`,
    `retryQuoteDelivery`, `quoteChannels`), then `preview` again for the new screen. Needs the owner's approval after the M7 report. Until it is
    done the screen and backend behave as before M7 (the new screen works with the old backend and the other way round).
-4c. **The audit fixes (2026-10-08, not deployed; each stage needs its own approval):** `./scripts/deploy-quote-sending.sh backend` again (the Phase 6.1 and quote functions share the changed code),
+4c. **The audit fixes (2026-10-08; the owner approved going stage by stage, in this order, verifying each; email stays as it is, ON since 2026-10-08, because the settings file keeps `MAIL_SEND=on`):** `./scripts/deploy-quote-sending.sh backend` again (the Phase 6.1 and quote functions share the changed code),
    then `older` (sendReply, sendMedia, claimAccess, leadIntake), then the screen (`preview`, then `live`), and **last** `rules`. See "Audit" above for why the order matters.
 5. **Preview:** `./scripts/deploy-quote-sending.sh preview` (Hosting channel `phase61`, live data and live backend). Test as in "Testing
    the preview".

@@ -4,7 +4,7 @@
 #   ./scripts/deploy-quote-sending.sh check      read-only: the settings file against what the live functions run with, the functions'
 #                                                own access, the one-time email setup, and what "backend" would deploy. Changes nothing.
 #   ./scripts/deploy-quote-sending.sh backend    the 7 new functions, and the 14 quote functions (they share the quote code that now
-#                                                locks a draft while a send is prepared). Email stays OFF. The live screen is unaffected.
+#                                                locks a draft while a send is prepared). Email stays as it is (the settings file decides). The live screen is unaffected.
 #   ./scripts/deploy-quote-sending.sh channels   M7 only: redeploy the 3 functions that send (deliverQuote, retryQuoteDelivery, quoteChannels) so a
 #                                                closed-window quote goes in the approved quotation template. Email stays as it is.
 #   ./scripts/deploy-quote-sending.sh older      the audit fixes in the four OLDER functions (sendReply, sendMedia, claimAccess, leadIntake): one request =
@@ -161,7 +161,7 @@ case "${1:-}" in
   backend)
     check_settings; check_access
     echo "Functions: $BACKEND_FUNCS"
-    confirm "Deploy the Phase 6.1 backend to the LIVE project? Email stays off."
+    confirm "Deploy the Phase 6.1 backend to the LIVE project? Email stays as it is (see the MAIL_SEND line above)."
     install
     echo "==> saving the revisions this replaces"
     save_revisions $BACKEND_FUNCS
