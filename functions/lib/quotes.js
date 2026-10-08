@@ -253,17 +253,40 @@ function parseSend(db, data, nowMs, uid) {
   return { ref, requestId: data.requestId, reopen, value, shown, upload };
 }
 
-// The PDF: must be a real PDF of sensible size. Stored under a path unique to this request, so two different sends racing
-// for the same draft can never overwrite each other's file; the loser removes its own copy.
+// The PDF: must be a real PDF of sensible size. The stored file is IMMUTABLE (audit finding 1): its path is unique to this request AND to these
+// exact bytes (the SHA-256 is in the name), and it is written create-only. So two sends racing for the same draft can never overwrite each
+// other's file, and neither can two calls that reuse a request id for different documents; whoever created a file may remove it again (and only
+// that exact version of it), nobody else.
 async function storeSendPdf(bucket, q0, ref, n, requestId, upload) {
   const upFile = bucket.file(upload);
   let buf;
   try { [buf] = await upFile.download(); } catch (e) { throw new HttpsError('not-found', 'The PDF upload was not found. Please try again.'); }
   if (buf.length < 8 || buf.length > PDF_MAX || buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw bad('The quote PDF is missing or not a PDF (max 25 MB).');
   const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
-  const finalPath = `quotes/${q0.phone}/${ref.id}/v${n}-${crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 12)}.pdf`;
-  await bucket.file(finalPath).save(buf, { contentType: 'application/pdf', resumable: false });
-  return { upFile, size: buf.length, sha256, finalPath };
+  const finalPath = `quotes/${q0.phone}/${ref.id}/v${n}-${crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 12)}-${sha256.slice(0, 16)}.pdf`;
+  const file = bucket.file(finalPath);
+  let created = false, generation = null;
+  try { await file.save(buf, { contentType: 'application/pdf', resumable: false, preconditionOpts: { ifGenerationMatch: 0 } }); created = true; }
+  catch (e) {
+    if (!(e && (e.code === 412 || e.code === 409))) throw e;                    // it exists already: a repeat of this very request; it must be these exact bytes
+    let existing = null; try { [existing] = await file.download(); } catch (e2) { existing = null; }
+    if (!existing || crypto.createHash('sha256').update(existing).digest('hex') !== sha256) throw refused('The stored copy of this PDF does not match. Please try again.');
+  }
+  if (created) { try { generation = String(((await file.getMetadata())[0] || {}).generation || '') || null; } catch (e) { generation = null; } }
+  return { upFile, size: buf.length, sha256, finalPath, created, generation };
+}
+
+// Remove the stored copy this call created (never one it merely found, and only that exact version of the object).
+async function dropOwnCopy(bucket, stored) {
+  if (!stored.created) return;
+  await bucket.file(stored.finalPath).delete({ ignoreNotFound: true, ...(stored.generation ? { ifGenerationMatch: stored.generation } : {}) }).catch(() => {});
+}
+
+// One request id means ONE document: a repeat that carries a different PDF is refused, never reported as "existing" (audit finding 1).
+const DIFFERENT_PDF = 'This send already has a different PDF. Start the send again from the quote.';
+function sameDocument(vSnap, sha256) {
+  const v = vSnap.exists ? vSnap.data() : null, rec = v && ((v.prepared && v.prepared.pdf) || v.pdf);
+  if (rec && rec.sha256 && rec.sha256 !== sha256) throw refused(DIFFERENT_PDF);
 }
 
 // Inside the transaction, after the quote itself has been read: everything that must still be true. s = the snapshots read.
@@ -335,7 +358,7 @@ async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {
       const [snap, vSnap, conv, contact, settings] = await Promise.all([tx.get(ref), tx.get(vRef), tx.get(convRef), tx.get(contactRef), tx.get(db.doc('quoteSettings/current'))]);
       if (!snap.exists) throw new HttpsError('not-found', 'Quote not found.');
       const q = snap.data();
-      if (q.lastSendRequestId === requestId) return { ...view(ref.id, q), existing: true };
+      if (q.lastSendRequestId === requestId) { sameDocument(vSnap, stored.sha256); return { ...view(ref.id, q), existing: true }; }
       if (q.preparedSend) throw refused(IN_PROGRESS);
       const c = checkSendable({ q, vSnap, conv, contact, settings }, data, n, r.shown);
       const validUntil = addDays(data.issueDate, c.settings.validityDays);
@@ -343,10 +366,10 @@ async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {
         customer: c.current, business: c.settings.business, pdf: { path: stored.finalPath, size: stored.size, sha256: stored.sha256 }, reopen: r.reopen, value: r.value });
     });
   } catch (e) {
-    await bucket.file(stored.finalPath).delete({ ignoreNotFound: true }).catch(() => {});   // this request's own copy only
+    await dropOwnCopy(bucket, stored);                                                       // the copy THIS call created, and only that
     throw e;
   }
-  // (A repeat of the same request that raced the first one lands on the same path with the same file: nothing to remove.)
+  // (A repeat of the same request with the same PDF lands on the same path and finds the file there: it created nothing, so it removes nothing.)
   await stored.upFile.delete({ ignoreNotFound: true }).catch(() => {});
   return result;
 }
@@ -377,8 +400,8 @@ async function prepare({ db, bucket }, actor, data, { nowMs = Date.now(), uid, i
       const [snap, vSnap, conv, contact, settings] = await Promise.all([tx.get(ref), tx.get(vRef), tx.get(convRef), tx.get(contactRef), tx.get(db.doc('quoteSettings/current'))]);
       if (!snap.exists) throw new HttpsError('not-found', 'Quote not found.');
       const q = snap.data();
-      if (q.lastSendRequestId === requestId) return { ...view(ref.id, q), existing: true, committed: true };
-      if (q.preparedSend && q.preparedSend.requestId === requestId) return { ...view(ref.id, q), existing: true, committed: false, version: q.preparedSend.version };
+      if (q.lastSendRequestId === requestId) { sameDocument(vSnap, stored.sha256); return { ...view(ref.id, q), existing: true, committed: true }; }
+      if (q.preparedSend && q.preparedSend.requestId === requestId) { sameDocument(vSnap, stored.sha256); return { ...view(ref.id, q), existing: true, committed: false, version: q.preparedSend.version }; }
       if (q.preparedSend) throw refused(IN_PROGRESS);
       const c = checkSendable({ q, vSnap, conv, contact, settings }, data, n, r.shown);
       const validUntil = addDays(data.issueDate, c.settings.validityDays);
@@ -391,7 +414,7 @@ async function prepare({ db, bucket }, actor, data, { nowMs = Date.now(), uid, i
       return { ...view(ref.id, { ...q, ...patch }), existing: false, committed: false, version: n, requestId, customer: c.current, pdf };
     });
   } catch (e) {
-    await bucket.file(stored.finalPath).delete({ ignoreNotFound: true }).catch(() => {});   // this request's own copy only
+    await dropOwnCopy(bucket, stored);                                                       // the copy THIS call created, and only that
     throw e;
   }
   await stored.upFile.delete({ ignoreNotFound: true }).catch(() => {});
@@ -617,7 +640,13 @@ async function pdfLink({ db, bucket }, actor, data, { signedUrl }) {
   const q = snap.data(), vd = vSnap.data(), pdf = vd.pdf || (vd.prepared && vd.prepared.pdf);     // Phase 6.1: a prepared (not yet delivered) PDF can be downloaded too
   if (!pdf || !pdf.path) throw new HttpsError('not-found', 'This version has no stored PDF (it was not sent).');
   if (!pdf.path.startsWith(`quotes/${q.phone}/${ref.id}/`)) throw new HttpsError('permission-denied', 'Bad file path.');     // defence in depth
-  if (!(await bucket.file(pdf.path).exists())[0]) throw new HttpsError('not-found', 'The stored PDF is missing.');
+  // The file must still be exactly what was recorded (same size, same SHA-256): a replaced, changed or truncated object is never offered (audit finding 1).
+  let stored = null;
+  try { [stored] = await bucket.file(pdf.path).download(); } catch (e) { throw new HttpsError('not-found', 'The stored PDF is missing.'); }
+  if ((pdf.size != null && stored.length !== pdf.size) || (pdf.sha256 && crypto.createHash('sha256').update(stored).digest('hex') !== pdf.sha256)) {
+    console.error(JSON.stringify({ level: 'error', msg: 'stored quote pdf does not match its record', quote: ref.id, version: data.version }));
+    throw refused('The stored PDF does not match its record, so it is not offered. Please tell support.');
+  }
   const url = await signedUrl(bucket, pdf.path, { filename: `EliteKitchens-${q.ref}-v${data.version}.pdf`, mime: 'application/pdf', download: flag(data.download, 'Download') });
   return { url, filename: `EliteKitchens-${q.ref}-v${data.version}.pdf`, size: pdf.size };
 }

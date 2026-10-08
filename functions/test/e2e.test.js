@@ -170,7 +170,10 @@ test('only allowlisted, verified staff can act; claimAccess grants the claim', a
   await rejects(h.claimAccess(asUser('stranger@gmail.com'), { adminAuth, cfg }), 'permission-denied');
   await rejects(h.claimAccess({ uid: 'x', token: { email: 'thomas@example.com', email_verified: false } }, { adminAuth, cfg }), 'permission-denied');
   await h.claimAccess(asUser('THOMAS@example.com'), { adminAuth, cfg });      // case-insensitive
-  assert.deepEqual(claims, [['x', { staff: true }]]);
+  // The claim now EXPIRES (Phase 6.1 audit, finding 5): `staff: true` plus `staffUntil`, about 12 hours ahead, and nothing else.
+  assert.equal(claims.length, 1); assert.equal(claims[0][0], 'x'); assert.equal(claims[0][1].staff, true);
+  assert.deepEqual(Object.keys(claims[0][1]).sort(), ['staff', 'staffUntil']);
+  assert.ok(Number.isFinite(claims[0][1].staffUntil) && claims[0][1].staffUntil > Date.now() + 11 * 3600 * 1000 && claims[0][1].staffUntil < Date.now() + 13 * 3600 * 1000, 'staffUntil must be about 12 hours ahead');
   // actions need the claim AND the allowlist (removing someone from the list revokes them)
   await rejects(h.sendReply(null, { phone: '1', body: 'x' }, deps()), 'unauthenticated');
   await rejects(h.sendReply(asUser('thomas@example.com'), { phone: '353851234567', body: 'x' }, deps()), 'permission-denied');   // no claim
@@ -597,7 +600,7 @@ test('storage rules: staff can only CREATE in their own uploads folder; nobody c
   const su = new URL(/:\/\//.test(process.env.STORAGE_EMULATOR_HOST) ? process.env.STORAGE_EMULATOR_HOST : 'http://' + process.env.STORAGE_EMULATOR_HOST);
   const env = await initializeTestEnvironment({ projectId: PROJECT, storage: { host: su.hostname, port: Number(su.port), rules: fs.readFileSync('../storage.rules', 'utf8') } });
   await env.withSecurityRulesDisabled(async (ctx) => { await ctx.storage('gs://' + BUCKET).ref('media/353851111111/m/secret.pdf').put(PDF, { contentType: 'application/pdf' }); });
-  const st = env.authenticatedContext('u1', { staff: true }).storage('gs://' + BUCKET);
+  const st = env.authenticatedContext('u1', { staff: true, staffUntil: Date.now() + 3600000 }).storage('gs://' + BUCKET);
   const other = env.authenticatedContext('u2', { staff: false }).storage('gs://' + BUCKET);
   const anon = env.unauthenticatedContext().storage('gs://' + BUCKET);
   await assertSucceeds(st.ref('uploads/u1/a.png').put(PNG, { contentType: 'image/png' }));
@@ -615,7 +618,7 @@ test('Firestore rules: staff can read, nobody can write from a browser', async (
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: Number(port), rules: fs.readFileSync('../firestore.rules', 'utf8') } });
   await env.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('conversations/1').set({ phone: '1' }); });
-  const s = env.authenticatedContext('u1', { staff: true, email: 't@x.com', email_verified: true }).firestore();
+  const s = env.authenticatedContext('u1', { staff: true, staffUntil: Date.now() + 3600000, email: 't@x.com', email_verified: true }).firestore();
   const plain = env.authenticatedContext('u2', { email: 't@x.com', email_verified: true }).firestore();
   const anon = env.unauthenticatedContext().firestore();
   await assertSucceeds(s.doc('conversations/1').get());

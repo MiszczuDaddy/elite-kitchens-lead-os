@@ -29,7 +29,10 @@
     if (!r || !r.state) return null;
     const at = ms(r.sentAt) || ms(r.claimedAt);
     if (!at) return null;
-    if (r.state === 'failed') return { kind: 'refused', at, error: r.error || null, waiting: false, counts: false };
+    // Meta refused it at once. It uses the allowance only for the two codes that mean "wait 24 hours" / "the customer opted out", the same
+    // decision as for a template that is accepted and later reported undelivered (audit finding 12). The code is stored structured (errorCode);
+    // an older record without one is judged by its text as before.
+    if (r.state === 'failed') return { kind: 'refused', at, error: r.error || null, waiting: false, counts: BLOCKS_RETRY.test(String(r.errorCode != null ? r.errorCode : '')) };
     if (r.state === 'unknown') return { kind: 'unsure', at, error: r.error || null, waiting: true, counts: true };
     if (r.state === 'sending') {
       return nowMs - at > STUCK_MS ? { kind: 'unsure', at, error: null, waiting: true, counts: true }

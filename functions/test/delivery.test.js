@@ -445,16 +445,16 @@ test('another channel for a sent version: its stored PDF goes out, with no new v
   assert.equal((await deliveries(id)).length, 0);
   const before = await quote(id), stored = (await bucket.file((await version(id)).pdf.path).download())[0];
   const req = rid();
-  const r = await run(D.deliver, { id, version: 1, requestId: req, channels: ['email'], messages: { email: MSG.email } });
+  const r = await run(D.deliver, { id, version: 1, requestId: req, channels: ['email'], messages: { email: MSG.email }, recipients: { email: 'anna@example.com' } });
   assert.deepEqual(states(r), [['email', 'sent']]); assert.equal(r.committed, null);
   assert.ok(mail.calls[0].pdf.bytes.equals(stored)); assert.deepEqual(mail.calls[0].to, { email: 'anna@example.com' });
   assert.deepEqual(await quote(id), before);                                                           // the quote record is untouched
-  const again = await run(D.deliver, { id, version: 1, requestId: req, channels: ['email'], messages: { email: MSG.email } });
+  const again = await run(D.deliver, { id, version: 1, requestId: req, channels: ['email'], messages: { email: MSG.email }, recipients: { email: 'anna@example.com' } });
   assert.equal(mail.calls.length, 1); assert.deepEqual(states(again), [['email', 'sent']]);
   // not for a draft, not with PDF fields
   await seed(R, {}, 'Brian Byrne');
   const { id: id2 } = await make(R);
-  await rejects(run(D.deliver, { id: id2, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email } }), 'failed-precondition', /Only a version that was sent/);
+  await rejects(run(D.deliver, { id: id2, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email }, recipients: { email: 'anna@example.com' } }), 'failed-precondition', /Only a version that was sent/);
   await rejects(run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email }, pdfUploadPath: 'uploads/u1/x.pdf' }), 'invalid-argument', /Unknown field/);
 });
 

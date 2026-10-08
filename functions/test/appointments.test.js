@@ -274,7 +274,7 @@ test('security rules: staff can read appointments; strangers cannot; nobody can 
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: +port, rules: fs.readFileSync(path.join(__dirname, '../../firestore.rules'), 'utf8') } });
   try {
-    const s = env.authenticatedContext('s1', { staff: true, email: 'thomas@example.com' }).firestore();
+    const s = env.authenticatedContext('s1', { staff: true, staffUntil: Date.now() + 3600000, email: 'thomas@example.com' }).firestore();
     assert.equal((await s.doc('appointments/' + id).get()).data().phone, P);
     await assertFails(s.doc('appointments/' + id).update({ status: 'cancelled' }));
     await assertFails(s.doc('appointments/a_new').set({ phone: P }));

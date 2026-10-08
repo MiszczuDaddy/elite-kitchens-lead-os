@@ -78,10 +78,12 @@ async function claimWelcome(db, phone, now) {
 const releaseWelcome = (db, phone, sentAt) => db.collection('contacts').doc(phone).set(
   { metaLead: { welcomeClaimedAt: FieldValue.delete(), ...(sentAt ? { welcomeSentAt: Timestamp.fromMillis(sentAt) } : {}) } }, { merge: true });
 
-// HTTP error from Meta = the message was definitely NOT sent. No HTTP answer (timeout/network) = we cannot know.
+// A refusal from Meta (4xx) = the message was definitely NOT sent; only a rate limit (429) is worth trying again. A 5xx, or no answer at all
+// (timeout, network), means we cannot know whether it went, so it is never retried automatically (audit finding 6; the same rule as every
+// other send in Elite OS): the inbox flags it for a human.
 function classify(e) {
   const m = /^Meta API error (\d{3})/.exec(String(e && e.message));
-  if (m) { const code = Number(m[1]); return code === 429 || code >= 500 ? 'retryable' : 'permanent'; }
+  if (m) { const code = Number(m[1]); return code === 429 ? 'retryable' : code >= 500 ? 'unknown' : 'permanent'; }
   if (e && /not configured/.test(String(e.message))) return 'permanent';
   return 'unknown';
 }
@@ -159,7 +161,7 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock }) {
   } catch (e) {
     const kind = classify(e), err = redact(e && e.message);
     log('error', 'welcome template failed', { leadId: id, kind, err });
-    if (kind === 'retryable') {   // Meta answered with an error: definitely not sent, so Make may safely retry
+    if (kind === 'retryable') {   // Meta refused it for rate limiting: definitely not sent, so Make may safely retry
       await ref.update({ welcome: { state: 'pending', lastError: err }, claimedAt: 0 });
       await releaseWelcome(db, phone);
       return respond(503, { ok: false, status: 'retry', leadId: id }, { 'Retry-After': '30' });

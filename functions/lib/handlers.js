@@ -1,6 +1,8 @@
 // Request logic, independent of the Cloud Functions wrappers so it can be tested directly.
 const { HttpsError } = require('firebase-functions/v2/https');
 const store = require('./store');
+const outbound = require('./outbound');
+const kindOf = (e) => String((e && (e.code || e.name)) || 'Error').slice(0, 60);       // what KIND of error: never its message (it can hold names, numbers, text)
 const mediaLib = require('./media');
 const appointments = require('./appointments');
 const calendarSync = require('./calendarSync');
@@ -75,15 +77,20 @@ async function processMedia({ db, wa, bucket }, phone, msgId, timeoutMs) {
 
 // ---- Staff actions (callable) -------------------------------------------------------------
 // Sets the "staff" custom claim for allowlisted, email-verified accounts. Firestore rules key off it.
-async function claimAccess(auth, { adminAuth, cfg }) {
+// Staff access EXPIRES (audit finding 5): the claim carries `staffUntil`, the rules refuse an expired one, and the app renews it (by calling this
+// again) only while the address is still on the list. So removing someone from ALLOWED_EMAILS ends their access within STAFF_CLAIM_MS even if
+// they never call this again; scripts/revoke-staff.js ends it within about an hour.
+const STAFF_CLAIM_MS = 12 * 3600 * 1000;
+async function claimAccess(auth, { adminAuth, cfg, now = Date.now }) {
   if (!auth) throw new HttpsError('unauthenticated', 'Sign in first.');
   if (!isAllowedUser(auth, cfg)) {
     // Removed from the allowlist? Revoke any claim they still carry so Firestore rules stop serving them.
     if (auth.token && auth.token.staff === true) await adminAuth.setCustomUserClaims(auth.uid, { staff: false });
     throw new HttpsError('permission-denied', 'This Google account is not authorised for Elite Kitchens.');
   }
-  await adminAuth.setCustomUserClaims(auth.uid, { staff: true });
-  return { ok: true };
+  const staffUntil = now() + STAFF_CLAIM_MS;
+  await adminAuth.setCustomUserClaims(auth.uid, { staff: true, staffUntil });
+  return { ok: true, staffUntil };
 }
 
 async function startConversation(auth, data, { db, wa, cfg }) {
@@ -116,15 +123,23 @@ async function sendReply(auth, data, { db, wa, cfg }) {
   if (!lastIn || Date.now() - lastIn > WINDOW_MS) {
     throw new HttpsError('failed-precondition', "Outside WhatsApp's 24-hour window: the customer must message first, or start a new conversation with the template.");
   }
-  try {
-    const wamid = await wa.sendText(phone, body);
-    await store.storeOutbound(db, phone, { wamid, type: 'text', body });
-    return { ok: true };
-  } catch (e) {
-    log('error', 'text send failed', { err: e.message, details: e.details });
-    await store.storeFailedOutbound(db, phone, { type: 'text', body, error: e.message });
-    throw new HttpsError('unavailable', e.message);
+  // One request = one message (audit finding 6): claim it, then send. WhatsApp accepting the message is final: nothing after that can make it a
+  // failure, and an answer we cannot confirm is never sent a second time by itself.
+  const requestId = outbound.requestIdOf(data);
+  if ((await outbound.begin(db, phone, requestId)).done) return { ok: true, existing: true };
+  let wamid;
+  try { wamid = await wa.sendText(phone, body); }
+  catch (e) {
+    const definite = !!e && e.definite === true, text = definite ? e.message : outbound.NOT_CONFIRMED;
+    log('error', definite ? 'text refused' : 'text not confirmed', { code: (e && e.code) || null });          // a code only: never the provider's words
+    await outbound.settle(db, phone, requestId, { state: definite ? 'failed' : 'unknown' });
+    await store.storeFailedOutbound(db, phone, { type: 'text', body, error: text }).catch(() => {});
+    throw new HttpsError('unavailable', text);
   }
+  await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
+  try { await store.storeOutbound(db, phone, { wamid, type: 'text', body }); }
+  catch (e) { log('error', 'text sent but not recorded', { wamid, kind: kindOf(e) }); }                       // it WENT: the chat can catch up through the status updates
+  return { ok: true };
 }
 
 const CONTACT_FIELDS = { name: 100, email: 200, address: 300, location: 100, projectType: 60, budget: 60, source: 60, notes: 5000 };   // address: Phase 6
@@ -257,21 +272,34 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
   try { kind = mediaLib.classifyForSend(mime, size); } catch (e) { await cleanup(); throw e; }
   const filename = mediaLib.safeName(data.filename || uploadPath.split('/').pop().replace(/^\d+-\w+-/, ''), mime, 'file');
   const shown = kind === 'audio' ? '' : caption;
+  // One request = one file, and "accepted" is final (audit finding 6): see sendReply.
+  const requestId = outbound.requestIdOf(data);
+  if ((await outbound.begin(db, phone, requestId)).done) { await cleanup(); return { ok: true, existing: true }; }
+  let mediaId, wamid, sendStarted = false;
   try {
     const [buf] = await file.download();
-    const mediaId = await wa.uploadMedia(buf, mime, filename);
-    const wamid = await wa.sendMedia(phone, kind, mediaId, { caption: shown, filename });
-    const finalPath = mediaLib.objectPath(phone, wamid, filename);
-    await file.move(finalPath);
-    await store.storeOutbound(db, phone, { wamid, type: kind, body: shown || `[${kind}]`,
-      media: { mimeType: mime, filename: mediaLib.displayName(data.filename) || filename, size, caption: shown || null, storagePath: finalPath, status: 'stored', waMediaId: mediaId } });
-    return { ok: true };
+    mediaId = await wa.uploadMedia(buf, mime, filename);                       // nothing reaches the customer until the next line
+    sendStarted = true;
+    wamid = await wa.sendMedia(phone, kind, mediaId, { caption: shown, filename });
   } catch (e) {
-    log('error', 'media send failed', { err: e.message, details: e.details });
+    const definite = !sendStarted || (!!e && e.definite === true), text = definite ? e.message : outbound.NOT_CONFIRMED;
+    log('error', definite ? 'media refused' : 'media not confirmed', { code: (e && e.code) || null });
     await cleanup();
-    await store.storeFailedOutbound(db, phone, { type: kind, body: shown || `[${kind}]`, error: e.message });
-    throw new HttpsError('unavailable', e.message);
+    await outbound.settle(db, phone, requestId, { state: definite ? 'failed' : 'unknown' });
+    await store.storeFailedOutbound(db, phone, { type: kind, body: shown || `[${kind}]`, error: text }).catch(() => {});
+    throw new HttpsError('unavailable', text);
   }
+  await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
+  // It went. Keeping our own copy and the chat record are best effort: neither can turn it into a failure.
+  const finalPath = mediaLib.objectPath(phone, wamid, filename);
+  let kept = true;
+  try { await file.move(finalPath); } catch (e) { kept = false; log('error', 'media sent but the copy was not kept', { wamid, kind: kindOf(e) }); await cleanup(); }
+  try {
+    await store.storeOutbound(db, phone, { wamid, type: kind, body: shown || `[${kind}]`,
+      media: { mimeType: mime, filename: mediaLib.displayName(data.filename) || filename, size, caption: shown || null, storagePath: kept ? finalPath : null, status: kept ? 'stored' : 'failed', waMediaId: mediaId,
+        ...(kept ? {} : { error: 'The copy for this chat could not be kept.' }) } });
+  } catch (e) { log('error', 'media sent but not recorded', { wamid, kind: kindOf(e) }); }
+  return { ok: true };
 }
 
 // ---- Phase 5: appointments. The rules live in ./appointments; these wrappers only check who is asking. ----

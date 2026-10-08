@@ -310,7 +310,10 @@ test('a quote Phase 6 marked sent by hand can be emailed later: the stored PDF g
   await Q.send(deps, actor, d0, { nowMs: NOW, uid: 'u1' });
   const before = await quote(id), stored = (await bucket.file((await version(id)).pdf.path).download())[0];
   await db.doc('contacts/' + P).update({ email: 'anna.new@example.com' });                           // they corrected their address since
-  const r = await run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email } });
+  // (audit 3) a dialog still showing the OLD address is refused; the dialog that shows the current one is accepted
+  await rejects(run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email }, recipients: { email: 'anna@example.com' } }), 'failed-precondition', /email address changed/);
+  assert.equal(google.sent.length, 0);
+  const r = await run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email }, recipients: { email: 'anna.new@example.com' } });
   assert.deepEqual([r.sent, states(r), r.committed], [true, [['email', 'sent']], null]);
   const m = parse(google.sent[0]); assert.equal(m.headers.To, 'anna.new@example.com'); assert.ok(m.pdf.equals(stored));
   assert.deepEqual(await quote(id), before);
@@ -322,7 +325,7 @@ test('re-sending an OLDER version emails that version\'s own PDF, never the newe
   const d1 = await dataFor(id, {}, v1); delete d1.channels; delete d1.messages; await Q.send(deps, actor, d1, { nowMs: NOW, uid: 'u1' });
   await Q.revise(deps, actor, { id, expectedRev: (await quote(id)).rev }, { nowMs: NOW });
   const d2 = await dataFor(id, {}, v2); delete d2.channels; delete d2.messages; await Q.send(deps, actor, d2, { nowMs: NOW, uid: 'u1' });
-  const r = await run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email } });
+  const r = await run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email }, recipients: { email: 'anna@example.com' } });
   assert.equal(r.sent, true);
   const m = parse(google.sent[0]);
   assert.ok(m.pdf.equals(v1)); assert.ok(!m.pdf.equals(v2)); assert.match(m.partHeads[1], /-v1\.pdf/);
@@ -336,7 +339,7 @@ test('an expired quote can still be emailed again, and a Closed customer moves t
   await Q.send(deps, actor, d0, { nowMs: NOW, uid: 'u1' });
   const later = NOW + 40 * 24 * H;
   assert.equal(Q.isExpired(await quote(id), later), true);
-  assert.equal((await run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email } }, later)).sent, true);
+  assert.equal((await run(D.deliver, { id, version: 1, requestId: rid(), channels: ['email'], messages: { email: MSG.email }, recipients: { email: 'anna@example.com' } }, later)).sent, true);
   await seed(P, { inboxStatus: 'closed' }); await seed(R2, { inboxStatus: 'closed' }, 'Brian Byrne', 'brian@example.com');
   const a = (await make(P)).id, b = (await make(R2)).id;
   await run(D.deliver, await dataFor(a, { pipeline: {} })); await run(D.deliver, await dataFor(b, { pipeline: { reopen: true } }));

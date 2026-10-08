@@ -35,6 +35,8 @@ const mockFetch = async (url, opts = {}) => {
   if (beforeReply) await beforeReply();
   if (mode === 'refuse') return reply({ error: { code: 132001, message: 'Template name does not exist in the translation' } }, 400);
   if (mode === 'refuse-number') return reply({ error: { code: 131026, message: 'Message undeliverable to 353851111111' } }, 400);
+  if (/^code-\d+$/.test(mode)) return reply({ error: { code: Number(mode.slice(5)), message: 'Refused' } }, 400);
+  if (mode === 'leaky') return reply({ error: { code: 131026, message: 'Recipient Anna Murphy (anna@example.com, +353 85 111 1111, 085-111-1111) cannot receive: quick question about your kitchen' } }, 400);
   if (mode === 'server') return reply({ error: { code: 1, message: 'Unknown error' } }, 500);
   if (mode === 'noid') return reply({ messages: [] }, 200);
   if (mode === 'network') throw new TypeError('fetch failed');
@@ -364,4 +366,41 @@ test('logs and stored errors hold codes only: no names, numbers or message text'
   assert.ok(seen.length >= 3, 'something was logged');
   for (const secret of [P, Q, '353850000031', 'Anna', 'Murphy', 'quick question']) assert.ok(!text.includes(secret), 'leaked: ' + secret);
   assert.match(text, /131026/);
+});
+
+// ============================================ audit findings 12 and 13 (2026-10-08) =======================================
+test('audit 12: Meta\'s IMMEDIATE refusals 131049 and 131050 block the next Reopen for 24 hours, exactly like the same codes arriving later; other refusals do not', async () => {
+  for (const [i, [code, blocks]] of [['131049', true], ['131050', true], ['131026', false], ['132001', false], ['132015', false]].entries()) {
+    const p = '35385000009' + i; await seed(p); mode = 'code-' + code; calls.length = 0;
+    await rejects(go(p), 'unavailable');                                                                // Meta refused it at once: nothing was sent
+    const st = await statusOf(p);
+    assert.equal(st.canReopen, !blocks, `code ${code}: canReopen should be ${!blocks}`);
+    assert.equal((await conv(p)).reopen.errorCode, code);                                               // the structured code is kept, not just words
+    mode = 'ok'; calls.length = 0;
+    if (blocks) {
+      await rejects(go(p), 'failed-precondition', /try again after/i); assert.equal(calls.length, 0, 'a blocked code must not reach Meta again');
+      assert.ok(st.nextReopenAt > NOW + 23 * H && st.nextReopenAt <= NOW + 24 * H + 1000);
+      assert.equal((await go(p, NOW + 25 * H)).state, 'sent');                                          // free again after the day
+    } else assert.equal((await go(p)).state, 'sent');                                                   // other refusals: try again straight away, as before
+  }
+});
+
+test('audit 12: the same decision is made for a stored refusal that has no structured code (records from before this fix keep working)', () => {
+  const r = (extra) => WS.windowStatus({ reopen: { state: 'failed', claimedAt: ts(NOW - 5 * MIN), ...extra } }, NOW, null);
+  assert.equal(r({ error: 'x (code 132001)' }).canReopen, true);                                        // an old record: refused, free to retry
+  assert.equal(r({ errorCode: '131049' }).canReopen, false); assert.equal(r({ errorCode: '131050' }).canReopen, false);
+  assert.equal(r({ errorCode: '131026' }).canReopen, true);
+  assert.equal(r({ errorCode: 131049 }).canReopen, false);                                               // a number as well as a string
+});
+
+test('audit 13: logs and stored errors never carry what Meta says about the customer: not a name, an email, a formatted number or message text', async () => {
+  await seed(P, { name: 'Anna Murphy' });
+  const seen = [], orig = { log: console.log, error: console.error, warn: console.warn };
+  console.log = (...a) => seen.push(a.join(' ')); console.error = (...a) => seen.push(a.join(' ')); console.warn = (...a) => seen.push(a.join(' '));
+  let c;
+  try { mode = 'leaky'; await go().catch(() => {}); c = await conv(P); } finally { Object.assign(console, orig); }
+  const text = seen.join('\n') + JSON.stringify(c.reopen);
+  assert.ok(seen.length >= 1, 'something was logged');
+  for (const secret of ['Anna', 'Murphy', 'anna@example.com', '85 111 1111', '085-111-1111', '111 1111', 'quick question', 'about your kitchen', 'Recipient']) assert.ok(!text.includes(secret), 'leaked: ' + secret);
+  assert.match(text, /131026/);                                                                          // the code is what is kept
 });

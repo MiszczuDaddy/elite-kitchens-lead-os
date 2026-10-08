@@ -199,12 +199,14 @@ test('welcome failures: permanent errors are shown in the inbox and never retrie
   mode = 'ok'; assert.equal((await call(META())).body.status, 'duplicate'); assert.equal(sends.length, 1);               // a finished lead is not re-sent
   await wipe();
 
+  // A Meta 5xx is NOT "definitely not sent" (audit finding 6; before it was retried automatically, which could send the welcome twice): it is
+  // "unknown", flagged for a human, and never resent by itself, exactly like no answer at all. Only a 429 rate limit (below) is retried.
   mode = 'retryable'; const t1 = await call(META());
-  assert.deepEqual([t1.status, t1.body.status], [503, 'retry']); assert.equal(t1.status, 503);
-  let l = await doc('leads/1111222233334444'); assert.deepEqual([l.state, l.welcome.state], ['processing', 'pending']);
-  mode = 'ok'; const t2 = await call(META());                                                                                // Make retries: now it goes out, exactly once
-  assert.deepEqual([t2.status, t2.body.welcome], [200, 'sent']); assert.equal(sends.filter((s) => s.body.to === '353891234567').length, 2);
-  assert.equal((await msgsOf('353891234567')).filter((m) => m.status !== 'failed').length, 1);
+  assert.deepEqual([t1.status, t1.body.status, t1.body.welcome], [200, 'processed', 'unknown']);
+  let l = await doc('leads/1111222233334444'); assert.deepEqual([l.state, l.welcome.state], ['done', 'unknown']);
+  assert.ok((await msgsOf('353891234567')).some((m) => m.status === 'failed' && /unknown/i.test(m.error)));
+  mode = 'ok'; const t2 = await call(META());                                                                                // Make asks again: it is a duplicate, nothing is sent
+  assert.equal(t2.body.status, 'duplicate'); assert.equal(sends.filter((s) => s.body.to === '353891234567').length, 1);
   await wipe();
 
   mode = 'ratelimit'; const out = []; for (let i = 0; i < 4; i++) out.push(await call(META()));
@@ -292,7 +294,7 @@ test('security rules unchanged: staff can read the lead ledger, nobody can write
   await call(META());
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: Number(port), rules: fs.readFileSync('../firestore.rules', 'utf8') } });
-  const staff = env.authenticatedContext('s1', { staff: true, email: 't@x.com', email_verified: true }).firestore();
+  const staff = env.authenticatedContext('s1', { staff: true, staffUntil: Date.now() + 3600000, email: 't@x.com', email_verified: true }).firestore();
   const plain = env.authenticatedContext('s2', { email: 'x@x.com', email_verified: true }).firestore(); const anon = env.unauthenticatedContext().firestore();
   await assertSucceeds(staff.doc('leads/1111222233334444').get()); await assertFails(staff.doc('leads/1111222233334444').set({ state: 'x' })); await assertFails(staff.doc('leads/NEW000001').set({ state: 'x' }));
   await assertFails(plain.doc('leads/1111222233334444').get()); await assertFails(anon.doc('leads/1111222233334444').get());

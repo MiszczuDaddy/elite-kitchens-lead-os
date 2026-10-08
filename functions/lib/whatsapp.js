@@ -17,7 +17,10 @@ function createClient(cfg, fetchImpl = fetch) {
     if (!cfg.phoneId || !cfg.token) throw refusal('WhatsApp is not configured (phone number id / access token missing).', undefined, true);
     const ac = timeoutMs ? new AbortController() : null;
     const timer = ac && setTimeout(() => ac.abort(), timeoutMs);
-    let res;
+    // The limit covers the WHOLE answer, not only its headers (audit finding 9): the timer stays on until the body has been read. A refusal
+    // (4xx) is a refusal even if its body is lost; an accepted-looking answer whose body is lost is NOT a success and is not a refusal either:
+    // it is thrown as an ambiguous failure (definite: false), which the callers record as "not confirmed".
+    let res, data = {}, bodyLost = false;
     try {
       res = await fetchImpl(`${cfg.apiBase || 'https://graph.facebook.com'}/${cfg.version || 'v21.0'}/${cfg.phoneId}/messages`, {
         method: 'POST',
@@ -25,8 +28,9 @@ function createClient(cfg, fetchImpl = fetch) {
         body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),
         ...(ac ? { signal: ac.signal } : {}),
       });
+      try { data = await res.json(); } catch (e) { data = {}; bodyLost = !!(ac && ac.signal.aborted); }
     } finally { if (timer) clearTimeout(timer); }
-    const data = await res.json().catch(() => ({}));
+    if (bodyLost && res.ok) throw refusal('Meta API answer was not received in time', undefined, false);
     if (!res.ok) {
       const e = data.error || {};
       throw refusal(`Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data, res.status >= 400 && res.status < 500, e.code);
@@ -55,10 +59,11 @@ function createClient(cfg, fetchImpl = fetch) {
       form.append('file', new Blob([buffer], { type: mime }), filename);
       const ac = timeoutMs ? new AbortController() : null;
       const timer = ac && setTimeout(() => ac.abort(), timeoutMs);
-      let res;
-      try { res = await fetchImpl(`${base()}/${cfg.phoneId}/media`, { method: 'POST', headers: auth(), body: form, ...(ac ? { signal: ac.signal } : {}) }); }
-      finally { if (timer) clearTimeout(timer); }
-      const data = await (await ok(res, 'Media upload')).json();
+      let data;                                                                    // the limit covers the answer's body too (audit finding 9)
+      try {
+        const res = await fetchImpl(`${base()}/${cfg.phoneId}/media`, { method: 'POST', headers: auth(), body: form, ...(ac ? { signal: ac.signal } : {}) });
+        data = await (await ok(res, 'Media upload')).json();
+      } finally { if (timer) clearTimeout(timer); }
       if (!data.id) throw new WhatsAppError('Meta returned no media id', data);
       return data.id;
     },

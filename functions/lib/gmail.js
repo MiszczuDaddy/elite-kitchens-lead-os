@@ -26,17 +26,21 @@ class GmailError extends Error {
 async function request(fetchImpl, url, { method = 'GET', headers = {}, body, form, timeoutMs = 8000 } = {}) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), Math.max(1, timeoutMs));
-  let res;
+  // The time limit covers the WHOLE answer: the timer stays on until the body has been read, so a provider that sends its headers and then
+  // stalls cannot hold the send up (audit finding 9). A refusal (a non-2xx status) is classified by its status even if its body is lost;
+  // a "success" whose body is lost is not a success: it is a timeout or a network failure, which the caller treats as unknown.
+  let res, text = '', bodyLost = false;
   try {
     const h = { ...headers };
     let payload;
     if (form) { h['content-type'] = 'application/x-www-form-urlencoded'; payload = new URLSearchParams(form).toString(); }
     else if (body) { h['content-type'] = 'application/json'; payload = JSON.stringify(body); }
     res = await fetchImpl(url, { method, headers: h, body: payload, signal: ac.signal });
+    try { text = await res.text(); } catch (e) { bodyLost = true; }
   } catch (e) {
     throw new GmailError(ac.signal.aborted ? 'timeout' : 'network', 0, false);
   } finally { clearTimeout(timer); }
-  const text = await res.text().catch(() => '');
+  if (bodyLost && res.ok) throw new GmailError(ac.signal.aborted ? 'timeout' : 'network', 0, false);
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
   return { status: res.status, ok: res.ok, json };

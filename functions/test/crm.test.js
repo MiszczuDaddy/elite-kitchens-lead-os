@@ -129,7 +129,7 @@ test('security rules: staff can read the new fields; nobody can write them from 
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: +port, rules: fs.readFileSync(require('path').join(__dirname, '../../firestore.rules'), 'utf8') } });
   try {
-    const s = env.authenticatedContext('s1', { staff: true, email: 'thomas@example.com' }).firestore();
+    const s = env.authenticatedContext('s1', { staff: true, staffUntil: Date.now() + 3600000, email: 'thomas@example.com' }).firestore();
     assert.equal((await s.doc('contacts/' + P).get()).data().quoteValue, 14500);
     assert.ok((await s.doc('conversations/' + P).get()).data().stageDates.won);
     await assertFails(s.doc('contacts/' + P).update({ quoteValue: 1 }));

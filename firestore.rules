@@ -1,10 +1,15 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only signed-in staff (custom claim set by the claimAccess function) may READ.
+    // Only signed-in staff (custom claim set by the claimAccess function) may READ, and only while the claim has not EXPIRED: claimAccess sets
+    // `staffUntil` (about 12 hours ahead) and the app renews it while the person is still allowed, so removing someone really ends their access.
+    // A claim with no `staffUntil` (the old kind), an old one or a malformed one is no access (audit finding 5).
     // Nobody can write from a browser: every write goes through Cloud Functions (Admin SDK).
+    function staff() {
+      return request.auth != null && request.auth.token.staff == true && request.auth.token.get('staffUntil', 0) > request.time.toMillis();
+    }
     match /{document=**} {
-      allow read: if request.auth != null && request.auth.token.staff == true;
+      allow read: if staff();
       allow write: if false;
     }
   }

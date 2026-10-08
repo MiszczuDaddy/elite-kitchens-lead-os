@@ -15,7 +15,7 @@ window.QuoteSettings = (() => {
     ['Tall pull-out larder', 'per unit', 'fixed'], ['150mm base pull-out', 'per unit', 'fixed'], ['LED underpanel', 'per metre', 'fixed'],
     ['LED inside larder', 'per unit', 'fixed'], ['LED kickboard', 'per metre', 'fixed'], ['Composite sink', 'included', 'free'],
   ];
-  const T = { host: null, form: null, settings: null, counter: null, dirty: false, saving: false, onLeaveOk: null };
+  const T = { host: null, form: null, settings: null, counter: null, dirty: false, saving: false, onLeaveOk: null, formRev: 0, stale: false };
   const pad4 = (n) => String(n).padStart(4, '0');
   const num = (input) => (input.value.trim() === '' ? null : Number(input.value));
 
@@ -84,8 +84,14 @@ window.QuoteSettings = (() => {
     const btns = el('div', 'qs-cat-btns'); btns.append(add, std);
     c.append(rows, btns);
     const foot = el('div', 'qs-foot'); const msgBox = el('div', 'd-msg'); msgBox.id = 'qs-msg'; msgBox.setAttribute('role', 'status');
+    // shown only when someone else saved while this form had unsaved changes (audit finding 2)
+    const conflict = el('p', 'd-msg err'); conflict.id = 'qs-conflict'; conflict.hidden = true; conflict.setAttribute('role', 'alert');
+    conflict.append('Quote Settings were changed by someone else while you were editing, so your changes are not saved. ');
+    const cr = el('button', 'linkbtn', 'Load their version (my changes are lost)'); cr.type = 'button'; cr.id = 'qs-conflict-reload'; cr.onclick = () => { T.dirty = false; fill(T.settings); renderState(); };
+    const ck = el('button', 'linkbtn', 'Keep my changes and replace theirs'); ck.type = 'button'; ck.id = 'qs-conflict-keep'; ck.onclick = () => { T.formRev = T.settings ? T.settings.rev : 0; T.stale = false; conflict.hidden = true; msg('Unsaved changes'); renderState(); };
+    conflict.append(cr, ' · ', ck);
     const save = el('button', 'btn btn-primary', 'Save settings'); save.type = 'submit'; save.id = 'qs-save';
-    foot.append(msgBox, save); f.append(foot);
+    foot.append(conflict, msgBox, save); f.append(foot);
     f.addEventListener('input', markDirty);
     f.addEventListener('submit', (e) => { e.preventDefault(); saveSettings(); });
 
@@ -117,7 +123,8 @@ window.QuoteSettings = (() => {
     set('priceList.drawerBoxes.cemux', pl.drawerBoxes && pl.drawerBoxes.cemux); set('priceList.drawerBoxes.blum', pl.drawerBoxes && pl.drawerBoxes.blum);
     set('priceList.glazing.small', pl.glazing && pl.glazing.small); set('priceList.glazing.large', pl.glazing && pl.glazing.large);
     $('qs-catalogue').replaceChildren(...(pl.extras || []).map(catalogueRow));
-    T.dirty = false; renderState();
+    T.dirty = false; T.formRev = s ? s.rev : 0; T.stale = false; { const c = $('qs-conflict'); if (c) c.hidden = true; }      // the form is based on this revision
+    renderState();
   }
   function read() {
     const g = (k) => num(field(k));
@@ -146,11 +153,12 @@ window.QuoteSettings = (() => {
     }
   }
   async function saveSettings() {
-    if (T.saving) return;
+    if (T.saving || T.stale) return;                                              // when someone else saved meanwhile: decide first (audit 2)
     T.saving = true; $('qs-save').disabled = true; msg('Saving…'); showErrors([]);
     const data = read();
     try {
-      await call('saveQuoteSettings')({ ...data, expectedRev: T.settings ? T.settings.rev : 0 });
+      const r = (await call('saveQuoteSettings')({ ...data, expectedRev: T.formRev })).data;       // the revision the FORM is based on, not the newest one seen
+      if (r && Number.isInteger(r.rev)) T.formRev = r.rev;
       T.dirty = false; msg('Saved', 'ok');
     } catch (err) {
       msg(errText(err), 'err'); $('qs-save').disabled = false;
@@ -168,7 +176,7 @@ window.QuoteSettings = (() => {
       ? `The next quote will be EK-${pad4(c.next)}.`
       : `Numbering is not set up yet: quotes get test numbers (next: TEST-${pad4(c.testNext || 1)}).`;
     if (!$('qs-next').value || document.activeElement !== $('qs-next')) $('qs-next').value = c.next != null ? String(c.next) : '';
-    $('qs-save').disabled = T.saving || (!!T.settings && !T.dirty);
+    $('qs-save').disabled = T.saving || T.stale || (!!T.settings && !T.dirty);
   }
   async function setNumbering() {
     const next = num($('qs-next')), m = $('qs-num-msg');
@@ -191,7 +199,7 @@ window.QuoteSettings = (() => {
     T.settings = settings; T.counter = counter;
     if (!T.form) return;
     if (!T.dirty) fill(settings);
-    else if (settings && settings.rev !== prevRev) msg('Quote Settings were changed by someone else. Saving now would be refused: reload this screen.', 'err');
+    else if (settings && settings.rev !== T.formRev) { T.stale = true; const c = $('qs-conflict'); if (c) c.hidden = false; msg(''); }
     renderState();
   }
   function stop() { T.form = null; T.settings = null; T.counter = null; T.dirty = false; if (T.host) T.host.replaceChildren(); }

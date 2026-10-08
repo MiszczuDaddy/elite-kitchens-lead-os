@@ -6,7 +6,7 @@
     "node": "22"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/e2e.test.js test/leads.test.js test/crm.test.js test/crm-metrics.test.js test/appointments.test.js test/calendar.test.js test/quote-engine.test.js test/quotes.test.js test/customers.test.js test/reopen.test.js test/delivery.test.js test/gmail.test.js test/quote-whatsapp.test.js test/quote-email.test.js test/quote-send-model.test.js test/quote-template.test.js"
+    "test": "node --test --test-concurrency=1 test/e2e.test.js test/leads.test.js test/crm.test.js test/crm-metrics.test.js test/appointments.test.js test/calendar.test.js test/quote-engine.test.js test/quotes.test.js test/customers.test.js test/reopen.test.js test/delivery.test.js test/gmail.test.js test/quote-whatsapp.test.js test/quote-email.test.js test/quote-send-model.test.js test/quote-template.test.js test/provider-timeouts.test.js test/audit.test.js test/access.test.js test/scripts.test.js"
   },
   "dependencies": {
     "firebase-admin": "^14.5.0",

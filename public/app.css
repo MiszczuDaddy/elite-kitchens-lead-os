@@ -802,3 +802,5 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 @media (max-width: 899px) { .qsend-res-actions { flex-wrap: wrap; } .qsend-chan-state, .qsend-chan > .btn { margin-left: 0; } }
 /* M7: the approved template's words are fixed, so the box that shows them looks read-only */
 .qsend-chan textarea[readonly] { background: var(--nav); color: var(--muted); cursor: default; }
+
+.qv-ver-links { display: inline-flex; align-items: baseline; gap: 14px; flex: none; }

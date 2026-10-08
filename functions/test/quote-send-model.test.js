@@ -177,3 +177,16 @@ test('a delivery that went by template says so in plain words, and a normal one 
   assert.equal(M.describe({ ...sent, route: 'document' }, NOW).detail, ''); assert.equal(M.describe(sent, NOW).detail, '');
   assert.match(M.describe({ ...sent, route: 'template', resolvedBy: 'staff' }, NOW).detail, /template.*Confirmed by staff\./);
 });
+
+// ============================================================== audit 11: a channel left waiting can be sent now ==============================
+test('a channel that is "waiting to send" is only offered "send now" once it has been left behind for a while (never while the call is plainly still working)', () => {
+  const born = (n) => ts(n);
+  const fresh = M.describe({ channel: 'email', state: 'queued', createdAt: born(NOW - 10 * 1000) }, NOW);
+  assert.deepEqual([fresh.state, fresh.actions, fresh.detail], ['queued', [], '']);
+  const left = M.describe({ channel: 'email', state: 'queued', createdAt: born(NOW - 5 * MIN) }, NOW);
+  assert.deepEqual([left.state, left.actions], ['queued', ['resume']]); assert.match(left.detail, /not started.*send it now/i);
+  assert.deepEqual(M.describe({ channel: 'email', state: 'queued' }, NOW).actions, []);                       // no time recorded: never guess
+  assert.deepEqual(M.describe({ channel: 'whatsapp', state: 'sending', claimedAt: ts(NOW - 10 * 1000) }, NOW).actions, []);    // sending is not "waiting"
+  const stalled = M.describe({ channel: 'whatsapp', state: 'sending', claimedAt: ts(NOW - 4 * MIN) }, NOW);
+  assert.deepEqual([stalled.state, stalled.actions], ['unknown', ['arrived', 'not_arrived']]);                  // a stalled send is "not confirmed": no retry, no resume
+});

@@ -65,6 +65,8 @@ function whatsappChannel({ db, bucket, wa, quoteTemplate = null, now = Date.now,
         log('warn', 'quote pdf upload to WhatsApp failed', { code: (e && e.code) || null });
         throw new ChannelError(`WhatsApp could not take the PDF${e && e.code ? ` (code ${e.code})` : ''}. Nothing was sent.`, { code: 'upload_failed', definite: true });
       }
+      // The customer may have been erased while the PDF was uploading: then nothing is sent (audit finding 4).
+      if (!(await db.collection('conversations').doc(ctx.phone).get()).exists) throw new ChannelError('This customer was erased, so nothing was sent.', { code: 'customer_erased', definite: true });
       // 2. the message itself
       const asTemplate = () => wa.sendTemplateWithDocument(ctx.phone, { name: quoteTemplate.name, lang: quoteTemplate.lang, mediaId, filename: ctx.filename, params: [first, label] }, { timeoutMs });
       let wamid, route = (check && check.route) || 'document', text = ctx.message;
@@ -93,16 +95,27 @@ function whatsappChannel({ db, bucket, wa, quoteTemplate = null, now = Date.now,
 // The outgoing document in the existing conversation, labelled with the quote. The chat keeps its own copy of the PDF under
 // media/ so the existing media viewing, retention and erasure code is used unchanged; the quote keeps the original. `text` is
 // what the customer was actually sent (the caption, or the template's words).
+// If the customer was erased while the message was in flight, NOTHING is written and nothing is left behind (audit finding 4): the erase
+// cannot see work that finishes after it, so this checks before it writes, writes only if the conversation still exists, and checks again
+// afterwards, removing its own file and message if the customer has gone in the meantime.
 async function recordInChat({ db, bucket }, ctx, wamid, mediaId, text, route) {
+  const convRef = db.collection('conversations').doc(ctx.phone);
+  if (!(await convRef.get()).exists) return;
   const finalPath = `media/${ctx.phone}/${wamid}/${ctx.filename}`;
   let media = { mimeType: 'application/pdf', filename: ctx.filename, size: ctx.pdf.size, caption: text || null, storagePath: finalPath, status: 'stored', waMediaId: mediaId, sha256: ctx.pdf.sha256 };
-  try { await bucket.file(ctx.pdf.path).copy(bucket.file(finalPath)); }
+  let copied = false;
+  try { await bucket.file(ctx.pdf.path).copy(bucket.file(finalPath)); copied = true; }
   catch (e) {
     log('error', 'quote document chat copy failed', { wamid });
     media = { ...media, storagePath: null, status: 'failed', error: 'The copy for this chat could not be made. The PDF is still on the quote.' };
   }
-  await store.storeOutbound(db, ctx.phone, { wamid, type: 'document', body: text || '[document]', media,
+  const dropFile = () => (copied ? bucket.file(finalPath).delete({ ignoreNotFound: true }).catch(() => {}) : null);
+  const wrote = await store.storeOutbound(db, ctx.phone, { wamid, type: 'document', body: text || '[document]', media, onlyIfConversation: true,
     extra: { quote: { id: ctx.quoteId, ref: ctx.quoteRef, version: ctx.version, deliveryId: ctx.deliveryId, ...(route === 'template' ? { template: true } : {}) } } });
+  if (!wrote) { await dropFile(); return; }
+  if (!(await convRef.get()).exists) {                                     // erased between our write and now: take our message and file with it
+    await convRef.collection('messages').doc(wamid).delete().catch(() => {}); await dropFile();
+  }
 }
 
 // ================================================ Email (M4): the Gmail API, as info@elitekitchens.ie ============================

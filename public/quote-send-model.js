@@ -72,6 +72,7 @@
   // the server (quoteDelivery.js effectiveState). The result has everything the screen needs and nothing it has to work out:
   //   mark: the symbol; tone: ok / bad / warn / info; title: "WhatsApp: sent 14:32"; detail: the plain reason or advice; actions.
   const STUCK_MS = 3 * 60 * 1000;
+  const QUEUED_MS = 45 * 1000;                           // a channel still "waiting" after this long is offered "Send now"
   const effective = (d, nowMs) => (d.state === 'sending' && ms(d.claimedAt) != null && nowMs - ms(d.claimedAt) > STUCK_MS ? 'unknown' : d.state);
   function describe(d, nowMs) {
     const name = CHANNEL_NAME[d.channel] || d.channel, st = effective(d, nowMs), at = ms(d.sentAt), err = d.error && d.error.text;
@@ -81,7 +82,12 @@
     if (st === 'unknown') return { state: st, mark: '?', tone: 'warn', title: `${name}: delivery not confirmed`,
       detail: (err || 'We could not tell whether it was delivered.') + ' It will not be sent again by itself.', actions: ['arrived', 'not_arrived'] };
     if (st === 'sending') return { state: st, mark: '…', tone: 'info', title: `${name}: sending…`, detail: '', actions: [] };
-    if (st === 'queued') return { state: st, mark: '…', tone: 'info', title: `${name}: waiting to send`, detail: '', actions: [] };
+    // A channel that is still waiting a while after the send began was left behind (the call that was sending it stopped): it can be sent now.
+    // The server claims it first, so this can never send it twice (audit finding 11).
+    if (st === 'queued') {
+      const born = ms(d.createdAt), left = born != null && nowMs - born > QUEUED_MS;
+      return { state: st, mark: '…', tone: 'info', title: `${name}: waiting to send`, detail: left ? 'This channel was not started. You can send it now.' : '', actions: left ? ['resume'] : [] };
+    }
     if (st === 'cancelled') return { state: st, mark: '–', tone: 'info', title: `${name}: cancelled`, detail: '', actions: [] };
     return { state: st, mark: '·', tone: 'info', title: name, detail: '', actions: [] };
   }

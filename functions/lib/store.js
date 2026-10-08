@@ -34,15 +34,20 @@ async function storeInbound(db, m) {
 
 // Record an outbound message that Meta accepted. Handles the race where the delivery status webhook
 // arrives before we get to write the message: keep the (higher) status the webhook already stored.
-async function storeOutbound(db, phone, { wamid, type, body, media, extra }) {      // extra (Phase 6.1): more fields on the message, e.g. the quote label
+// extra (Phase 6.1): more fields on the message, e.g. the quote label.
+// onlyIfConversation (audit finding 4): write NOTHING unless the conversation still exists, and say whether it did. A send that was in flight
+// while the customer was erased must not bring the conversation back; the older callers keep the old behaviour (they may create it).
+async function storeOutbound(db, phone, { wamid, type, body, media, extra, onlyIfConversation }) {
   const convRef = db.collection('conversations').doc(phone);
   const msgRef = convRef.collection('messages').doc(wamid);
-  await db.runTransaction(async (tx) => {
-    const existing = await tx.get(msgRef);
+  return db.runTransaction(async (tx) => {
+    const [existing, conv] = await Promise.all([tx.get(msgRef), onlyIfConversation ? tx.get(convRef) : null]);
+    if (onlyIfConversation && !conv.exists) return false;
     const base = { wamid, direction: 'out', type, body, media: media || null, error: null, ...(extra || {}) };
     if (existing.exists) tx.set(msgRef, { ...base, createdAt: Timestamp.now() }, { merge: true });   // status untouched
     else tx.set(msgRef, { ...base, status: 'sent', createdAt: Timestamp.now() });
     tx.set(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(body), lastMessageType: type, lastMessageDirection: 'out' }, { merge: true });
+    return true;
   });
 }
 

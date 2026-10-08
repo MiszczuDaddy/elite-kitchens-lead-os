@@ -189,10 +189,11 @@ const SEND_KEYS = ['id', 'expectedRev', 'requestId', 'issueDate', 'settingsRev',
 async function deliver(deps, actor, data, { nowMs = Date.now(), uid } = {}) {
   const { db } = deps;
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw bad('Missing details.');
-  onlyKeys(data, [...SEND_KEYS, 'version', 'channels', 'messages', 'subject']);
+  onlyKeys(data, [...SEND_KEYS, 'version', 'channels', 'messages', 'subject', 'recipients']);
   const channels = cleanChannels(deps, data), messages = cleanMessages(deps, channels, data), subject = cleanSubject(data);
   let id = data.id, requestId = data.requestId;
   if (data.version == null) {
+    if ('recipients' in data) throw bad('Unknown field: recipients');                  // a draft is checked against the customer details on screen instead
     const sendData = {};
     for (const k of SEND_KEYS) if (k in data) sendData[k] = data[k];
     await quotes.prepare(deps, actor, sendData, { nowMs, uid, inTx: (tx, ctx) => {          // the delivery records are created with the preparation
@@ -206,10 +207,20 @@ async function deliver(deps, actor, data, { nowMs = Date.now(), uid } = {}) {
   return summary(deps, id, requestId, nowMs, { committed: committedOf(results) });
 }
 // Another channel for a version the customer already has: no prepare, no commit. The same request again creates nothing twice.
-// The email goes to the customer's CURRENT address (they may have corrected it since); the PDF is the frozen one.
+// The email goes to the address the staff member REVIEWED (data.recipients.email), and only if that is still the customer's current address:
+// if it changed or was removed meanwhile the send is refused, and it NEVER falls back to an older address frozen on the version (audit finding 3).
+// The PDF is the frozen one.
 async function createForSent(deps, actor, data, channels, messages, subject, nowMs) {
   const { db } = deps;
   const ref = quoteRef(db, data.id);
+  let shownEmail = null;
+  if (channels.includes('email')) {
+    const r = data.recipients;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('Say which email address this is for.');
+    onlyKeys(r, ['email'], 'recipients');
+    if (typeof r.email !== 'string' || !r.email.trim()) throw bad('Say which email address this is for.');
+    shownEmail = r.email;
+  } else if (data.recipients != null) throw bad('Unknown field: recipients');
   if (typeof data.requestId !== 'string' || !REQUEST_ID.test(data.requestId)) throw bad('Missing request id.');
   if (!Number.isInteger(data.version) || data.version < 1) throw bad('Missing version.');
   await db.runTransaction(async (tx) => {
@@ -220,8 +231,12 @@ async function createForSent(deps, actor, data, channels, messages, subject, now
     const contact = await tx.get(db.collection('contacts').doc(qSnap.data().phone));
     const dRefs = channels.map((c) => ref.collection('deliveries').doc(deliveryId(data.version, data.requestId, c)));
     const existing = await Promise.all(dRefs.map((r) => tx.get(r)));
-    const email = (contact.exists && contact.data().email) || (v.customer && v.customer.email) || null;
-    const ctx = { ref, q: qSnap.data(), n: data.version, requestId: data.requestId, pdf: v.pdf, customer: { ...v.customer, email }, business: v.business, now: at(nowMs) };
+    const current = (contact.exists && contact.data().email) || null;
+    if (shownEmail !== null) {
+      if (!current) throw refused('This customer has no email address any more. Add one in their Details first.');
+      if (current !== shownEmail) throw refused("The customer's email address changed while you were sending. Please check it and try again.");
+    }
+    const ctx = { ref, q: qSnap.data(), n: data.version, requestId: data.requestId, pdf: v.pdf, customer: { ...v.customer, email: current }, business: v.business, now: at(nowMs) };
     channels.forEach((c, i) => { if (!existing[i].exists) tx.create(dRefs[i], newDelivery(ctx, c, messages[c], actor, subject)); });
   });
 }

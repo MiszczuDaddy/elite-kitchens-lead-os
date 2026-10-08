@@ -136,10 +136,28 @@ $('signout').onclick = doSignOut;
 $('signout-m').onclick = doSignOut;
 $('login-signout').onclick = doSignOut;
 
+// Staff access EXPIRES (audit finding 5). claimAccess gives a claim that lasts about 12 hours and refuses anyone who is no longer allowed. While this
+// window stays open the claim is renewed every 30 minutes (and when the tab comes back to the front after a while), so a person who is still
+// allowed never notices; a person who has been removed is signed out at the next renewal, and Firestore and Storage refuse them once the claim
+// has expired in any case. A hiccup (offline) just tries again later: the current claim stays valid until it expires.
+const ACCESS_RENEW_MS = 30 * 60 * 1000;
+let accessTimer = null, lastAccessAt = 0;
+async function renewAccess() {
+  const user = auth.currentUser; if (!user) return;
+  try { await call('claimAccess')(); await user.getIdToken(true); lastAccessAt = Date.now(); }
+  catch (e) {
+    if (e && e.code === 'functions/permission-denied') { stopAccessRenewal(); $('loginmsg').textContent = `${user.email} is no longer authorised for Elite Kitchens.`; await doSignOut(); }
+  }
+}
+function stopAccessRenewal() { if (accessTimer) { clearInterval(accessTimer); accessTimer = null; } }
+function startAccessRenewal() { stopAccessRenewal(); lastAccessAt = Date.now(); accessTimer = setInterval(renewAccess, ACCESS_RENEW_MS); }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && accessTimer && Date.now() - lastAccessAt > 15 * 60 * 1000) renewAccess(); });
+
 auth.onAuthStateChanged(async (user) => {
   stopListening();
   $('login-signout').hidden = true;
   if (!user) {
+    stopAccessRenewal();
     $('login').hidden = false; $('app').hidden = true;
     return;
   }
@@ -152,6 +170,7 @@ auth.onAuthStateChanged(async (user) => {
     return;
   }
   $('login').hidden = true; $('app').hidden = false;
+  startAccessRenewal();
   watchList();
   routeFromHash();
 });
@@ -583,7 +602,7 @@ function windowNote(c, w) {
   const name = c.name || 'the customer', r = w.reopen;
   if (w.state === 'awaiting') return `Template sent ${whenText(r.at)} (${DELIVERY[r.kind]}). Waiting for ${name} to reply. You can't send normal messages until they do.`;
   let t = `${ms(c.lastInboundAt) ? `More than 24 hours since ${name} last messaged.` : `${name} hasn't messaged yet.`} WhatsApp only allows an approved template until they reply.`;
-  if (r && r.kind === 'refused') t += ` The last attempt did not go through: ${r.error || 'WhatsApp refused it.'}`;
+  if (r && r.kind === 'refused') t += ` The last attempt did not go through: ${r.error || 'WhatsApp refused it.'}${w.canReopen ? '' : ` You can try again after ${whenText(w.nextReopenAt)}.`}`;
   else if (r && r.kind === 'undelivered') t += ` WhatsApp could not deliver the template sent ${whenText(r.at)}${r.error ? ` (${r.error})` : ''}.${w.canReopen ? '' : ` You can try again after ${whenText(w.nextReopenAt)}.`}`;
   else if (r) t += ` The template sent ${whenText(r.at)} got no reply.`;
   return t;
@@ -614,6 +633,19 @@ const finishPending = (p, phone) => {
   if (S.selected === phone) renderMessages();
 };
 
+// One request id per message (audit finding 6). The server sends a request once, and never a second time after an answer it could not confirm.
+// If the answer never ARRIVED here (the connection dropped) and the SAME message is sent again to the same customer within 5 minutes, the same
+// id is reused, so the server recognises it and nothing goes out twice. A message that was refused or answered is a new request next time.
+const newRid = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+let lastTry = null;
+function requestFor(phone, key) {
+  const again = lastTry && lastTry.phone === phone && lastTry.key === key && lastTry.unsure && Date.now() - lastTry.at < 5 * 60 * 1000;
+  lastTry = { phone, key, requestId: again ? lastTry.requestId : newRid(), at: Date.now(), unsure: false };
+  return lastTry.requestId;
+}
+const answered = (err) => !!(err && /^functions\/(unavailable|failed-precondition|invalid-argument|permission-denied|not-found|unauthenticated|resource-exhausted)$/.test(err.code));
+const noteUnsure = (err) => { if (lastTry && !answered(err)) lastTry.unsure = true; };
+
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   const phone = S.selected;
@@ -629,9 +661,10 @@ $('composer').addEventListener('submit', async (e) => {
   ta.value = ''; ta.style.height = 'auto';
   renderMessages();
   try {
-    await call('sendReply')({ phone, body });
+    await call('sendReply')({ phone, body, requestId: requestFor(phone, body) });
     finishPending(p, phone);
   } catch (err) {
+    noteUnsure(err);
     S.pending = S.pending.filter((x) => x !== p);
     // Meta rejections are recorded as a failed message by the server; other errors leave nothing behind, so keep the text.
     if (S.selected === phone) {
@@ -710,9 +743,10 @@ async function sendAttachment(phone, caption) {
     task.on('state_changed', (s) => { p.progress = Math.round(100 * s.bytesTransferred / Math.max(1, s.totalBytes)); if (S.selected === phone) renderMessages(); });
     await task;
     p.progress = null; if (S.selected === phone) renderMessages();        // uploaded; now handing it to WhatsApp
-    await call('sendMedia')({ phone, uploadPath: path, caption, filename: att.file.name });
+    await call('sendMedia')({ phone, uploadPath: path, caption, filename: att.file.name, requestId: requestFor(phone, `${att.file.name}|${att.file.size}|${caption}`) });
     finishPending(p, phone);
   } catch (err) {
+    noteUnsure(err);
     S.pending = S.pending.filter((x) => x !== p);
     if (S.selected === phone) {                                              // put everything back so nothing is lost
       if (!(err && err.code === 'functions/unavailable')) { S.attach = { ...keep, url: keep.kind === 'image' ? URL.createObjectURL(keep.file) : null }; $('attach-bar').hidden = false;

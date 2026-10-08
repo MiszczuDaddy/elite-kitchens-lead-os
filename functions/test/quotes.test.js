@@ -603,7 +603,7 @@ test('security rules: staff can read quotes, versions and settings; nobody can w
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: +port, rules: fs.readFileSync(path.join(__dirname, '../../firestore.rules'), 'utf8') } });
   try {
-    const s = env.authenticatedContext('s1', { staff: true, email: 'thomas@example.com' }).firestore();
+    const s = env.authenticatedContext('s1', { staff: true, staffUntil: Date.now() + 3600000, email: 'thomas@example.com' }).firestore();
     assert.equal((await s.doc('quotes/' + id).get()).data().phone, P);
     await assertSucceeds(s.doc(`quotes/${id}/versions/1`).get());
     await assertSucceeds(s.doc('quoteSettings/current').get());
@@ -620,7 +620,7 @@ test('security rules: staff can read quotes, versions and settings; nobody can w
   const su = new URL(/:\/\//.test(process.env.STORAGE_EMULATOR_HOST) ? process.env.STORAGE_EMULATOR_HOST : 'http://' + process.env.STORAGE_EMULATOR_HOST);
   const senv = await initializeTestEnvironment({ projectId: PROJECT, storage: { host: su.hostname, port: Number(su.port), rules: fs.readFileSync(path.join(__dirname, '../../storage.rules'), 'utf8') } });
   try {
-    const st = senv.authenticatedContext('u1', { staff: true }).storage('gs://' + BUCKET);
+    const st = senv.authenticatedContext('u1', { staff: true, staffUntil: Date.now() + 3600000 }).storage('gs://' + BUCKET);
     await assertFails(st.ref(pdfPath).getDownloadURL());
     await assertFails(st.ref(`quotes/${P}/${id}/v9-evil.pdf`).put(PDF, { contentType: 'application/pdf' }));
   } finally { await senv.cleanup(); }

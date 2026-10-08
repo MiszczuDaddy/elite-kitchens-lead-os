@@ -32,13 +32,15 @@ function classify(status, body) {
 async function request(fetchImpl, url, { method = 'GET', headers = {}, body, timeoutMs = 8000 } = {}) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), Math.max(1, timeoutMs));
-  let res;
+  // The limit covers the whole answer, not just its headers (audit finding 9): see gmail.js.
+  let res, text = '', bodyLost = false;
   try {
     res = await fetchImpl(url, { method, headers: body ? { 'content-type': 'application/json', ...headers } : headers, body: body ? JSON.stringify(body) : undefined, signal: ac.signal });
+    try { text = await res.text(); } catch (e) { bodyLost = true; }
   } catch (e) {
     throw new GcalError(ac.signal.aborted ? 'timeout' : 'network', 0, true);
   } finally { clearTimeout(timer); }
-  const text = await res.text().catch(() => '');
+  if (bodyLost && res.ok) throw new GcalError(ac.signal.aborted ? 'timeout' : 'network', 0, true);
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
   return { status: res.status, ok: res.ok, json };

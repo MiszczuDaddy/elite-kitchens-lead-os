@@ -37,8 +37,9 @@ const refusalText = (e) => (e && e.code && FRIENDLY[e.code] ? `${FRIENDLY[e.code
   : e && e.code ? `WhatsApp refused the template (code ${e.code}).` : 'WhatsApp is not set up to send this template.');
 const NOT_CONFIRMED = 'Not confirmed: we could not tell whether WhatsApp sent the template. Check this chat before trying again; Elite OS will not send it a second time by itself.';
 
-// Logs and stored errors never hold customer details: only a code and a short message with long digit runs (numbers) removed.
-const safe = (s) => String(s || '').replace(/\d{7,}/g, '[number]').slice(0, 200);
+// Logs never hold customer details (audit finding 13): a code or the KIND of an unexpected error, never its message (a provider or
+// database message can carry a name, an address, a number or message text). Customer deletion cannot erase logs.
+const kindOf = (e) => String((e && (e.code || e.name)) || 'Error').slice(0, 60);
 const when = (ms) => new Intl.DateTimeFormat('en-IE', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false, day: 'numeric', month: 'short' }).format(new Date(ms)).replace(',', ' at');
 
 // Record how the send ended, unless the conversation is gone (customer erased) or a newer Reopen has taken over.
@@ -96,7 +97,9 @@ async function reopen({ db, wa, cfg }, actor, data, { nowMs = Date.now() } = {})
       const r = st.reopen;
       throw refused(r.kind === 'undelivered'
         ? `WhatsApp could not deliver the last template${r.error ? ` (${r.error})` : ''}. Try again after ${when(st.nextReopenAt)}.`
-        : `A Reopen template was already sent to this customer (${when(r.at)}). Only one can be sent every 24 hours: wait for their reply, or try again after ${when(st.nextReopenAt)}.`,
+        : r.kind === 'refused'
+          ? `WhatsApp refused the last template${r.error ? `: ${r.error}` : ''}. Try again after ${when(st.nextReopenAt)}.`
+          : `A Reopen template was already sent to this customer (${when(r.at)}). Only one can be sent every 24 hours: wait for their reply, or try again after ${when(st.nextReopenAt)}.`,
       { nextReopenAt: st.nextReopenAt });
     }
     tx.update(convRef, { reopen: { state: 'sending', requestId, claimedAt: Timestamp.fromMillis(nowMs), by: actor.id, templateName: name } });
@@ -115,9 +118,10 @@ async function reopen({ db, wa, cfg }, actor, data, { nowMs = Date.now() } = {})
   } catch (e) {
     const definite = !!e && e.definite === true;
     const text = definite ? refusalText(e) : NOT_CONFIRMED;
-    log('error', definite ? 'reopen template refused' : 'reopen template not confirmed', { code: (e && e.code) || null, err: safe(e && e.message) });
+    log('error', definite ? 'reopen template refused' : 'reopen template not confirmed', { code: (e && e.code) || null });         // a code only (audit finding 13)
     let recorded = false;
-    try { recorded = await settle(db, convRef, requestId, { 'reopen.state': definite ? 'failed' : 'unknown', 'reopen.error': text }); } catch (e2) { log('error', 'reopen record failed', { err: safe(e2.message) }); }
+    const errorCode = definite && e && e.code != null ? String(e.code) : null;
+    try { recorded = await settle(db, convRef, requestId, { 'reopen.state': definite ? 'failed' : 'unknown', 'reopen.error': text, ...(errorCode ? { 'reopen.errorCode': errorCode } : {}) }); } catch (e2) { log('error', 'reopen record failed', { kind: kindOf(e2) }); }
     if (recorded) await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${name}]`, error: text }).catch(() => {});
     throw new HttpsError('unavailable', text);
   }
@@ -125,7 +129,7 @@ async function reopen({ db, wa, cfg }, actor, data, { nowMs = Date.now() } = {})
   // 3. Meta accepted it. Record it (the staff member is told it worked even if this write fails, because the message really was
   //    sent: the claim then stays "sending" and is shown as not confirmed). If the customer was erased meanwhile, nothing is recreated.
   try { await recordSent(db, convRef, requestId, { wamid, body, nowMs }); }
-  catch (e) { log('error', 'reopen record failed', { wamid, err: safe(e.message) }); }
+  catch (e) { log('error', 'reopen record failed', { wamid, kind: kindOf(e) }); }
   log('info', 'reopen template sent', { wamid });
   return { ok: true, existing: false, state: 'sent' };
 }
