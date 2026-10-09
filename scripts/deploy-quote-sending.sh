@@ -74,6 +74,8 @@ serving_revision() {
     });'
 }
 save_revisions() {
+  # Never lose an earlier undo list: a stage that is repeated (or another stage) would otherwise overwrite the only way back with whatever is live at that moment.
+  if [ -s "$SAVED" ]; then cp -p "$SAVED" "$SAVED.$(date +%Y%m%d-%H%M%S)"; echo "   (the previous undo list is kept as $SAVED.<date and time>)"; fi
   : > "$SAVED"
   for f in "$@"; do
     local rev; rev=$(serving_revision "$(svc "$f")")
