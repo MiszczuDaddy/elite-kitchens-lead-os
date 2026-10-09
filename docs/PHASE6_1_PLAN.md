@@ -897,8 +897,13 @@ revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollbac
 7. **Live (approval):** `./scripts/deploy-quote-sending.sh live`. Then reload Elite OS.
 8. **Merge and tag (approval), after live is confirmed:** merge `phase-6-1-quote-sending` into `main` and tag it.
 
-Rollback: `./scripts/rollback-quote-sending.sh` (the last functions deploy back to the saved revisions, in seconds; refused while a quote send is in progress unless `--ignore-prepared`), `--originals` (the 14
-quote functions back to before Phase 6.1), `--close` (the 7 new functions stop answering browsers; data stays), `--mail-off`; the screen: Firebase console > Hosting > Release history > Rollback.
+**What the real rollout taught (2026-10-09, Stage 1 of the audit fixes).** (1) Google throttled the burst of 21 updates; Firebase's retries redeploy **all** the functions again (14 of them gained four revisions each), not only the ones that failed, so a retry is not cheap and it is not "skipped if up to date". (2) The saved list of revisions was overwritten when the stage was run more than once; it now keeps every earlier list as `~/.previous-revisions-phase61.<date and time>`. (3) **Going back by revision does not work** (below).
+
+Rollback (**corrected 2026-10-09, after trying it on the real project**):
+
+* **Functions: redeploy the previous code from git. This is the dependable way.** `git checkout 6baa6ca -- functions` (the code from before the audit fixes), then the same stage again (`./scripts/deploy-quote-sending.sh backend` for the 21 quote functions, `older` for the four older ones), then `git checkout HEAD -- functions` to put the audit code back in the working copy. It takes minutes, not seconds, and Google can throttle it like any deploy.
+* **Not dependable: `./scripts/rollback-quote-sending.sh` (and `--originals`) put the *saved revisions* back, which only works while Google still has those versions' files.** On 2026-10-09 it was run against the real project and **all 21 restores failed** ("Revision ... is not ready and cannot serve traffic. Container import failed."): the files of old function versions are deleted (probably Firebase's automatic clean-up, about a day). Nothing was changed by the failed attempt: the functions kept running what they ran. The older deploy/rollback scripts of earlier phases make the same "in seconds" promise and were never tested this way. The script now exits with an error and says so when a restore fails (before, it printed the errors and still ended as if it had worked).
+* **Still dependable:** `./scripts/rollback-quote-sending.sh --close` / `--open` / `--mail-off` (they change who may call a function, or the email switch, not the code); the screen: Firebase console > Hosting > Release history > Rollback; the security rules: `git checkout 6baa6ca -- firestore.rules storage.rules`, then `firebase deploy --only firestore:rules,storage`.
 
 ## One-time Google Workspace setup (email)
 

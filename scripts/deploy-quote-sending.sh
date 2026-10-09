@@ -19,9 +19,10 @@
 #                                                and the Workspace approval first.
 #   ./scripts/deploy-quote-sending.sh mail off   the kill switch: email sending off again.
 #   ./scripts/deploy-quote-sending.sh live       the new screen on production Hosting. ONLY after the owner approved the preview.
-# Every functions deploy first saves the revisions it replaces, so ./scripts/rollback-quote-sending.sh can undo it in seconds. The very
+# Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
+# deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
-# them, so a repeated run cannot lose the way back. A deploy that Google throttles is retried by itself (up to 3 times).
+# them. A deploy that Google throttles is retried by itself (up to 3 times).
 # Never deploys the webhook, calendarSweep or any function not named above; changes security rules ONLY in the explicit "rules" stage; never
 # changes indexes, secrets, DNS, the Google Calendar settings, Make or Meta. Do NOT use scripts/deploy-preview.sh: it deploys every function and makes them public.
 set -euo pipefail
@@ -46,7 +47,7 @@ SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GC
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,27p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -63,7 +64,7 @@ deploy_functions() {
     [ "$try" = 3 ] && break
     echo "   The deploy did not finish (try $try of 3). Waiting 60 s, then repeating what is left..."; sleep 60
   done
-  echo "The deploy did not finish after 3 tries. Nothing is lost: run the same command again, or undo with ./scripts/rollback-quote-sending.sh --originals"; return 1
+  echo "The deploy did not finish after 3 tries. Nothing is lost: what already deployed stays deployed. Wait a few minutes and run the same command again."; return 1
 }
 serving_revision() {
   { gcloud run services describe "$1" --region "$REGION" --project "$PROJECT" --format=json 2>/dev/null || true; } | node -e '
@@ -141,7 +142,7 @@ check_reachable() {
     sleep 10
   done
   echo "   WARNING: not answering as expected after 90 s:$pending"
-  echo "   Stop here and report it. The live screen is unaffected; ./scripts/rollback-quote-sending.sh undoes the deploy."
+  echo "   Stop here and report it. The live screen is unaffected. To go back see docs/PHASE6_1_PLAN.md, \"Rollback\"."
   exit 1
 }
 show_deployed() {
@@ -174,7 +175,7 @@ case "${1:-}" in
       gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
     done
     check_reachable "$NEW_FUNCS $QUOTE_FUNCS"
-    echo "Done. The live screen is unchanged (it does not call the new functions). Undo in seconds with: ./scripts/rollback-quote-sending.sh"
+    echo "Done. The live screen is unchanged (it does not call the new functions). To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;
   channels)
     check_settings; check_access
@@ -185,7 +186,7 @@ case "${1:-}" in
     save_revisions $CHANNEL_FUNCS
     deploy_functions $CHANNEL_FUNCS
     check_reachable "$CHANNEL_FUNCS"
-    echo "Done. The live screen is unchanged. Undo in seconds with: ./scripts/rollback-quote-sending.sh"
+    echo "Done. The live screen is unchanged. To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;
   older)
     check_settings; check_access
@@ -198,14 +199,14 @@ case "${1:-}" in
     deploy_functions $OLDER_FUNCS
     check_reachable "$OLDER_FUNCS"
     echo "Done. Staff access now carries an expiry and is renewed by the new screen. Do NOT run \"rules\" until the new screen (Phase 6.1) is live and you have reloaded Elite OS once."
-    echo "Undo in seconds with: ./scripts/rollback-quote-sending.sh"
+    echo "To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;
   rules)
     [ -n "$(serving_revision claimaccess)" ] || { echo "Deploy the functions first: $0 older"; exit 1; }
     echo "This publishes security rules that REFUSE a staff sign-in whose claim has expired or has no expiry (audit finding 5)."
     echo "Before you do: (1) './scripts/deploy-quote-sending.sh older' must be done; (2) the Phase 6.1 screen must be live (it renews access every 30 minutes;"
     echo "the old screen does not, so it would lose access after about 12 hours); (3) reload Elite OS once so your session carries the new kind of claim."
-    echo "If you are locked out afterwards: reload the page (it asks for a new claim). To go back: redeploy the previous rules (git show phase-6-quotes-complete:firestore.rules)."
+    echo "If you are locked out afterwards: reload the page (it asks for a new claim). To go back: git checkout 6baa6ca -- firestore.rules storage.rules, then firebase deploy --only firestore:rules,storage (docs/PHASE6_1_PLAN.md, \"Rollback\")."
     confirm "Publish the new security rules to the LIVE project?"
     firebase deploy --project "$PROJECT" --only firestore:rules,storage
     echo "Done. Reload Elite OS to confirm you can still read your conversations."

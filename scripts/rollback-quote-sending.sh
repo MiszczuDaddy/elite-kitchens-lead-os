@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Undo Phase 6.1 functions deploys in seconds (no rebuild).
+# Put the revisions saved by the last Phase 6.1 functions deploy back. WORKS ONLY WHILE Google still keeps those versions' files (Firebase deletes them
+# after about a day: on 2026-10-09 every one of 21 restores failed with "Container import failed"). The dependable way back for functions is to redeploy the
+# previous code from git: docs/PHASE6_1_PLAN.md, "Rollback". --close / --open / --mail-off do not depend on that (they change access, not code).
 #   ./scripts/rollback-quote-sending.sh              undo the LAST functions deploy (backend, channels or mail): every function it replaced goes back
 #                                                    to the revision it had (~/.previous-revisions-phase61)
 #   ./scripts/rollback-quote-sending.sh --originals  put the 14 quote functions back to how they were BEFORE Phase 6.1 (the list the first
@@ -71,7 +73,15 @@ fi
 
 F="$HOME/.previous-revisions-phase61"; [ "$ORIG" = 1 ] && F="$HOME/.previous-revisions-phase61.original"
 [ -s "$F" ] || { echo "No saved revisions ($F). Nothing to roll back to."; exit 1; }
+bad=""
 while IFS='=' read -r s rev; do
   [ -n "$s" ] && [ -n "$rev" ] || continue
-  gcloud run services update-traffic "$s" --region "$REGION" --project "$PROJECT" --to-revisions="$rev=100" --quiet >/dev/null && echo "restored $s -> $rev"
+  if gcloud run services update-traffic "$s" --region "$REGION" --project "$PROJECT" --to-revisions="$rev=100" --quiet </dev/null >/dev/null; then echo "restored $s -> $rev"; else bad="$bad $s"; fi
 done < "$F"
+if [ -n "$bad" ]; then
+  echo
+  echo "NOT RESTORED:$bad"
+  echo "Those functions still run what they ran before: nothing was changed for them. Google keeps an old version's files only for a short time (about a day), so going back by revision often fails with \"Container import failed\"."
+  echo "The dependable way back is to redeploy the previous code from git: docs/PHASE6_1_PLAN.md, \"Rollback\"."
+  exit 1
+fi

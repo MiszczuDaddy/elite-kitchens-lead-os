@@ -40,7 +40,9 @@ case "$sub" in
     [ -f "$FAKE_STATE/deployed/$svc" ] || { echo "ERROR: (gcloud.run.services.get-iam-policy) Cannot find service [$svc]" >&2; exit 1; }
     if [ -f "$FAKE_STATE/public/$svc" ]; then echo '{"bindings":[{"members":["allUsers"],"role":"roles/run.invoker"}],"etag":"x"}'; else echo '{"etag":"x"}'; fi
     exit 0 ;;
-  "run services update-traffic") echo "updated traffic $svc"; exit 0 ;;
+  "run services update-traffic")
+    [ "$(mode)" = notready ] && { echo "ERROR: (gcloud.run.services.update-traffic) Revision '$svc-00001-old' is not ready and cannot serve traffic. Container import failed." >&2; exit 1; }
+    echo "updated traffic $svc"; exit 0 ;;
 esac
 echo "fake gcloud: unexpected command: $*" >&2; exit 2
 `;
@@ -138,6 +140,19 @@ test('rollback proceeds when no send is in progress; and when it cannot tell, it
   assert.equal(ok.code, 0, ok.out); assert.match(fs.readFileSync(path.join(state, 'calls.log'), 'utf8'), /update-traffic sendquote/);
   const unsure = run('rollback-quote-sending.sh', [], { PREPARED_SENDS_CMD: 'echo "cannot reach Firestore" >&2; exit 2' });
   assert.notEqual(unsure.code, 0, unsure.out); assert.match(unsure.out, /could not check|cannot|ignore-prepared/i);
+});
+
+test('a restore that fails (Google no longer has that version\'s files) is reported as a failure: non-zero exit, the functions named, and the way back that does work', () => {
+  fs.writeFileSync(path.join(home, '.previous-revisions-phase61'), 'sendquote=sendquote-00001-abc\ncreatequote=createquote-00001-def\n');
+  failWith('sendQuote', 'notready');
+  const some = run('rollback-quote-sending.sh', [], { PREPARED_SENDS_CMD: 'echo none; exit 0' });
+  assert.notEqual(some.code, 0, some.out);
+  assert.match(some.out, /NOT RESTORED: sendquote/); assert.ok(!/NOT RESTORED:.*createquote/.test(some.out), some.out);
+  assert.match(some.out, /restored createquote/); assert.ok(!/restored sendquote/.test(some.out), some.out);
+  assert.match(some.out, /redeploy the previous code from git/);
+  failWith('createQuote', 'notready');
+  const all = run('rollback-quote-sending.sh', [], { PREPARED_SENDS_CMD: 'echo none; exit 0' });
+  assert.notEqual(all.code, 0, all.out); assert.ok(!/restored /.test(all.out), all.out); assert.match(all.out, /NOT RESTORED: sendquote createquote/);
 });
 
 // ============================ finding 8: the old preview script must not open every service to browsers =========================
