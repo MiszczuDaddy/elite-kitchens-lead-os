@@ -99,17 +99,25 @@ async function startConversation(auth, data, { db, wa, cfg }) {
   const name = String((data && data.name) || '').trim();
   if (phone.length < 9) throw new HttpsError('invalid-argument', 'Enter a full number with country code, e.g. +353851234567');
   if (!name) throw new HttpsError('invalid-argument', 'Enter the customer first name (used in the template).');
+  const requestId = outbound.requestIdOf(data);
   await store.ensureConversation(db, phone, name);
   const body = `[template: ${cfg.template}] Hi ${name}, thanks for your enquiry with Elite Kitchens...`;
-  try {
-    const wamid = await wa.sendTemplate(phone, name);
-    await store.storeOutbound(db, phone, { wamid, type: 'template', body });
-    return { phone };
-  } catch (e) {
-    log('error', 'template send failed', { err: e.message, details: e.details });
-    await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: e.message });
-    throw new HttpsError('unavailable', e.message);
+  // One request = one conversation start (second audit, finding 6): the same claim as sendReply. Meta accepting the template is final: nothing after
+  // it (the chat record) can turn it into a failure, and an answer we cannot confirm is never sent a second time by itself.
+  if ((await outbound.begin(db, phone, requestId)).done) return { phone, existing: true };
+  let wamid;
+  try { wamid = await wa.sendTemplate(phone, name); }
+  catch (e) {
+    const definite = !!e && e.definite === true, text = definite ? e.message : outbound.NOT_CONFIRMED;
+    log('error', definite ? 'template refused' : 'template not confirmed', { code: (e && e.code) || null });          // a code only: never the provider's words
+    await outbound.settle(db, phone, requestId, { state: definite ? 'failed' : 'unknown' });
+    await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: text }).catch(() => {});
+    throw new HttpsError('unavailable', text);
   }
+  await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
+  try { await store.storeOutbound(db, phone, { wamid, type: 'template', body }); }
+  catch (e) { log('error', 'template sent but not recorded', { wamid, kind: kindOf(e) }); }                     // it WENT: the chat can catch up through the status updates
+  return { phone };
 }
 
 async function sendReply(auth, data, { db, wa, cfg }) {

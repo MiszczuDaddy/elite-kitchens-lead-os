@@ -296,6 +296,9 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   await page.click('#qsend-res-list button[data-action="not_arrived"]');
   await page.waitForFunction(() => document.querySelector('#qsend-res-list li[data-channel="whatsapp"][data-state="failed"]'));
   assert.match(await rowText('whatsapp'), /You confirmed that it did not arrive[\s\S]*Retry WhatsApp/);
+  // The row turns to "failed" from the live update a moment BEFORE the call's own answer arrives, and the screen ignores a second press while one is still running:
+  // wait for the confirmation that the call is over, or a Retry pressed straight away is (rarely, under load) ignored.
+  await page.waitForFunction(() => /Recorded as not delivered/.test(document.body.innerText));
   await page.click('#qsend-res-list button[data-action="retry"]');
   await page.waitForFunction(() => document.querySelector('#qsend-res-list li[data-channel="whatsapp"][data-state="sent"]'));
   assert.equal((await quote(gus)).status, 'sent');

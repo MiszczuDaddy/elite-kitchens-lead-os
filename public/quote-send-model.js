@@ -78,7 +78,8 @@
     const name = CHANNEL_NAME[d.channel] || d.channel, st = effective(d, nowMs), at = ms(d.sentAt), err = d.error && d.error.text;
     if (st === 'sent') return { state: st, mark: '✓', tone: 'ok', title: d.channel === 'manual' ? 'Marked sent by hand' : `${name}: sent${at ? ' ' + dayTime(at) : ''}`,
       detail: [d.route === 'template' ? 'Sent with the approved quotation template, PDF attached (WhatsApp does not allow your own wording after 24 hours).' : '', d.resolvedBy && d.channel !== 'manual' ? 'Confirmed by staff.' : ''].filter(Boolean).join(' '), actions: [] };
-    if (st === 'failed') return { state: st, mark: '✕', tone: 'bad', title: `${name}: failed`, detail: err || 'It was not sent.', actions: ['retry'] };
+    // A send that was queued for an address that is no longer the customer's cannot be retried (it would fail again): staff cancel it and send again (second audit, finding 3).
+    if (st === 'failed') return { state: st, mark: '✕', tone: 'bad', title: `${name}: failed`, detail: err || 'It was not sent.', actions: d.error && d.error.code === 'recipient_changed' ? ['cancel'] : ['retry'] };
     if (st === 'unknown') return { state: st, mark: '?', tone: 'warn', title: `${name}: delivery not confirmed`,
       detail: (err || 'We could not tell whether it was delivered.') + ' It will not be sent again by itself.', actions: ['arrived', 'not_arrived'] };
     if (st === 'sending') return { state: st, mark: '…', tone: 'info', title: `${name}: sending…`, detail: '', actions: [] };

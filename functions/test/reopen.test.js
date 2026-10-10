@@ -385,6 +385,33 @@ test('audit 12: Meta\'s IMMEDIATE refusals 131049 and 131050 block the next Reop
   }
 });
 
+test('second audit 12: a refusal recorded BEFORE its code was stored (the code only in the words) keeps Meta\'s 24-hour restriction, on the server and on the screen', async () => {
+  const words = (code) => ({
+    131049: "WhatsApp held the message back to keep customers' inboxes healthy. Try again after 24 hours. (code 131049)",
+    131050: 'This customer has chosen not to receive these messages. (code 131050)',
+    131026: "WhatsApp can't deliver to this number (it may not be on WhatsApp). (code 131026)",
+    132001: 'WhatsApp refused the template (code 132001).',
+  })[code];
+  const old = (error, extra = {}) => ({ reopen: { state: 'failed', claimedAt: ts(NOW - 5 * MIN), error, ...extra } });          // as the first Reopen build wrote it: no errorCode
+  for (const code of [131049, 131050]) {
+    const st = WS.windowStatus(old(words(code)), NOW, null);
+    assert.equal(st.canReopen, false, 'code ' + code + ': an old record must still block'); assert.equal(st.reopen.counts, true);
+    assert.ok(st.nextReopenAt > NOW + 23 * H && st.nextReopenAt <= NOW + 24 * H);
+  }
+  assert.equal(WS.windowStatus(old('WhatsApp refused the template (code 131049).'), NOW, null).canReopen, false);          // the generic wording of the first build
+  for (const code of [131026, 132001]) assert.equal(WS.windowStatus(old(words(code)), NOW, null).canReopen, true, 'code ' + code + ' is free to retry');
+  assert.equal(WS.windowStatus(old('Someone wrote 131049 here but it is not a marked code'), NOW, null).canReopen, true);  // only the marked code counts
+  assert.equal(WS.windowStatus(old(words(131049), { errorCode: '131026' }), NOW, null).canReopen, true);                    // the structured code wins when both exist
+  assert.equal(WS.windowStatus(old(words(131049)), NOW + 25 * H, null).canReopen, true);                                    // and it is free again after the day
+  // end to end, with the record in the database exactly as the first build wrote it
+  const record = (error) => ({ reopen: { state: 'failed', requestId: 'old-request-1', claimedAt: Timestamp.fromMillis(NOW - 5 * MIN), error, templateName: 'elite_kitchens_reopen', by: 'thomas@example.com' } });
+  await seed(P, { conv: record(words(131049)) });
+  await rejects(go(P), 'failed-precondition', /try again after/i);
+  assert.equal(calls.length, 0, 'an old record let a second template reach Meta');
+  await seed(Q, { conv: record(words(132001)) });
+  assert.equal((await go(Q)).state, 'sent');                                                                                // an old refusal with another code: free to retry, as before
+});
+
 test('audit 12: the same decision is made for a stored refusal that has no structured code (records from before this fix keep working)', () => {
   const r = (extra) => WS.windowStatus({ reopen: { state: 'failed', claimedAt: ts(NOW - 5 * MIN), ...extra } }, NOW, null);
   assert.equal(r({ error: 'x (code 132001)' }).canReopen, true);                                        // an old record: refused, free to retry

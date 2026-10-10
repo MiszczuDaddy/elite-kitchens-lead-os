@@ -1,5 +1,6 @@
 'use strict';
-// Audit findings 2, 6, 10, 11 and 14 on the real screen (docs/PHASE6_1_PLAN.md, "Audit"): recovery after a dropped connection (the controls come back,
+// Audit findings 2, 6, 10, 11 and 14, and the second audit's findings 2 (listener ordering) and 3 (a resumed send for another address), on the real screen
+// (docs/PHASE6_1_PLAN.md, "Audit"): recovery after a dropped connection (the controls come back,
 // and the SAME request is continued), a channel left waiting can be sent now and a stalled one turns into "not confirmed" by itself, and any
 // sent version can be sent again. Real page + real functions + emulators + MOCKED Meta and Gmail (nothing real is sent). Written first: it
 // failed on the screen as it was. Run: bash test-ui/run.sh quote-recovery.e2e.js
@@ -31,7 +32,7 @@ const web = http.createServer((req, res) => {
 }).listen(5055);
 
 // ---- mocked Meta (the uploaded file and the message are kept) and Gmail (a send is counted) ----
-const state = { mode: 'ok', media: [], messages: [], mails: 0, mailMode: 'ok' }; let gid = 0;
+const state = { mode: 'ok', media: [], messages: [], mails: 0, mailTo: [], mailMode: 'ok' }; let gid = 0;
 function filePart(buf, contentType) {
   const boundary = '--' + /boundary=(.+)$/.exec(contentType || '')[1], s = buf.toString('latin1');
   for (const part of s.split(boundary)) {
@@ -52,10 +53,11 @@ const meta = http.createServer((req, res) => {
   });
 }).listen(9911); meta.keepAliveTimeout = 0;
 const gmail = http.createServer((req, res) => {
-  req.on('data', () => {}); req.on('end', () => {
+  const chunks = []; req.on('data', (c) => chunks.push(c)); req.on('end', () => {
     const json = (o, st = 200) => { res.statusCode = st; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(o)); };
     if (req.method === 'POST' && /\/gmail\/v1\/users\/me\/messages\/send$/.test(req.url)) {
       if (state.mailMode === 'refuse') return json({ error: { message: 'forbidden' } }, 403);
+      try { const raw = Buffer.from(JSON.parse(Buffer.concat(chunks).toString()).raw, 'base64url').toString('utf8'); const m = /^To:\s*.*?([\w.+-]+@[\w.-]+)/mi.exec(raw); state.mailTo.push(m ? m[1] : null); } catch (e) { state.mailTo.push(null); }      // WHO the email went to
       state.mails++; return json({ id: 'gmsg-' + ++gid, threadId: 'thr' });
     }
     json({ error: { message: 'unexpected' } }, 404);
@@ -63,7 +65,7 @@ const gmail = http.createServer((req, res) => {
 }).listen(9913); gmail.keepAliveTimeout = 0;
 
 const H = 3600e3;
-const ph = { anna: '353860000051', brian: '353860000052', cara: '353860000053', dan: '353860000054' };
+const ph = { anna: '353860000051', brian: '353860000052', cara: '353860000053', dan: '353860000054', eve: '353860000055' };
 const SETTINGS = { vatRate: 13.5, validityDays: 30,
   business: { tradingName: 'Elite Kitchens', signatureName: 'Test Signer', phone: '01 000 0000', email: 'quotes@example.com', web: 'www.example.com', address: 'Test Street, Dublin', vatNumber: 'IE0000000X' },
   priceList: { options: { ess: { perDoor: 313.37, perTopBox: 171.17 }, prem: { perDoor: 323.41, perTopBox: 181.19 }, pp: { perDoor: 333.53, perTopBox: 191.29 } },
@@ -73,7 +75,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   initializeApp({ projectId: 'demo-leados', storageBucket: 'demo-leados.firebasestorage.app' });
   const db = getFirestore(), bucket = getStorage().bucket();
   const t0 = Date.now();
-  for (const [id, name, email] of [[ph.anna, 'Anna Murphy', 'anna@example.com'], [ph.brian, 'Brian Byrne', 'brian@example.com'], [ph.cara, 'Cara Walsh', 'cara@example.com'], [ph.dan, 'Dan Doyle', 'dan@example.com']]) {
+  for (const [id, name, email] of [[ph.anna, 'Anna Murphy', 'anna@example.com'], [ph.brian, 'Brian Byrne', 'brian@example.com'], [ph.cara, 'Cara Walsh', 'cara@example.com'], [ph.dan, 'Dan Doyle', 'dan@example.com'], [ph.eve, 'Eve Egan', 'eve@example.com']]) {
     await db.doc('conversations/' + id).set({ phone: id, name, createdAt: Timestamp.fromMillis(t0 - 10 * H), updatedAt: Timestamp.fromMillis(t0 - 1 * H), lastMessage: 'Hi', unreadCount: 0, lastInboundAt: Timestamp.fromMillis(t0 - 2 * H) });
     await db.doc('contacts/' + id).set({ phone: id, name, email, address: '1 Main Street, Swords', location: 'Swords', createdAt: Timestamp.fromMillis(t0 - 10 * H) });
   }
@@ -267,7 +269,70 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   await page.fill('[data-field="vatRate"]', '13.5'); await setBVat(23); await page.waitForSelector('#qs-conflict', { timeout: 15000 });
   await page.click('#qs-conflict-reload'); await page.waitForFunction(() => document.querySelector('[data-field="vatRate"]').value === '23');
   ok('Quote Settings: someone else\'s change while you are editing disables Save and offers "load their version" or "keep mine and replace theirs"');
+  // ================================================== second audit 2: the quote and its draft arrive through two listeners, in either order ============
+  // If the QUOTE's new revision reaches A while the DRAFT's new answers are still on their way, A's form used to be paired with the newer revision although
+  // it held the older answers: A's next save then replaced B's work without a word. Here the draft's snapshots are held back on purpose.
+  const bq = await makeQuote(ph.brian);
+  const bDoors = async () => (await db.doc(`quotes/${bq}/versions/1`).get()).data().answers.doors;
+  const saveAsB = (id, doors) => page2.evaluate(async ([i, d]) => { const f = firebase.app().functions('europe-west1'), fs = firebase.firestore();
+    const q = (await fs.doc('quotes/' + i).get()).data(), vv = (await fs.doc(`quotes/${i}/versions/1`).get()).data(), a = JSON.parse(JSON.stringify(vv.answers)); a.doors = d;
+    await f.httpsCallable('saveQuoteDraft')({ id: i, expectedRev: q.rev, answers: a }); }, [id, doors]);
+  assert.equal(await page.evaluate(() => typeof firebase.firestore.Query), 'function', 'cannot hold the draft listener back: this SDK has no Query class');
+  await page.evaluate(() => {
+    const proto = firebase.firestore.Query.prototype, orig = proto.onSnapshot;
+    window.__hold = { on: false, queue: [] };
+    proto.onSnapshot = function (...args) {
+      if (typeof this.path === 'string' && /\/versions$/.test(this.path) && typeof args[0] === 'function') { const next = args[0]; args[0] = (snap) => { if (window.__hold.on) window.__hold.queue.push(() => next(snap)); else next(snap); }; }
+      return orig.apply(this, args);
+    };
+    window.__releaseDraft = () => { window.__hold.on = false; for (const f of window.__hold.queue.splice(0)) f(); };
+  });
+  await openQuote(bq); await page.waitForSelector('[data-field="doors"]');
+  const rev0 = (await quote(bq)).rev;
+  await page.evaluate(() => { window.__hold.on = true; });                                       // from now on the DRAFT's snapshots are held back
+  await saveAsB(bq, 7);                                                                          // B saves new answers
+  await until(async () => (await quote(bq)).rev > rev0, 'B\'s save');
+  await sleep(1500);                                                                             // the QUOTE's new revision has reached A; the draft's new answers have not
+  await page.fill('[data-field="doors"]', '12');                                                 // A, not yet told, types...
+  await page.waitForFunction(() => !document.getElementById('qv-save').disabled);
+  await page.click('#qv-save');                                                                  // ...and saves
+  await sleep(1500);
+  assert.equal(await bDoors(), 7, 'A saved its OLD answers over B\'s newer ones, paired with the newest quote revision');
+  await page.evaluate(() => window.__releaseDraft());                                            // now the draft's snapshot arrives
+  await page.waitForSelector('#qv-conflict', { timeout: 15000 });                                // and A is told, with A's typing kept
+  assert.equal(await page.inputValue('[data-field="doors"]'), '12'); assert.equal(await bDoors(), 7);
+  ok('the quote\'s newer revision arrived before the draft\'s newer answers: A\'s save is refused (B\'s work stays), and when the draft arrives A is told and keeps the typing');
+
   await page2.close();
+
+  // ================================================== second audit 3: a resumed send whose queued email is for ANOTHER address ===========================
+  // The dialog is reopened (the same request is remembered) after the customer's address was corrected. The queued email was made for the OLD address: it must
+  // not be sent to it, nor silently to the new one. Staff decide (cancel the earlier attempt), and the next send is a new request for the address shown.
+  const eveQ = await makeQuote(ph.eve);
+  await openSend(eveQ); await page.click('#qsend-send'); await results();
+  await page.waitForFunction(() => document.querySelector('#qsend-res-list li[data-channel="whatsapp"][data-state="sent"]')); await closeResults();
+  const R = 'resume-' + Date.now() + '-xyzxyzxy', sentV = (await db.doc(`quotes/${eveQ}/versions/1`).get()).data();
+  const did = `1-${require('crypto').createHash('sha256').update(R).digest('hex').slice(0, 12)}-email`;
+  await db.doc(`quotes/${eveQ}/deliveries/${did}`).set({ quoteId: eveQ, phone: ph.eve, version: 1, channel: 'email', requestId: R, state: 'queued', attempts: 0, attemptId: null,
+    message: 'Dear Eve, please find attached your quotation.', to: { email: 'eve@example.com' }, subject: 'Quote', pdf: sentV.pdf, provider: null, error: null, claimedAt: null, sentAt: null, failedAt: null,
+    resolvedBy: null, history: [], createdAt: Timestamp.fromMillis(Date.now() - 300000), createdBy: { kind: 'staff', id: 'staff@test.dev' }, updatedAt: Timestamp.now() });          // what an interrupted resend leaves behind
+  await db.doc('contacts/' + ph.eve).update({ email: 'eve.corrected@example.com' });
+  await page.evaluate(([key, requestId]) => sessionStorage.setItem('ek-resend-request', JSON.stringify({ key, requestId, at: Date.now() })), [`${eveQ}|1`, R]);       // the interrupted request is remembered
+  const mailsBefore = state.mails;
+  await openSend(eveQ, '#qv-resend'); await page.uncheck('#qsend-wa'); await page.check('#qsend-em');
+  await page.click('#qsend-send');
+  await page.waitForFunction(() => /earlier attempt/i.test(document.getElementById('qsend-err').textContent));
+  assert.equal(state.mails, mailsBefore, 'the queued email was sent although the dialog showed another address');
+  assert.ok(!state.mailTo.includes('eve@example.com'), 'something went to the OLD address');
+  assert.equal(await page.isDisabled('#qsend-send'), false);
+  await page.waitForSelector('#qsend-cancel-earlier');                                          // the explicit decision is offered right here
+  await page.click('#qsend-cancel-earlier');
+  await page.waitForFunction(() => /earlier attempt was cancelled/i.test(document.getElementById('qsend-err').textContent));
+  assert.equal((await db.doc(`quotes/${eveQ}/deliveries/${did}`).get()).data().state, 'cancelled');
+  await page.click('#qsend-send'); await results();                                              // now a NEW request, for the address shown
+  await page.waitForFunction(() => document.querySelector('#qsend-res-list li[data-channel="email"][data-state="sent"]'));
+  assert.deepEqual(state.mailTo.slice(mailsBefore), ['eve.corrected@example.com']);
+  ok('a resumed send for another address is refused with a clear choice: the earlier attempt can be cancelled in one click, and the next send goes to the address shown, never to the old one');
 
   // ================================================== audit 6 on the screen: the inbox sends a request id, and keeps it when an answer never arrived ===
   const sendReqs = [];
@@ -283,13 +348,31 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   assert.equal(await page.inputValue('#text'), 'Hello from the audit test', 'the text must be kept so it can be sent again');
   await page.click('#send');                                                                  // sent again, as a person would
   await until(() => state.messages.filter((m) => m.type === 'text').length === texts0 + 1, 'the message reaches WhatsApp once');
-  assert.equal(sendReqs.length, 2); assert.ok(/^[A-Za-z0-9_-]{8,64}$/.test(sendReqs[0].requestId));
+  assert.equal(sendReqs.length, 2); assert.equal(typeof sendReqs[0].requestId, 'string', 'no request id was sent'); assert.ok(/^[A-Za-z0-9_-]{8,64}$/.test(sendReqs[0].requestId));
   assert.equal(sendReqs[1].requestId, sendReqs[0].requestId, 'the second try must be the same request');
   await page.fill('#text', 'Hello from the audit test'); await page.click('#send');          // a message that WAS answered: sending it again is a NEW message, on purpose
   await until(() => state.messages.filter((m) => m.type === 'text').length === texts0 + 2, 'a second, deliberate message');
   assert.notEqual(sendReqs[2].requestId, sendReqs[0].requestId);
   ok('inbox: a message gets a request id; if its answer never arrived, sending the same text again is the SAME request (one message), while a message that was answered is a new one next time');
 
+  // ---- second audit 6 on the screen: starting a conversation sends a request id too, and keeps it when the answer never arrived ----
+  const startReqs = [];
+  page.on('request', (r) => { if (r.method() === 'POST' && /\/startConversation$/.test(r.url())) { try { startReqs.push(JSON.parse(r.postData()).data); } catch (e) { /* not json */ } } });
+  const NEWNUM = '353860000099';
+  await page.click('#new-btn'); await page.waitForSelector('#n-phone', { state: 'visible' });
+  await page.fill('#n-phone', '+353 86 000 0099'); await page.fill('#n-name', 'Frank');
+  await page.route('**/startConversation', (route) => route.abort('failed'));                    // the connection drops: no answer reaches the screen
+  await page.click('#n-go');
+  await page.waitForFunction(() => document.getElementById('n-err').textContent.length > 0);
+  await page.unroute('**/startConversation');
+  await page.waitForFunction(() => !document.getElementById('n-go').disabled);
+  await page.click('#n-go');                                                                     // pressed again, as a person would
+  await until(async () => (await db.doc('conversations/' + NEWNUM).get()).exists, 'the conversation to start');
+  await until(async () => state.messages.filter((m) => m.to === NEWNUM).length >= 1, 'the template to reach WhatsApp');
+  assert.equal(startReqs.length, 2); assert.equal(typeof startReqs[0].requestId, 'string', 'no request id was sent'); assert.ok(/^[A-Za-z0-9_-]{8,64}$/.test(startReqs[0].requestId));
+  assert.equal(startReqs[1].requestId, startReqs[0].requestId, 'the second try must be the same request');
+  assert.equal(state.messages.filter((m) => m.to === NEWNUM).length, 1, 'the template went out more than once');
+  ok('starting a conversation: the request has an id, and pressing again after an answer that never arrived is the SAME request (one template)');
   assert.deepEqual(errors, [], 'browser errors: ' + JSON.stringify(errors)); ok('no JavaScript errors in the browser');
   console.log(`ALL ${n} CHECKS PASSED`);
   await browser.close(); web.close(); meta.close(); gmail.close(); process.exit(0);

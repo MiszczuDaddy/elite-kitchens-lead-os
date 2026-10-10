@@ -25,14 +25,17 @@
   // What happened to the last Reopen template. msg = its stored chat message ({status, error}) when known: Meta's delivery
   // statuses reach it through the webhook. waiting: it may be in the customer's hands. counts: it uses up the 24-hour allowance.
   // A template Meta refused, or reports as never delivered (for example it expired), does not count: the customer never saw it.
+  // The code Meta refused a Reopen with: the structured one, or, for a record made before it was stored (every refusal written by the first Reopen build),
+  // the one in the words: "... (code 131049)." The same decision either way (second audit, finding 12). The structured code wins when both exist.
+  const refusalCode = (r) => (r.errorCode != null ? String(r.errorCode) : ((/\(code (\d{1,10})\)/.exec(String(r.error || '')) || [])[1] || ''));
   function reopenOutcome(r, nowMs, msg) {
     if (!r || !r.state) return null;
     const at = ms(r.sentAt) || ms(r.claimedAt);
     if (!at) return null;
     // Meta refused it at once. It uses the allowance only for the two codes that mean "wait 24 hours" / "the customer opted out", the same
     // decision as for a template that is accepted and later reported undelivered (audit finding 12). The code is stored structured (errorCode);
-    // an older record without one is judged by its text as before.
-    if (r.state === 'failed') return { kind: 'refused', at, error: r.error || null, waiting: false, counts: BLOCKS_RETRY.test(String(r.errorCode != null ? r.errorCode : '')) };
+    // an older record without one is judged by the code in its words (refusalCode).
+    if (r.state === 'failed') return { kind: 'refused', at, error: r.error || null, waiting: false, counts: BLOCKS_RETRY.test(refusalCode(r)) };
     if (r.state === 'unknown') return { kind: 'unsure', at, error: r.error || null, waiting: true, counts: true };
     if (r.state === 'sending') {
       return nowMs - at > STUCK_MS ? { kind: 'unsure', at, error: null, waiting: true, counts: true }

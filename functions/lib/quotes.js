@@ -186,7 +186,7 @@ async function create({ db }, actor, data, { nowMs = Date.now() } = {}) {
       rev: 1, requestId: data.requestId, lastSendRequestId: null, createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     };
     tx.set(ref, q);
-    tx.set(versionRef(ref, 1), { n: 1, state: 'draft', engine: engineRef, answers: p.answers, priceList: s.priceList, vatRate: s.vatRate, sheet: p.sheet,
+    tx.set(versionRef(ref, 1), { n: 1, rev: 1, state: 'draft', engine: engineRef, answers: p.answers, priceList: s.priceList, vatRate: s.vatRate, sheet: p.sheet,
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor });
     return { ...view(id, q), existing: false };
   });
@@ -194,8 +194,14 @@ async function create({ db }, actor, data, { nowMs = Date.now() } = {}) {
 
 // Save the draft (a new quote, or a revision of a sent one). "Update to current prices" swaps the frozen price list and VAT
 // rate for today's Quote Settings; a sent version is never touched.
+// Second audit, finding 2: the screen reads the quote and its draft through two separate live listeners, so it can pair OLD answers with a NEWER quote
+// revision. The draft therefore carries a revision of its own (`rev`, 1 when it is made, +1 on every save), and the screen says which draft and which
+// revision of it its form was built from (`version`, `versionRev`): a save based on anything older is refused. Both or neither: older screens send
+// neither and are checked by the quote revision alone, as before. A change to the quote's notes does not touch the draft, so it is not a conflict.
 async function saveDraft({ db }, actor, data, { nowMs = Date.now() } = {}) {
-  onlyKeys(data, ['id', 'expectedRev', 'answers', 'useCurrentPrices']);
+  onlyKeys(data, ['id', 'expectedRev', 'answers', 'useCurrentPrices', 'version', 'versionRev']);
+  const basis = data.version != null || data.versionRev != null;
+  if (basis && (!Number.isInteger(data.version) || data.version < 1 || !Number.isInteger(data.versionRev) || data.versionRev < 0)) throw bad('Say which draft this was made from.');
   const ref = quoteRef(db, data.id);
   const useCurrent = flag(data.useCurrentPrices, 'Use current prices');
   return db.runTransaction(async (tx) => {
@@ -208,6 +214,7 @@ async function saveDraft({ db }, actor, data, { nowMs = Date.now() } = {}) {
     const vRef = versionRef(ref, q.draftVersion);
     const [vSnap, settings] = await Promise.all([tx.get(vRef), useCurrent ? tx.get(db.doc('quoteSettings/current')) : null]);
     const v = vSnap.data();
+    if (basis && (q.draftVersion !== data.version || (v.rev || 0) !== data.versionRev)) throw refused(CHANGED);     // someone saved (or replaced) this draft since the form was built
     let priceList = v.priceList, vatRate = v.vatRate;
     if (useCurrent) {
       if (!settings.exists) throw refused('Quote Settings are not set up.');
@@ -215,11 +222,12 @@ async function saveDraft({ db }, actor, data, { nowMs = Date.now() } = {}) {
     }
     const p = priced(v.engine, data.answers === undefined ? v.answers : data.answers, priceList, vatRate);
     const now = at(nowMs);
-    tx.update(vRef, { answers: p.answers, priceList, vatRate, sheet: p.sheet, updatedAt: now, updatedBy: actor });
+    const versionRev = (v.rev || 0) + 1;
+    tx.update(vRef, { answers: p.answers, priceList, vatRate, sheet: p.sheet, rev: versionRev, updatedAt: now, updatedBy: actor });
     const patch = { summary: summaryOf(p.sheet), rev: q.rev + 1, updatedAt: now, updatedBy: actor,
       history: withHistory(q, { action: useCurrent ? 'prices updated' : 'edited', at: now, by: actor.id, version: q.draftVersion }) };
     tx.update(ref, patch);
-    return { ...view(ref.id, { ...q, ...patch }), sendProblems: p.sendProblems };
+    return { ...view(ref.id, { ...q, ...patch }), sendProblems: p.sendProblems, versionRev };
   });
 }
 
@@ -253,32 +261,29 @@ function parseSend(db, data, nowMs, uid) {
   return { ref, requestId: data.requestId, reopen, value, shown, upload };
 }
 
-// The PDF: must be a real PDF of sensible size. The stored file is IMMUTABLE (audit finding 1): its path is unique to this request AND to these
-// exact bytes (the SHA-256 is in the name), and it is written create-only. So two sends racing for the same draft can never overwrite each
-// other's file, and neither can two calls that reuse a request id for different documents; whoever created a file may remove it again (and only
-// that exact version of it), nobody else.
+// The PDF: must be a real PDF of sensible size. The stored file is IMMUTABLE and PRIVATE TO THE CALL THAT WROTE IT (audit finding 1, and the second
+// audit's finding 1): the name carries a random part, so no other call can ever hold, reuse or be handed this object, and it is written create-only.
+// Two calls that carry the same request (a double click, a retry after a timeout) therefore each have a file of their own; only the call whose
+// transaction commits has a record that points at its file. That makes cleanup safe by construction: a call may remove its own file (and only that
+// exact version of it) once it KNOWS its file is not referenced, and never a file some other call may be using.
 async function storeSendPdf(bucket, q0, ref, n, requestId, upload) {
   const upFile = bucket.file(upload);
   let buf;
   try { [buf] = await upFile.download(); } catch (e) { throw new HttpsError('not-found', 'The PDF upload was not found. Please try again.'); }
   if (buf.length < 8 || buf.length > PDF_MAX || buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw bad('The quote PDF is missing or not a PDF (max 25 MB).');
   const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
-  const finalPath = `quotes/${q0.phone}/${ref.id}/v${n}-${crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 12)}-${sha256.slice(0, 16)}.pdf`;
+  const finalPath = `quotes/${q0.phone}/${ref.id}/v${n}-${crypto.randomBytes(8).toString('hex')}-${sha256.slice(0, 16)}.pdf`;
   const file = bucket.file(finalPath);
-  let created = false, generation = null;
-  try { await file.save(buf, { contentType: 'application/pdf', resumable: false, preconditionOpts: { ifGenerationMatch: 0 } }); created = true; }
-  catch (e) {
-    if (!(e && (e.code === 412 || e.code === 409))) throw e;                    // it exists already: a repeat of this very request; it must be these exact bytes
-    let existing = null; try { [existing] = await file.download(); } catch (e2) { existing = null; }
-    if (!existing || crypto.createHash('sha256').update(existing).digest('hex') !== sha256) throw refused('The stored copy of this PDF does not match. Please try again.');
-  }
-  if (created) { try { generation = String(((await file.getMetadata())[0] || {}).generation || '') || null; } catch (e) { generation = null; } }
-  return { upFile, size: buf.length, sha256, finalPath, created, generation };
+  await file.save(buf, { contentType: 'application/pdf', resumable: false, preconditionOpts: { ifGenerationMatch: 0 } });       // create-only: a name that already exists is an error, never a shared file
+  let generation = null;
+  try { generation = String(((await file.getMetadata())[0] || {}).generation || '') || null; } catch (e) { generation = null; }
+  return { upFile, size: buf.length, sha256, finalPath, generation };
 }
 
-// Remove the stored copy this call created (never one it merely found, and only that exact version of the object).
+// Remove the stored copy this call created (only that exact version of the object). Only ever called when this call's file is known not to be
+// referenced by any record: after our own refusal (nothing was committed), or after a repeat found the request already committed with the OTHER
+// call's file. NEVER after an unclear failure (a lost database answer): the commit may have gone through, and then a record points at this file.
 async function dropOwnCopy(bucket, stored) {
-  if (!stored.created) return;
   await bucket.file(stored.finalPath).delete({ ignoreNotFound: true, ...(stored.generation ? { ifGenerationMatch: stored.generation } : {}) }).catch(() => {});
 }
 
@@ -366,10 +371,10 @@ async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {
         customer: c.current, business: c.settings.business, pdf: { path: stored.finalPath, size: stored.size, sha256: stored.sha256 }, reopen: r.reopen, value: r.value });
     });
   } catch (e) {
-    await dropOwnCopy(bucket, stored);                                                       // the copy THIS call created, and only that
-    throw e;
+    if (e instanceof HttpsError) await dropOwnCopy(bucket, stored);          // our own refusal: nothing was committed, so nothing points at this file
+    throw e;                                                                 // anything else (a lost database answer) may have committed: the file STAYS (second audit, finding 1)
   }
-  // (A repeat of the same request with the same PDF lands on the same path and finds the file there: it created nothing, so it removes nothing.)
+  if (result.existing) await dropOwnCopy(bucket, stored);                    // a repeat: the record already points at the FIRST call's file, not at ours
   await stored.upFile.delete({ ignoreNotFound: true }).catch(() => {});
   return result;
 }
@@ -414,9 +419,10 @@ async function prepare({ db, bucket }, actor, data, { nowMs = Date.now(), uid, i
       return { ...view(ref.id, { ...q, ...patch }), existing: false, committed: false, version: n, requestId, customer: c.current, pdf };
     });
   } catch (e) {
-    await dropOwnCopy(bucket, stored);                                                       // the copy THIS call created, and only that
-    throw e;
+    if (e instanceof HttpsError) await dropOwnCopy(bucket, stored);          // our own refusal: nothing was committed, so nothing points at this file
+    throw e;                                                                 // anything else (a lost database answer) may have committed: the file STAYS (second audit, finding 1)
   }
+  if (result.existing) await dropOwnCopy(bucket, stored);                    // a repeat: the record already points at the FIRST call's file, not at ours
   await stored.upFile.delete({ ignoreNotFound: true }).catch(() => {});
   return result;
 }
@@ -564,7 +570,7 @@ async function revise({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (q.currentVersion >= VERSIONS_MAX) throw refused(`A quote can have at most ${VERSIONS_MAX} versions. Start a new quote instead.`);
     const sent = (await tx.get(versionRef(ref, q.sentVersion))).data();
     const n = q.currentVersion + 1, now = at(nowMs);
-    tx.set(versionRef(ref, n), { n, state: 'draft', engine: sent.engine, answers: sent.answers, priceList: sent.priceList, vatRate: sent.vatRate, sheet: sent.sheet,
+    tx.set(versionRef(ref, n), { n, rev: 1, state: 'draft', engine: sent.engine, answers: sent.answers, priceList: sent.priceList, vatRate: sent.vatRate, sheet: sent.sheet,
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor });
     const patch = { currentVersion: n, draftVersion: n, summary: summaryOf(sent.sheet), history: withHistory(q, { action: 'revised', at: now, by: actor.id, version: n }),
       rev: q.rev + 1, updatedAt: now, updatedBy: actor };

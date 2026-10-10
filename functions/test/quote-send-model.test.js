@@ -190,3 +190,12 @@ test('a channel that is "waiting to send" is only offered "send now" once it has
   const stalled = M.describe({ channel: 'whatsapp', state: 'sending', claimedAt: ts(NOW - 4 * MIN) }, NOW);
   assert.deepEqual([stalled.state, stalled.actions], ['unknown', ['arrived', 'not_arrived']]);                  // a stalled send is "not confirmed": no retry, no resume
 });
+
+// ============================================================== second audit 3: a changed address is cancelled, not retried ==============================
+test('a send that failed because the email address changed after it was queued is offered Cancel, not Retry (a retry would only fail again); every other failure keeps Retry', () => {
+  const failed = (code) => M.describe({ channel: 'email', state: 'failed', error: { code, text: 'The email address changed after this was queued.' } }, NOW);
+  assert.deepEqual([failed('recipient_changed').state, failed('recipient_changed').actions], ['failed', ['cancel']]);
+  assert.match(failed('recipient_changed').detail, /address changed/i);
+  for (const code of ['failed', 'not_possible', 'pdf_missing', undefined]) assert.deepEqual(failed(code).actions, ['retry'], String(code));
+  assert.deepEqual(M.describe({ channel: 'email', state: 'failed' }, NOW).actions, ['retry']);                      // no error recorded: as before
+});

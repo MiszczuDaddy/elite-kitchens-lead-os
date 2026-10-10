@@ -127,7 +127,7 @@ window.QUOTES = (() => {
     Q.deliveries = [];
     watchQuoteContact(null);
     if (Q.builder) { Q.builder.destroy(); Q.builder = null; }
-    Object.assign(Q, { formRev: null, notesBase: null, quote: null, quoteLoaded: false, versions: new Map(), versionsLoaded: false, builderKey: null, answers: null, dirty: false, sheet: null, errors: [], problems: [], notesDirty: false, built: null });
+    Object.assign(Q, { formVer: null, formVRev: 0, notesBase: null, quote: null, quoteLoaded: false, versions: new Map(), versionsLoaded: false, builderKey: null, answers: null, dirty: false, sheet: null, errors: [], problems: [], notesDirty: false, built: null });
   }
   function watchQuoteContact(phone) {
     if (Q.contactPhone === phone) return;
@@ -313,7 +313,9 @@ window.QUOTES = (() => {
     if (q.preparedSend) banner.append(sendStatePanel(q));
     if (q.draftVersion) {
       if (!dv) { body.replaceChildren(el('p', 'appts-empty', 'Loading…')); return; }
-      if (!Q.dirty) Q.formRev = q.rev;                    // nothing typed: the form IS the saved draft, so it is based on this revision (audit 2)
+      // Second audit, finding 2: the form is based on the draft it is built from (its number and its OWN revision), read from the SAME document as its
+      // answers. The quote and its drafts arrive through two separate listeners, so the quote's revision must never be paired with this form's data.
+      if (!Q.dirty) { Q.formVer = dv.n; Q.formVRev = dv.rev || 0; }     // nothing typed: the form IS this saved draft
       const key = q.draftVersion + '|' + JSON.stringify(dv.priceList);
       if (Q.builderKey !== key && !Q.dirty) {
         if (!QuoteBuilder.supports(dv.engine)) { body.replaceChildren(el('p', 'appts-empty', 'This quote was made with a calculator this screen cannot edit.')); return; }
@@ -331,13 +333,17 @@ window.QUOTES = (() => {
     if (Q.builder) { Q.builder.destroy(); Q.builder = null; Q.builderKey = null; Q.answers = null; Q.dirty = false; }
     body.replaceChildren(sv ? sentView(q, sv) : el('p', 'appts-empty', 'Loading…'));
   }
-  // Audit finding 2. The form on screen is based on the revision it was loaded from (Q.formRev), NOT on the newest one the live listener has seen:
-  // when someone else saves while this person has unsaved inputs, the screen says so and the save is disabled until they decide, instead of quietly
-  // adopting the newer revision and saving the old inputs on top of the other person's work. A save by this person moves the base to its own revision.
+  // Audit finding 2 (and the second audit's finding 2). The form on screen is based on the draft it was built from (Q.formVer, and the draft's own revision Q.formVRev),
+  // NOT on whatever the live listeners have seen since: when someone else saves while this person has unsaved inputs, the screen says so and the save is disabled
+  // until they decide, instead of quietly adopting the newer data and saving the old inputs on top of the other person's work. A save by this person moves the base to its own revision.
   // (Not while this person's own save is in flight: its live update can arrive before the save's reply, and is not someone else's change.)
-  const staleEdit = () => !!(!Q.saving && Q.dirty && Q.quote && Q.quote.draftVersion && Q.formRev != null && Q.quote.rev !== Q.formRev);
+  const staleEdit = () => {
+    if (Q.saving || !Q.dirty || !Q.quote || !Q.quote.draftVersion || Q.formVer == null) return false;
+    const dv = draftV();
+    return Q.quote.draftVersion !== Q.formVer || (!!dv && (dv.rev || 0) !== Q.formVRev);          // the draft was replaced, or someone saved it, since this form was built
+  };
   function reloadTheirs() { Q.dirty = false; Q.builderKey = null; renderQuote(); }          // the form is rebuilt from what is saved
-  function keepMine() { Q.formRev = Q.quote.rev; renderMain(); renderActions(); }          // an explicit decision: the next save replaces theirs
+  function keepMine() { const dv = draftV(); if (dv) { Q.formVer = dv.n; Q.formVRev = dv.rev || 0; } renderMain(); renderActions(); }          // an explicit decision: the next save replaces theirs
   // The extras offered as quick-select buttons: Quote Settings as they are now (they only fill in a row, which keeps its own
   // price), or the draft's own list until the settings have loaded.
   function catalogueFor(dv) {
@@ -562,10 +568,10 @@ window.QUOTES = (() => {
     if (staleEdit()) { renderMain(); renderActions(); return; }                       // decide first: see the box at the top (audit 2)
     const seq = Q.editSeq; Q.saving = true; renderActions();
     try {
-      const data = { id: q.id, expectedRev: Q.dirty && Q.formRev != null ? Q.formRev : q.rev, answers: Q.answers };      // the revision the FORM is based on
+      const data = { id: q.id, expectedRev: q.rev, answers: Q.answers, ...(Q.formVer != null ? { version: Q.formVer, versionRev: Q.formVRev } : {}) };      // which draft, and which revision of it, the FORM was built from
       if (useCurrentPrices) data.useCurrentPrices = true;
       const saved = (await call('saveQuoteDraft')(data)).data;
-      if (saved && Number.isInteger(saved.rev)) Q.formRev = saved.rev;                 // what is on screen is now based on this person's own save
+      if (saved && Number.isInteger(saved.versionRev)) Q.formVRev = saved.versionRev;  // what is on screen is now based on this person's own save
       // Nothing typed since: the saved draft (as the server stored it, and repriced if asked) replaces the form when it arrives.
       if (Q.editSeq === seq) Q.dirty = false;
       note(useCurrentPrices ? 'Draft repriced with today\'s prices.' : 'Draft saved.');
@@ -995,6 +1001,7 @@ window.QUOTES = (() => {
       progress('');
       d.working = false;                                                  // BEFORE the controls are redrawn: they follow this flag, and the message below tells staff to press Send again (audit 10)
       if (resend) { if (looksUnsure(e2)) rememberRequest(`${d.q.id}|${d.n}`, d.requestId); else forgetRequest(); }       // an unsure resend continues as the SAME request
+      if (resend && e2 && e2.details && e2.details.reason === 'recipient_differs') { offerRecipientDecision(d, e2); setBusy(false); renderChannels(false); return; }
       if (looksUnsure(e2)) {
         err('The connection dropped while sending, so we do not know whether it went. Nothing is ever sent twice by itself: press Send quote again to check (it is safe), or look at the quote page, which shows exactly what happened.');
       } else {
@@ -1003,6 +1010,24 @@ window.QUOTES = (() => {
       setBusy(false); renderChannels(false);
     } finally { if (Q.dlg === d) d.working = false; }
   });
+
+  // Second audit, finding 3: this dialog was reopened for a request that was started for ANOTHER email address. Nothing was sent to either. Staff decide:
+  // cancel the earlier attempt if it has not gone out (one click here), or look in the customer's inbox if it may have; the next press of Send quote is then a
+  // NEW request for the address shown, never a resume of the old one.
+  function offerRecipientDecision(d, e) {
+    const oldId = d.requestId, old = Q.deliveries.find((x) => x.requestId === oldId && x.channel === 'email');
+    d.requestId = newRequestId();
+    const box = $('qsend-err'); box.textContent = errText(e) + ' ';
+    if (old && ['queued', 'failed'].includes(QuoteSend.effective(old, Date.now()))) {
+      const b = el('button', 'linkbtn', 'Cancel the earlier attempt'); b.type = 'button'; b.id = 'qsend-cancel-earlier';
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await call('resolveQuoteDelivery')({ id: d.q.id, deliveryId: old.id, outcome: 'cancel' }); err('The earlier attempt was cancelled: nothing was sent. Press Send quote to send to the address shown.'); }
+        catch (x) { err(errText(x)); }
+      };
+      box.append(b);
+    }
+  }
 
   // --- "Prefer to send it yourself": Phase 6's way, unchanged ---
   $('qsend-go').onclick = async () => {
@@ -1059,7 +1084,8 @@ window.QUOTES = (() => {
       if (dsc.detail) main.append(el('p', 'qsend-res-detail', dsc.detail));
       const acts = el('div', 'qsend-res-acts');
       for (const a of dsc.actions) {
-        const label = a === 'retry' ? `Retry ${QuoteSend.CHANNEL_NAME[x.channel] || ''}`.trim() : a === 'resume' ? `Send ${QuoteSend.CHANNEL_NAME[x.channel] || ''} now`.trim() : a === 'arrived' ? 'It arrived' : 'It did not arrive';
+        if (a === 'cancel') { const lq = Q.quote && Q.quote.id === x.quoteId ? Q.quote : quote; if (lq && lq.preparedSend && lq.preparedSend.requestId === x.requestId) continue; }      // a send still being prepared has its own "Cancel this send"
+        const label = a === 'retry' ? `Retry ${QuoteSend.CHANNEL_NAME[x.channel] || ''}`.trim() : a === 'resume' ? `Send ${QuoteSend.CHANNEL_NAME[x.channel] || ''} now`.trim() : a === 'cancel' ? `Cancel ${QuoteSend.CHANNEL_NAME[x.channel] || ''}`.trim() : a === 'arrived' ? 'It arrived' : 'It did not arrive';
         const b = el('button', 'btn btn-ghost btn-sm', label); b.type = 'button'; b.dataset.action = a;
         b.onclick = () => deliveryAction(a, x, b);
         acts.append(b);
@@ -1101,10 +1127,10 @@ window.QUOTES = (() => {
     Q.busy = true; if (btn) btn.disabled = true;
     try {
       const r = action === 'retry' || action === 'resume' ? (await call('retryQuoteDelivery')({ id: q.id, deliveryId: x.id })).data
-        : (await call('resolveQuoteDelivery')({ id: q.id, deliveryId: x.id, outcome: action === 'arrived' ? 'delivered' : 'not_delivered' })).data;
+        : (await call('resolveQuoteDelivery')({ id: q.id, deliveryId: x.id, outcome: action === 'arrived' ? 'delivered' : action === 'cancel' ? 'cancel' : 'not_delivered' })).data;
       const d = sendDlg(); if (d && d.view === 'results' && d.requestId === r.requestId) { d.result = r; if (r.committed) d.committed = r.committed; renderResults(); }
       const dsc = (r.deliveries.find((y) => y.id === x.id));
-      note(action === 'retry' || action === 'resume' ? `${QuoteSend.CHANNEL_NAME[x.channel]}: ${dsc && dsc.state === 'sent' ? 'sent.' : dsc && dsc.state === 'unknown' ? 'delivery not confirmed.' : 'failed again.'}` : action === 'arrived' ? 'Recorded as delivered.' : 'Recorded as not delivered: you can retry it.', dsc && dsc.state === 'failed' ? 'err' : undefined);
+      note(action === 'retry' || action === 'resume' ? `${QuoteSend.CHANNEL_NAME[x.channel]}: ${dsc && dsc.state === 'sent' ? 'sent.' : dsc && dsc.state === 'unknown' ? 'delivery not confirmed.' : 'failed again.'}` : action === 'arrived' ? 'Recorded as delivered.' : action === 'cancel' ? 'Cancelled: nothing was sent. You can send it again to the address on file.' : 'Recorded as not delivered: you can retry it.', dsc && dsc.state === 'failed' ? 'err' : undefined);
     } catch (e) { note(errText(e), 'err'); if (btn) btn.disabled = false; }
     finally { Q.busy = false; }
   }

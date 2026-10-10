@@ -825,10 +825,11 @@ $('new-form').addEventListener('submit', async (e) => {
   $('n-err').textContent = '';
   $('n-go').disabled = true;
   try {
-    const r = await call('startConversation')({ phone, name });
+    const r = await call('startConversation')({ phone, name, requestId: requestFor(phone, 'start|' + name) });          // one request = one conversation start (second audit, finding 6)
     dlg.close();
     openConversation(r.data.phone);
   } catch (err) {
+    noteUnsure(err);                                                // an answer that never arrived: the same press again is the SAME request
     $('n-err').textContent = errText(err);
     $('n-go').disabled = false;
   }

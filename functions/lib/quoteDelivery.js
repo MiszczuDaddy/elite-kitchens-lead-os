@@ -37,6 +37,7 @@ class ChannelError extends Error {
 }
 
 const log = (level, msg, extra) => console[level === 'error' ? 'error' : 'log'](JSON.stringify({ level, msg, ...extra }));
+const maskEmail = (e) => String(e).replace(/^(.).*(@.*)$/, '$1***$2');       // a hint for staff (who may see the address anyway); never logged
 const hash12 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 12);
 const deliveryId = (n, requestId, channel) => `${n}-${hash12(requestId)}-${channel}`;
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : null);
@@ -125,6 +126,11 @@ async function attempt(deps, actor, id, did, { nowMs, retry = false, message = n
     const pdf = await readPdf(bucket, claim.d.pdf);
     const ctx = { quoteId: id, quoteRef: claim.quoteRef, version: claim.d.version, channel, phone: claim.phone, to: claim.d.to, customerName: claim.d.customerName || null, message: claim.d.message, subject: claim.d.subject || null,
       requestId: claim.d.requestId, deliveryId: did, attempt: claim.attempt, pdf, filename: `EliteKitchens-${claim.quoteRef}-v${claim.d.version}.pdf` };
+    if (channel === 'email') {                                                       // second audit, finding 3: never to an address that is no longer the customer's
+      const cs = await db.collection('contacts').doc(claim.phone).get();
+      const now = (cs.exists && cs.data().email) || null, was = (claim.d.to && claim.d.to.email) || null;
+      if (was !== now) throw new ChannelError(now ? "The customer's email address changed after this was queued, so nothing was sent to the old address. Cancel this, then send it again to the current address." : 'The customer has no email address any more, so nothing was sent. Add one in their Details, cancel this, then send it again.', { code: 'recipient_changed', definite: true });
+    }
     const check = adapter.check ? await adapter.check(ctx) : null;
     if (check && check.ok === false) throw new ChannelError(check.text || 'This cannot be sent.', { code: check.code || 'not_possible', definite: true });
     const r = await adapter.send(ctx, check);
@@ -235,6 +241,13 @@ async function createForSent(deps, actor, data, channels, messages, subject, now
     if (shownEmail !== null) {
       if (!current) throw refused('This customer has no email address any more. Add one in their Details first.');
       if (current !== shownEmail) throw refused("The customer's email address changed while you were sending. Please check it and try again.");
+      // The same request again (a resume): if its email was made for ANOTHER address than the one staff see and confirm now, it is neither sent to the old
+      // address nor silently moved to the new one (second audit, finding 3). They decide: cancel the earlier attempt if it was not sent, then send again.
+      const i = channels.indexOf('email');
+      if (i >= 0 && existing[i].exists) {
+        const was = (existing[i].data().to || {}).email || null;
+        if (was !== shownEmail) throw new HttpsError('failed-precondition', `An earlier attempt of this send (the same request) was made for a different email address${was ? ` (${maskEmail(was)})` : ''}. Nothing was sent to the address you see now. If that attempt has not gone out, cancel it; if it may have, check the customer's inbox. Then send again.`, { reason: 'recipient_differs' });      // `reason`: the screen offers the decision
+      }
     }
     const ctx = { ref, q: qSnap.data(), n: data.version, requestId: data.requestId, pdf: v.pdf, customer: { ...v.customer, email: current }, business: v.business, now: at(nowMs) };
     channels.forEach((c, i) => { if (!existing[i].exists) tx.create(dRefs[i], newDelivery(ctx, c, messages[c], actor, subject)); });
@@ -282,13 +295,22 @@ async function resolve(deps, actor, data, { nowMs = Date.now() } = {}) {
   onlyKeys(data, ['id', 'deliveryId', 'outcome']);
   const { db } = deps;
   const { ref, dRef } = deliveryRef(db, data);
-  if (!['delivered', 'not_delivered'].includes(data.outcome)) throw bad('Choose "It arrived" or "It did not arrive".');
+  if (!['delivered', 'not_delivered', 'cancel'].includes(data.outcome)) throw bad('Choose "It arrived" or "It did not arrive".');
   let requestId, committed = null;
   await db.runTransaction(async (tx) => {
     committed = null;
     const dSnap = await tx.get(dRef);
     if (!dSnap.exists) throw new HttpsError('not-found', 'Delivery not found.');
     const d = dSnap.data();
+    if (data.outcome === 'cancel') {                                           // second audit, finding 3: a send that has not gone out can be cancelled, by an explicit decision
+      const eff = effectiveState(d, nowMs), qSnap = await tx.get(ref);
+      if (eff !== 'queued' && eff !== 'failed') throw refused('Only a send that has not gone out can be cancelled.');          // sent, sending or not confirmed: never
+      if (qSnap.exists && qSnap.data().preparedSend && qSnap.data().preparedSend.requestId === d.requestId) throw refused('This send is still being prepared for the quote: use "Cancel this send" instead.');
+      const now = at(nowMs);
+      requestId = d.requestId;
+      tx.update(dRef, { state: 'cancelled', error: null, resolvedBy: actor.id, history: capped(d.history, entry({ now, actor }, { event: 'cancelled' }), HISTORY_MAX), updatedAt: now });
+      return;
+    }
     if (effectiveState(d, nowMs) !== 'unknown') throw refused('Only a send that could not be confirmed can be settled this way.');
     requestId = d.requestId;
     const st = data.outcome === 'delivered' ? await quotes.readState(tx, db, data.id, d.version) : null;

@@ -429,3 +429,252 @@ test('audit 6: logs carry codes only: no message text, number or name from the p
   assert.ok(seen.length >= 1);
   for (const secret of ['secret words', 'Anna', 'Murphy', '353851111111', 'undeliverable', 'firestore is down']) assert.ok(!text.includes(secret), 'leaked: ' + secret);
 });
+
+
+// ============================================================================================================================================
+// SECOND AUDIT (2026-10-09): the findings that were only PARTLY fixed. Each test reproduces what the audit described and fails without its fix.
+// ============================================================================================================================================
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(fn, what) { for (let i = 0; i < 100; i++) { if (await fn()) return; await sleep(50); } throw new Error('timed out waiting for ' + what); }
+
+// ---- second audit 1 (HIGH): the cleanup of a failed or duplicate request must never delete a PDF that another call has committed ----------------
+test('second audit 1: a DUPLICATE request that fails (a lost database answer) must not delete the PDF another call has committed', async () => {
+  const { id } = await make();
+  const data = await dataFor(id, { channels: ['email'] });                    // one request, one upload: two calls carry it (a double click, a retry after a timeout)
+  let release; const gate = new Promise((res) => { release = res; });
+  const lost = Object.assign(new Error('14 UNAVAILABLE: the connection was dropped'), { code: 14 });          // what a lost database answer looks like
+  const failing = new Proxy(db, { get(t, k) { if (k === 'runTransaction') return async () => { await gate; throw lost; }; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+  const slow = D.deliver({ ...depsWith(bucket), db: failing }, actor, data, { nowMs: NOW, uid: 'u1' }).then(() => null, (e) => e);
+  await until(async () => (await files(`quotes/${P}/`)).length === 1, 'the first call to store its PDF');       // it has stored the PDF and waits at the database
+  const b = await run(D.deliver, data);                                                                         // the duplicate goes all the way: committed, sent
+  assert.equal(b.sent, true);
+  release();                                                                                                    // now the first call fails and cleans up
+  const e = await slow; assert.ok(e, 'the failing call should have failed');
+  const v = await version(id);
+  assert.equal((await bucket.file(v.pdf.path).exists())[0], true, 'the PDF of the committed send was deleted by the other, failing call');
+  assert.equal(sha(await storedBytes(id)), v.pdf.sha256);
+  const link = await Q.pdfLink({ db, bucket }, actor, { id, version: 1 }, { signedUrl: async () => 'https://example.test/signed' });
+  assert.equal(link.url, 'https://example.test/signed');
+});
+
+test('second audit 1: a call that is REFUSED removes only the file it created; the other call\'s committed PDF stays', async () => {
+  const { id } = await make();
+  const X = pdfBytes('A'), Y = pdfBytes('B');
+  const dataA = await dataFor(id, { channels: ['email'] }, X);
+  const dataB = { ...(await dataFor(id, { channels: ['email'] }, Y)), expectedRev: dataA.expectedRev };
+  const gate = gatedBucket((p, buf) => buf.equals(X));
+  const late = D.deliver(depsWith(gate.bucket), actor, dataA, { nowMs: NOW, uid: 'u1' }).then(() => null, (e) => e);
+  await sleep(300);                                                                                           // A passed its checks and is held at its storage write
+  assert.equal((await run(D.deliver, dataB)).sent, true);                                                    // B commits meanwhile: the quote moved on
+  gate.release();
+  const e = await late; assert.equal(e && e.code, 'failed-precondition', 'A should have been refused (the quote changed)');
+  assert.ok((await storedBytes(id)).equals(Y));
+  assert.equal((await files(`quotes/${P}/`)).length, 1, 'the refused call left its file behind, or removed the other call\'s');
+});
+
+test('second audit 1: the same holds for Phase 6\'s own "mark as sent": a failing duplicate must not delete the committed PDF', async () => {
+  const { id } = await make();
+  const bytes = pdfBytes('mark sent twice');
+  const data = await dataFor(id, {}, bytes); delete data.channels; delete data.messages;
+  let release; const gate = new Promise((res) => { release = res; });
+  const lost = Object.assign(new Error('14 UNAVAILABLE: the connection was dropped'), { code: 14 });
+  const failing = new Proxy(db, { get(t, k) { if (k === 'runTransaction') return async () => { await gate; throw lost; }; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+  const slow = Q.send({ db: failing, bucket }, actor, data, { nowMs: NOW, uid: 'u1' }).then(() => null, (e) => e);
+  await until(async () => (await files(`quotes/${P}/`)).length === 1, 'the first call to store its PDF');
+  const ok = await Q.send(deps, actor, data, { nowMs: NOW, uid: 'u1' });                                       // the duplicate commits
+  assert.equal(ok.status, 'sent');
+  release();
+  assert.ok(await slow, 'the failing call should have failed');
+  const v = await version(id);
+  assert.equal((await bucket.file(v.pdf.path).exists())[0], true, 'the committed PDF was deleted by the failing duplicate');
+  assert.equal(sha(await storedBytes(id)), v.pdf.sha256);
+});
+
+test('second audit 1: two duplicates that BOTH succeed leave exactly one PDF: the committed one (the other call removes its own redundant copy)', async () => {
+  const { id } = await make();
+  const data = await dataFor(id, { channels: ['email'] });
+  const rs = await Promise.allSettled([D.deliver(dd(), actor, data, { nowMs: NOW, uid: 'u1' }), D.deliver(dd(), actor, data, { nowMs: NOW, uid: 'u1' })]);
+  assert.ok(rs.some((r) => r.status === 'fulfilled'));
+  assert.equal(mailLog.length, 1, 'sent more than once');
+  const v = await version(id);
+  const left = await files(`quotes/${P}/`);
+  assert.deepEqual(left, [v.pdf.path], 'files left behind: ' + left.join(', '));
+});
+
+test('second audit 1: a commit whose ANSWER is lost (it went through) must not lose its PDF: an unclear failure never deletes the file', async () => {
+  const lost = Object.assign(new Error('14 UNAVAILABLE: the connection was dropped'), { code: 14 });
+  const answerLost = new Proxy(db, { get(t, k) { if (k === 'runTransaction') return async (fn, o) => { await t.runTransaction(fn, o); throw lost; }; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+  // the delivery's preparation commits, then reports a failure
+  const { id } = await make();
+  const e = await D.deliver({ ...depsWith(bucket), db: answerLost }, actor, await dataFor(id, { channels: ['email'] }), { nowMs: NOW, uid: 'u1' }).then(() => null, (x) => x);
+  assert.ok(e, 'the call should have reported a failure');
+  const v = await version(id);
+  assert.ok(v.prepared && v.prepared.pdf, 'the commit did go through: the version is prepared');
+  assert.equal((await bucket.file(v.prepared.pdf.path).exists())[0], true, 'the PDF of a commit that went through was deleted after an unclear failure');
+  assert.equal(sha((await bucket.file(v.prepared.pdf.path).download())[0]), v.prepared.pdf.sha256);
+  // and Phase 6's own "mark as sent"
+  await seed(R2); const other = await make(R2);
+  const data = await dataFor(other.id, {}, pdfBytes('mark sent, answer lost')); delete data.channels; delete data.messages;
+  const e2 = await Q.send({ db: answerLost, bucket }, actor, data, { nowMs: NOW, uid: 'u1' }).then(() => null, (x) => x);
+  assert.ok(e2, 'the call should have reported a failure');
+  const v2 = await version(other.id);
+  assert.ok(v2.pdf, 'the commit did go through: the version is sent');
+  assert.equal((await bucket.file(v2.pdf.path).exists())[0], true, 'the PDF of a send that went through was deleted after an unclear failure');
+});
+
+// ---- second audit 2 (HIGH): the draft carries its own revision, so a form can never be paired with a newer revision than its data ---------------
+const saveDraftWith = (id, over) => Q.saveDraft(deps, actor, { id, ...over }, { nowMs: NOW });
+test('second audit 2: a draft carries its own revision, and a save based on older answers is refused even when it carries the newest QUOTE revision', async () => {
+  const { id } = await make();
+  assert.equal((await version(id)).rev, 1);
+  const mine = answers(); mine.doors = 12;
+  const r = await saveDraftWith(id, { expectedRev: (await quote(id)).rev, answers: mine, version: 1, versionRev: 1 });
+  assert.equal(r.versionRev, 2); assert.equal((await version(id)).rev, 2);
+  // The screen's quote listener delivered the newest quote revision, but its draft listener had not caught up: the form still holds the answers of revision 1.
+  const stale = answers(); stale.doors = 7;
+  await rejects(saveDraftWith(id, { expectedRev: (await quote(id)).rev, answers: stale, version: 1, versionRev: 1 }), 'failed-precondition', /changed|check/i);
+  assert.equal((await version(id)).answers.doors, 12, 'stale answers were saved over newer ones');
+  assert.equal((await version(id)).rev, 2);
+});
+
+test('second audit 2: someone else\'s NOTES are not a conflict for the answers; older screens (no version fields) save as before; half a pair is refused', async () => {
+  const { id } = await make();
+  await Q.setNotes(deps, actor, { id, expectedRev: (await quote(id)).rev, notes: 'Measure twice' }, { nowMs: NOW });
+  const mine = answers(); mine.doors = 11;
+  const r = await saveDraftWith(id, { expectedRev: (await quote(id)).rev, answers: mine, version: 1, versionRev: 1 });         // the QUOTE moved on (notes); the draft did not
+  assert.equal(r.versionRev, 2);
+  const old = answers(); old.doors = 9;
+  await saveDraftWith(id, { expectedRev: (await quote(id)).rev, answers: old });                                                // an older screen
+  assert.deepEqual([(await version(id)).answers.doors, (await version(id)).rev], [9, 3]);
+  for (const half of [{ version: 1 }, { versionRev: 3 }, { version: 1.5, versionRev: 3 }, { version: 1, versionRev: -1 }, { version: '1', versionRev: 3 }]) {
+    await rejects(saveDraftWith(id, { expectedRev: (await quote(id)).rev, answers: old, ...half }), 'invalid-argument');
+  }
+});
+
+// ---- second audit 3 (HIGH): the address staff see and confirm is the address that is used, also when a request is resumed ---------------------
+async function interruptedResend(id, over = {}) {                                // a resend by WhatsApp AND email whose WhatsApp send never comes back: the email stays queued for the address of the time
+  const w = interrupted();
+  const first = resendEmail(id, { channels: ['whatsapp', 'email'], messages: { whatsapp: MSG.whatsapp, email: MSG.email }, ...over });
+  void D.deliver({ db, cfg, bucket, channels: { whatsapp: w.channel, email: mail } }, actor, first, { nowMs: NOW, uid: 'u1' }).catch(() => {});
+  await w.began;
+  return { first, w, emailDid: (await deliveries(id)).find((d) => d.channel === 'email' && d.requestId === first.requestId).id };
+}
+
+test('second audit 3: a resumed request whose queued email is for an OLD address is refused: it is not sent to the old address, nor silently to the new one', async () => {
+  const { id } = await make(); await sendOld(id, pdfBytes('v1'));
+  const { first, emailDid } = await interruptedResend(id);
+  assert.deepEqual([(await emailD(id)).state, (await emailD(id)).to.email], ['queued', 'anna@example.com']);
+  await db.doc('contacts/' + P).update({ email: 'corrected@example.com' });                                      // the address is corrected; the dialog is reopened and SHOWS the corrected one
+  await rejects(run(D.deliver, resendEmail(id, { requestId: first.requestId, recipients: { email: 'corrected@example.com' } })), 'failed-precondition', /earlier attempt|different (email )?address/i);
+  assert.equal(mailLog.length, 0, 'the queued email was sent although the dialog showed another address');
+  assert.deepEqual([(await emailD(id)).state, (await emailD(id)).to.email], ['queued', 'anna@example.com']);       // untouched
+  // the explicit, safe recovery: cancel the earlier attempt (nothing was sent), then send to the corrected address as a NEW request
+  await run(D.resolve, { id, deliveryId: emailDid, outcome: 'cancel' });
+  assert.equal((await db.doc(`quotes/${id}/deliveries/${emailDid}`).get()).data().state, 'cancelled');
+  const fresh = await run(D.deliver, resendEmail(id, { recipients: { email: 'corrected@example.com' } }));
+  assert.equal(fresh.sent, true); assert.deepEqual(mailLog.map((m) => m.to), ['corrected@example.com']);
+});
+
+test('second audit 3: a resumed request for the SAME address still resumes (once); a changed or removed address is refused as before', async () => {
+  const { id } = await make(); await sendOld(id, pdfBytes('v1'));
+  const { first } = await interruptedResend(id);
+  const r = await run(D.deliver, resendEmail(id, { requestId: first.requestId }));                                  // the same address, again: it resumes
+  assert.deepEqual(mailLog.map((m) => m.to), ['anna@example.com']);
+  const again = await run(D.deliver, resendEmail(id, { requestId: first.requestId }));                              // and never a second time
+  assert.equal(mailLog.length, 1); assert.ok(r && again);
+  await db.doc('contacts/' + P).update({ email: FieldValue.delete() });
+  await rejects(run(D.deliver, resendEmail(id, { requestId: first.requestId })), 'failed-precondition', /no email address|add one|changed/i);
+  assert.equal(mailLog.length, 1);
+});
+
+test('second audit 3: a request that ALREADY went to one address is not reported as sent to another', async () => {
+  const { id } = await make(); await sendOld(id, pdfBytes('v1'));
+  const req = resendEmail(id);
+  assert.equal((await run(D.deliver, req)).sent, true);                                                           // went to anna@
+  await db.doc('contacts/' + P).update({ email: 'corrected@example.com' });
+  await rejects(run(D.deliver, { ...req, recipients: { email: 'corrected@example.com' } }), 'failed-precondition', /earlier attempt|different (email )?address/i);
+  assert.deepEqual(mailLog.map((m) => m.to), ['anna@example.com']);                                              // and nothing else went out
+});
+
+test('second audit 3: "Send now" on a queued email whose address was corrected meanwhile does NOT send to the old address, and says why', async () => {
+  const { id } = await make(); await sendOld(id, pdfBytes('v1'));
+  const { emailDid } = await interruptedResend(id);
+  await db.doc('contacts/' + P).update({ email: 'corrected@example.com' });
+  const r = await run(D.retry, { id, deliveryId: emailDid });
+  assert.equal(mailLog.length, 0, 'the queued email was sent to the old address');
+  const d = await emailD(id);
+  assert.deepEqual([d.state, d.error && d.error.code], ['failed', 'recipient_changed']);
+  assert.match(d.error.text, /address changed|cancel/i); assert.ok(r);
+  await run(D.resolve, { id, deliveryId: emailDid, outcome: 'cancel' });                                           // a failed one can be cancelled too
+  assert.equal((await db.doc(`quotes/${id}/deliveries/${emailDid}`).get()).data().state, 'cancelled');
+});
+
+test('second audit 3: only a delivery that sent nothing can be cancelled (not one that was sent, is sending or is unconfirmed, nor one of a send still being prepared)', async () => {
+  const { id } = await make(); await sendOld(id, pdfBytes('v1'));
+  const sent = resendEmail(id); await run(D.deliver, sent);
+  const sentDid = (await emailD(id)).id;
+  await rejects(run(D.resolve, { id, deliveryId: sentDid, outcome: 'cancel' }), 'failed-precondition');
+  assert.equal((await emailD(id)).state, 'sent');
+  const { emailDid } = await interruptedResend(id);
+  const w = (await deliveries(id)).find((d) => d.channel === 'whatsapp');
+  await rejects(run(D.resolve, { id, deliveryId: w.id, outcome: 'cancel' }), 'failed-precondition');            // still sending
+  assert.ok(emailDid);
+});
+
+// ---- second audit 6 (HIGH): startConversation has the same duplicate protection as the newer sending functions ------------------------------------
+const NEWP = '353852223333';
+const cfgSC = { ...cfg, template: 'elite_welcome' };
+const waSC = createClient({ phoneId: '111', token: 'tok', version: 'v21.0', template: 'elite_welcome', lang: 'en' }, mockFetch);
+const startSC = (over = {}, dbx = db) => h.startConversation(staff, { phone: NEWP, name: 'Dan', requestId: reqId(), ...over }, { db: dbx, wa: waSC, cfg: cfgSC });
+const templatesSent = () => meta.messages.filter((m) => m.body.type === 'template');
+
+test('second audit 6: starting a conversation is one request = one template: a double click, or the same request again, sends once', async () => {
+  const id = reqId();
+  const rs = await Promise.allSettled([1, 2, 3].map(() => startSC({ requestId: id })));
+  assert.ok(rs.some((x) => x.status === 'fulfilled'));
+  for (const x of rs.filter((x) => x.status === 'rejected')) assert.equal(x.reason.code, 'failed-precondition');
+  assert.equal(templatesSent().length, 1);
+  const again = await startSC({ requestId: id });                                                                 // after success: the same answer, nothing sent
+  assert.deepEqual([again.phone, templatesSent().length], [NEWP, 1]);
+  await startSC({ requestId: reqId() });                                                                          // a NEW request is a new template, on purpose
+  assert.equal(templatesSent().length, 2);
+});
+
+test('second audit 6: an answer we cannot confirm (Meta 5xx, no connection) is "not confirmed": the same request again sends NOTHING', async () => {
+  for (const mode of ['server', 'network']) {
+    await db.recursiveDelete(db.collection('conversations').doc(NEWP)); meta.messages.length = 0;
+    meta.mode = mode; const id = reqId();
+    await assert.rejects(startSC({ requestId: id }), (e) => e.code === 'unavailable' && /not confirmed|could not tell/i.test(e.message), mode);
+    meta.mode = 'ok';
+    await rejects(startSC({ requestId: id }), 'failed-precondition', /not confirmed|could not tell|check/i);
+    assert.equal(templatesSent().length, 1, mode + ': the template was sent a second time');
+    assert.ok((await db.collection(`conversations/${NEWP}/messages`).get()).docs.some((d) => d.data().status === 'failed' && /not confirmed|could not tell|check/i.test(d.data().error || '')));
+  }
+});
+
+test('second audit 6: a template Meta REFUSED (4xx) is a plain failure: nothing was sent, the same request may be tried again; accepted is final even if the chat record fails', async () => {
+  const id = reqId(); meta.mode = 'refuse';
+  await rejects(startSC({ requestId: id }), 'unavailable');
+  meta.mode = 'ok';
+  assert.equal((await startSC({ requestId: id })).phone, NEWP);                                                   // the refused attempt, then the one that went
+  assert.equal(templatesSent().length, 2);
+  await db.recursiveDelete(db.collection('conversations').doc(NEWP)); meta.messages.length = 0;
+  const r = await startSC({ requestId: reqId() }, flaky(1, 2));                                                    // ensure + claim pass; the chat record fails AFTER Meta accepted
+  assert.equal(r.phone, NEWP); assert.equal(templatesSent().length, 1);
+  assert.ok(!(await db.collection(`conversations/${NEWP}/messages`).get()).docs.some((d) => d.data().status === 'failed'), 'a template that WENT OUT was recorded as failed');
+});
+
+test('second audit 6: a request id is optional (older screens) and checked when given; logs carry codes only; erasing the customer erases the claims', async () => {
+  assert.equal((await startSC({ requestId: undefined })).phone, NEWP);                                           // as before
+  await rejects(startSC({ requestId: 'x' }), 'invalid-argument');
+  await startSC({ requestId: reqId() });
+  assert.equal((await db.collection(`conversations/${NEWP}/sendRequests`).get()).size, 1);
+  const seen = [], orig = { log: console.log, error: console.error, warn: console.warn };
+  console.log = (...a) => seen.push(a.join(' ')); console.error = (...a) => seen.push(a.join(' ')); console.warn = (...a) => seen.push(a.join(' '));
+  try { meta.mode = 'refuse'; await startSC({ name: 'Dan Secretname', requestId: reqId() }).catch(() => {}); } finally { Object.assign(console, orig); meta.mode = 'ok'; }
+  const text = seen.join('\n');
+  assert.ok(seen.length >= 1);
+  for (const secret of ['Secretname', 'Dan ', NEWP, 'undeliverable']) assert.ok(!text.includes(secret), 'leaked: ' + secret);
+  await h.deleteCustomer(staff, { phone: NEWP, confirm: '3333' }, deps);
+  assert.equal((await db.collection(`conversations/${NEWP}/sendRequests`).get()).size, 0);
+});
