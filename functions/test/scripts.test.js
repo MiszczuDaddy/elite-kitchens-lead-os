@@ -40,11 +40,28 @@ case "$sub" in
     [ -f "$FAKE_STATE/deployed/$svc" ] || { echo "ERROR: (gcloud.run.services.get-iam-policy) Cannot find service [$svc]" >&2; exit 1; }
     if [ -f "$FAKE_STATE/public/$svc" ]; then echo '{"bindings":[{"members":["allUsers"],"role":"roles/run.invoker"}],"etag":"x"}'; else echo '{"etag":"x"}'; fi
     exit 0 ;;
+  "auth print-access-token "*) echo fake-token; exit 0 ;;
+  "functions describe claimAccess") if [ -f "$FAKE_STATE/claim-updated" ]; then cat "$FAKE_STATE/claim-updated"; exit 0; fi; echo "ERROR: (gcloud.functions.describe) not found" >&2; exit 1 ;;
   "run services update-traffic")
     [ "$(mode)" = notready ] && { echo "ERROR: (gcloud.run.services.update-traffic) Revision '$svc-00001-old' is not ready and cannot serve traffic. Container import failed." >&2; exit 1; }
     echo "updated traffic $svc"; exit 0 ;;
 esac
 echo "fake gcloud: unexpected command: $*" >&2; exit 2
+`;
+
+// A pretend curl for the Firebase Rules API: $FAKE_STATE/rules-firestore.txt and rules-storage.txt hold the live rules; $FAKE_STATE/curl-fail makes every call fail.
+const FAKE_CURL = `#!/usr/bin/env bash
+echo "curl $*" >> "$FAKE_STATE/calls.log"
+[ -f "$FAKE_STATE/curl-fail" ] && exit 22
+for a in "$@"; do url="$a"; done
+body() { node -e 'console.log(JSON.stringify({ source: { files: [{ name: "x.rules", content: require("fs").readFileSync(process.argv[1], "utf8") }] } }))' "$1"; }
+case "$url" in
+  */releases/cloud.firestore) echo '{"rulesetName":"projects/p/rulesets/fs"}' ;;
+  */releases/firebase.storage/*) echo '{"rulesetName":"projects/p/rulesets/st"}' ;;
+  */rulesets/fs) body "$FAKE_STATE/rules-firestore.txt" ;;
+  */rulesets/st) body "$FAKE_STATE/rules-storage.txt" ;;
+  *) echo "fake curl: unexpected url $url" >&2; exit 2 ;;
+esac
 `;
 
 let tmp, state, bin, home;
@@ -54,6 +71,7 @@ beforeEach(() => {
   for (const d of ['deployed', 'public', 'fail']) fs.mkdirSync(path.join(state, d), { recursive: true });
   fs.mkdirSync(bin); fs.mkdirSync(home);
   fs.writeFileSync(path.join(bin, 'gcloud'), FAKE_GCLOUD, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'curl'), FAKE_CURL, { mode: 0o755 });
   fs.writeFileSync(path.join(state, 'calls.log'), '');
 });
 const deploy = (funcs, open = true) => { for (const f of funcs) { fs.writeFileSync(path.join(state, 'deployed', low(f)), ''); if (open) fs.writeFileSync(path.join(state, 'public', low(f)), ''); } };
@@ -200,4 +218,139 @@ test('rollback --originals restores from the ORIGINAL list (before Phase 6.1), n
 test('an unknown option prints the help and does nothing', () => {
   const r = run('rollback-quote-sending.sh', ['--nonsense']);
   assert.notEqual(r.code, 0); assert.match(r.out, /--close/); assert.equal(fs.readFileSync(path.join(state, 'calls.log'), 'utf8'), '');
+});
+
+
+// ============================ second audit 7: staff access has an expiry; the security rules and claimAccess must stay in step ===========================
+// New rules refuse a sign-in without an expiry, so an OLDER claimAccess (it gives none) put back by a rollback, or rules published while claimAccess is still
+// the old one, would lock everyone out of the screen. scripts/access-compat.sh reads the live state and says whether a step is safe; nothing here is real.
+const NEW_RULES = "allow read: if request.auth.token.staff == true && request.auth.token.get('staffUntil', 0) > request.time.toMillis();";
+const OLD_RULES = 'allow read: if request.auth.token.staff == true;';
+const rulesAre = (firestoreRules, storageRules = firestoreRules) => { fs.writeFileSync(path.join(state, 'rules-firestore.txt'), firestoreRules); fs.writeFileSync(path.join(state, 'rules-storage.txt'), storageRules); };
+const claimUpdated = (iso) => fs.writeFileSync(path.join(state, 'claim-updated'), iso + '\n');
+const cannotRead = () => fs.writeFileSync(path.join(state, 'curl-fail'), '');
+const NEW_CODE = 'const staffUntil = now() + 1;\n', OLD_CODE = 'await adminAuth.setCustomUserClaims(auth.uid, { staff: true });\n';
+const OLD_CLAIM = '2026-09-30T22:34:44Z', NEW_CLAIM = '2026-10-09T21:50:00Z';
+const compat = (cmd, { code = NEW_CODE, env = {} } = {}) => {
+  const f = path.join(tmp, 'handlers.js'); fs.writeFileSync(f, code);
+  return run('access-compat.sh', [cmd], { ACCESS_HANDLERS_FILE: f, ACCESS_CLAIM_SINCE: '2026-10-08T05:00:00Z', ...env });
+};
+const callsLog = () => fs.readFileSync(path.join(state, 'calls.log'), 'utf8');
+
+test('status tells the truth about the three parts, and calls "the rules need the expiry but claimAccess does not give it" DANGER', () => {
+  rulesAre(NEW_RULES); claimUpdated(OLD_CLAIM);
+  const danger = compat('status');
+  assert.match(danger.out, /REQUIRE an expiring staff claim/); assert.match(danger.out, /older than the expiry code/); assert.match(danger.out, /VERDICT: DANGER/); assert.match(danger.out, /rules-back/);
+  claimUpdated(NEW_CLAIM);
+  assert.match(compat('status').out, /VERDICT: in step/);
+  rulesAre(OLD_RULES);
+  assert.match(compat('status').out, /VERDICT: safe .*can be published/);
+  assert.match(callsLog(), /x-goog-user-project: elite-kitchens-lead-os/, 'the call to the Rules API must name the project to bill');
+  cannotRead();
+  const blind = compat('status'); assert.match(blind.out, /could not be read/); assert.match(blind.out, /VERDICT: not proven/);
+});
+
+test('allow-code: code that gives the expiry is always fine; code WITHOUT it only while the live rules do not require one, and never when that cannot be read', () => {
+  rulesAre(NEW_RULES); claimUpdated(NEW_CLAIM);
+  assert.equal(compat('allow-code', { code: NEW_CODE }).code, 0);
+  const bad = compat('allow-code', { code: OLD_CODE });
+  assert.equal(bad.code, 1, bad.out); assert.match(bad.out, /REFUSED/); assert.match(bad.out, /locked out/); assert.match(bad.out, /rules-back/);
+  rulesAre(OLD_RULES);
+  assert.equal(compat('allow-code', { code: OLD_CODE }).code, 0);
+  rulesAre(OLD_RULES, NEW_RULES);                                                      // Firestore still old but Storage already new: the rules DO require it
+  const storageOnly = compat('allow-code', { code: OLD_CODE }); assert.equal(storageOnly.code, 1);
+  assert.match(storageOnly.out, /REQUIRE one/, 'Storage requiring the expiry must be recognised, not reported as unreadable');
+  rulesAre(OLD_RULES); cannotRead();
+  assert.equal(compat('allow-code', { code: OLD_CODE }).code, 1, 'when the live rules cannot be read, old code must be refused');
+  assert.equal(compat('allow-code', { code: NEW_CODE }).code, 0, 'code that gives the expiry needs no proof');
+  assert.equal(compat('allow-code', { env: { ACCESS_HANDLERS_FILE: path.join(tmp, 'does-not-exist.js') } }).code, 1);
+});
+
+test('allow-legacy-code (an older claimAccess put back): only while the live rules do not require the expiry', () => {
+  rulesAre(NEW_RULES);
+  const r = compat('allow-legacy-code'); assert.equal(r.code, 1, r.out); assert.match(r.out, /locked out|lock everyone out/); assert.match(r.out, /rules-back/);
+  rulesAre(OLD_RULES); assert.equal(compat('allow-legacy-code').code, 0);
+  cannotRead(); assert.equal(compat('allow-legacy-code').code, 1);
+});
+
+test('allow-rules: only if this checkout gives the expiry AND the live claimAccess is newer than the code that gives it; never when that cannot be checked', () => {
+  claimUpdated(NEW_CLAIM);
+  const r = compat('allow-rules'); assert.equal(r.code, 0, r.out);
+  const oldCheckout = compat('allow-rules', { code: OLD_CODE }); assert.equal(oldCheckout.code, 1, oldCheckout.out); assert.match(oldCheckout.out, /WITHOUT an expiry/);
+  claimUpdated(OLD_CLAIM);
+  const oldLive = compat('allow-rules'); assert.equal(oldLive.code, 1, oldLive.out); assert.match(oldLive.out, /older than the code that gives the expiry/); assert.match(oldLive.out, /older/);
+  fs.rmSync(path.join(state, 'claim-updated'));
+  const unknown = compat('allow-rules'); assert.equal(unknown.code, 1, unknown.out); assert.match(unknown.out, /could not be checked/);
+  claimUpdated(NEW_CLAIM);
+});
+
+test('ACCESS_COMPAT_FORCE=yes lets a person who has checked by hand go on (and says so); nothing else does', () => {
+  rulesAre(NEW_RULES);
+  assert.equal(compat('allow-legacy-code').code, 1);
+  const forced = compat('allow-legacy-code', { env: { ACCESS_COMPAT_FORCE: 'yes' } });
+  assert.equal(forced.code, 0, forced.out); assert.match(forced.out, /going on anyway/);
+  assert.equal(compat('allow-legacy-code', { env: { ACCESS_COMPAT_FORCE: '1' } }).code, 1, 'only the exact word counts');
+});
+
+test('the rollback script will not put an older claimAccess back while the new rules are live; other functions restore as usual; the override works', () => {
+  const list = (...lines) => fs.writeFileSync(path.join(home, '.previous-revisions-phase61'), lines.join('\n') + '\n');
+  const roll = (env = {}) => run('rollback-quote-sending.sh', [], { PREPARED_SENDS_CMD: 'echo none; exit 0', ACCESS_CLAIM_SINCE: '2026-10-08T05:00:00Z', ...env });
+  rulesAre(NEW_RULES);
+  list('claimaccess=claimaccess-00001-old', 'sendreply=sendreply-00001-old');
+  const refused = roll(); assert.notEqual(refused.code, 0, refused.out); assert.match(refused.out, /REFUSED/); assert.match(refused.out, /rules-back/);
+  assert.ok(!/update-traffic/.test(callsLog()), 'nothing may be restored when it would lock staff out');
+  list('sendreply=sendreply-00001-old');                                               // no claimAccess in the list: nothing to do with access
+  const fine = roll(); assert.equal(fine.code, 0, fine.out); assert.match(callsLog(), /update-traffic sendreply/);
+  list('claimaccess=claimaccess-00001-old'); rulesAre(OLD_RULES);                      // the old rules do not mind
+  const old = roll(); assert.equal(old.code, 0, old.out); assert.match(callsLog(), /update-traffic claimaccess/);
+  rulesAre(NEW_RULES);
+  const forced = roll({ ACCESS_COMPAT_FORCE: 'yes' }); assert.equal(forced.code, 0, forced.out);
+});
+
+test('the deploy stages that change staff access run the check first, "older" includes startConversation, and "back" and "rules-back" put your checkout back whatever happens', () => {
+  const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const stage = (name) => { const i = s.indexOf(`\n  ${name})\n`); assert.ok(i >= 0, name + ' stage not found'); return s.slice(i, s.indexOf('\n    ;;', i)); };
+  assert.match(stage('older'), /access-compat\.sh allow-code/); assert.ok(stage('older').indexOf('access-compat') < stage('older').indexOf('confirm '), 'older: the check must come before the question');
+  assert.match(stage('rules'), /access-compat\.sh allow-rules/); assert.ok(stage('rules').indexOf('access-compat') < stage('rules').indexOf('confirm '), 'rules: the check must come before the question');
+  for (const name of ['rules-back', 'back']) {
+    assert.match(stage(name), /trap 'git checkout HEAD -- /, name + ': it must restore your checkout');
+    assert.match(stage(name), /git checkout "\$PRE_AUDIT" -- /, name + ': it must take the code from the commit before the audit fixes');
+  }
+  assert.match(s, /^OLDER_FUNCS=".*startConversation/m);
+});
+
+test('rules-back publishes the PREVIOUS rules, and leaves your checkout on the audit-fix rules both when it works and when the deploy fails', () => {
+  const repo = path.join(tmp, 'repo'); fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+  for (const f of ['deploy-quote-sending.sh', 'access-compat.sh', 'lib-run-iam.sh']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(repo, 'scripts', f));
+  const git = (...a) => spawnSync('git', ['-C', repo, '-c', 'core.autocrlf=false', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { encoding: 'utf8' });
+  const put = (rules, code) => { fs.writeFileSync(path.join(repo, 'firestore.rules'), rules + '\n'); fs.writeFileSync(path.join(repo, 'storage.rules'), rules + ' // storage\n');
+    fs.mkdirSync(path.join(repo, 'functions', 'lib'), { recursive: true }); fs.writeFileSync(path.join(repo, 'functions', 'lib', 'handlers.js'), code); };
+  git('init', '-q'); git('config', 'core.autocrlf', 'false'); put(OLD_RULES, OLD_CODE); git('add', '-A'); git('commit', '-q', '-m', 'before the audit fixes');
+  const pre = git('rev-parse', 'HEAD').stdout.trim();
+  put(NEW_RULES, NEW_CODE); git('add', '-A'); git('commit', '-q', '-m', 'audit fixes');
+  fs.writeFileSync(path.join(bin, 'firebase'), '#!/usr/bin/env bash\necho "firebase $*" >> "$FAKE_STATE/calls.log"\n[ -f "$FAKE_STATE/firebase-fail" ] && { echo "Error: deploy failed" >&2; exit 1; }\ncp firestore.rules "$FAKE_STATE/deployed-firestore.rules"; cp storage.rules "$FAKE_STATE/deployed-storage.rules"\necho "Deploy complete!"\n', { mode: 0o755 });
+  const go = (input, ...args) => { const r = spawnSync('bash', [path.join(repo, 'scripts', 'deploy-quote-sending.sh'), ...(args.length ? args : ['rules-back'])], { encoding: 'utf8', input, timeout: 60000, cwd: repo,
+    env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, FAKE_STATE: state, HOME: home, USERPROFILE: home, PRE_AUDIT: pre } }); return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }; };
+  const norm = (f) => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
+  const stillNew = () => norm(path.join(repo, 'firestore.rules')) === NEW_RULES + '\n' && git('status', '--porcelain').stdout.trim() === '';
+
+  const no = go('no\n'); assert.notEqual(no.code, 0, no.out); assert.ok(!fs.existsSync(path.join(state, 'deployed-firestore.rules')), 'nothing may be deployed when the answer is not yes'); assert.ok(stillNew());
+  const yes = go('yes\n'); assert.equal(yes.code, 0, yes.out); assert.match(yes.out, /previous rules are live/);
+  assert.equal(norm(path.join(state, 'deployed-firestore.rules')), OLD_RULES + '\n', 'the PREVIOUS rules must be what is deployed');
+  assert.equal(norm(path.join(state, 'deployed-storage.rules')), OLD_RULES + ' // storage\n');
+  assert.ok(stillNew(), 'your checkout must be back on the audit-fix rules:\n' + git('status', '--porcelain').stdout);
+  fs.writeFileSync(path.join(state, 'firebase-fail'), '');                            // the deploy itself fails
+  const failed = go('yes\n'); assert.notEqual(failed.code, 0, failed.out);
+  assert.ok(stillNew(), 'a failed deploy must still leave your checkout on the audit-fix rules');
+  fs.writeFileSync(path.join(repo, 'firestore.rules'), 'local edit\n');               // local changes are never overwritten
+  const dirty = go('yes\n'); assert.notEqual(dirty.code, 0); assert.match(dirty.out, /local changes/);
+  assert.equal(fs.readFileSync(path.join(repo, 'firestore.rules'), 'utf8'), 'local edit\n');
+
+  // "back": the functions come from the commit before the audit fixes, and your checkout is put back even when the stage it runs stops early
+  git('checkout', '--', 'firestore.rules');
+  const usage = go('', 'back', 'nonsense'); assert.notEqual(usage.code, 0); assert.match(usage.out, /Usage: .* back backend\|older/);
+  const back = go('yes\n', 'back', 'older');                                                 // the stage itself stops early here (there is no settings file in this pretend repo)
+  assert.notEqual(back.code, 0, back.out); assert.match(back.out, /Going back: the stage "older" is redeployed from the code of/);
+  assert.equal(norm(path.join(repo, 'functions', 'lib', 'handlers.js')), NEW_CODE, 'a stopped "back" must leave your checkout on the audit-fix code');
+  assert.equal(git('status', '--porcelain').stdout.trim(), '', git('status', '--porcelain').stdout);
 });

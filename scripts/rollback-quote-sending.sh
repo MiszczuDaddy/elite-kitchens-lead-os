@@ -73,6 +73,8 @@ fi
 
 F="$HOME/.previous-revisions-phase61"; [ "$ORIG" = 1 ] && F="$HOME/.previous-revisions-phase61.original"
 [ -s "$F" ] || { echo "No saved revisions ($F). Nothing to roll back to."; exit 1; }
+# Putting an OLDER claimAccess back gives staff access without an expiry: with the new security rules live that locks everyone out of the screen (second audit, finding 7).
+if grep -q '^claimaccess=' "$F"; then bash "$HERE/access-compat.sh" allow-legacy-code || exit 1; fi
 bad=""
 while IFS='=' read -r s rev; do
   [ -n "$s" ] && [ -n "$rev" ] || continue
