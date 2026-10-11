@@ -42,6 +42,7 @@ case "$sub" in
     exit 0 ;;
   "auth print-access-token "*) echo fake-token; exit 0 ;;
   "functions describe claimAccess") if [ -f "$FAKE_STATE/claim-updated" ]; then cat "$FAKE_STATE/claim-updated"; exit 0; fi; echo "ERROR: (gcloud.functions.describe) not found" >&2; exit 1 ;;
+  "run services describe") cat "$FAKE_STATE/claim-traffic.json" || exit 1; if [ -f "$FAKE_STATE/claim-traffic-after.json" ]; then cp "$FAKE_STATE/claim-traffic-after.json" "$FAKE_STATE/claim-traffic.json"; fi; exit 0 ;;
   "run services update-traffic")
     [ "$(mode)" = notready ] && { echo "ERROR: (gcloud.run.services.update-traffic) Revision '$svc-00001-old' is not ready and cannot serve traffic. Container import failed." >&2; exit 1; }
     echo "updated traffic $svc"; exit 0 ;;
@@ -60,18 +61,20 @@ case "$url" in
   */releases/firebase.storage/*) echo '{"rulesetName":"projects/p/rulesets/st"}' ;;
   */rulesets/fs) body "$FAKE_STATE/rules-firestore.txt" ;;
   */rulesets/st) body "$FAKE_STATE/rules-storage.txt" ;;
-  */claimAccess)
-    [ -f "$FAKE_STATE/claim-code" ] || { echo 'fake curl: no claim-code' >&2; exit 7; }
-    seq=$(cat "$FAKE_STATE/claim-code"); n=$(cat "$FAKE_STATE/claim-n" 2>/dev/null || echo 0); echo $((n + 1)) > "$FAKE_STATE/claim-n"
-    count=$(echo "$seq" | tr ',' '\n' | wc -l); mode=$(echo "$seq" | tr ',' '\n' | sed -n "$(( n % count + 1 ))p")
+  https://r*---claimaccess-test.a.run.app)
+    [ -f "$FAKE_STATE/claim-code" ] || exit 7
+    rev=$(echo "$url" | sed -E 's@https://r([0-9]+)---.*@claimaccess-\\1@')
+    mode=$(cat "$FAKE_STATE/$rev.code")
     case "$mode" in
-      new) echo '{"result":{"ok":true,"expiring":true,"claimMs":43200000}}' ;;
-      old) echo '{"error":{"message":"Sign in first.","status":"UNAUTHENTICATED"}}' ;;
+      new) echo '{"result":{"ok":true,"expiring":true,"claimMs":43200000,"revision":"'"$rev"'"}}' ;;
+      old) echo '{"error":{"status":"UNAUTHENTICATED"}}' ;;
       noexpiry) echo '{"result":{"ok":true,"expiring":false}}' ;;
       noms) echo '{"result":{"ok":true,"expiring":true}}' ;;
+      wrongrev) echo '{"result":{"ok":true,"expiring":true,"claimMs":43200000,"revision":"claimaccess-other"}}' ;;
       garbage) echo 'not json at all' ;;
       down) exit 7 ;;
     esac ;;
+
   *) echo "fake curl: unexpected url $url" >&2; exit 2 ;;
 esac
 `;
@@ -90,8 +93,8 @@ const deploy = (funcs, open = true) => { for (const f of funcs) { fs.writeFileSy
 const failWith = (f, how) => fs.writeFileSync(path.join(state, 'fail', low(f)), how);
 const isPublic = (f) => fs.existsSync(path.join(state, 'public', low(f)));
 const run = (script, args = [], env = {}) => {
-  const r = spawnSync('bash', [path.join(SCRIPTS, script), ...args], { encoding: 'utf8', timeout: 60000,
-    env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, FAKE_STATE: state, HOME: home, USERPROFILE: home, ...env } });
+  const r = spawnSync('bash', ['-c', 'gcloud() { bash "$TEST_BIN/gcloud" "$@"; }; curl() { bash "$TEST_BIN/curl" "$@"; }; export -f gcloud curl; exec bash "$@"', 'test', path.join(SCRIPTS, script), ...args], { encoding: 'utf8', timeout: 60000,
+    env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, FAKE_STATE: state, TEST_BIN: bin, HOME: home, USERPROFILE: home, ...env } });
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
 };
 
@@ -240,14 +243,22 @@ const NEW_RULES = "allow read: if request.auth.token.staff == true && request.au
 const OLD_RULES = 'allow read: if request.auth.token.staff == true;';
 const rulesAre = (firestoreRules, storageRules = firestoreRules) => { fs.writeFileSync(path.join(state, 'rules-firestore.txt'), firestoreRules); fs.writeFileSync(path.join(state, 'rules-storage.txt'), storageRules); };
 const claimUpdated = (iso) => fs.writeFileSync(path.join(state, 'claim-updated'), iso + '\n');          // when the function was last (re)deployed: NOT proof of what runs
-const claimCode = (answers) => { fs.writeFileSync(path.join(state, 'claim-code'), answers); fs.rmSync(path.join(state, 'claim-n'), { force: true }); };       // what the code that is actually SERVING claimAccess answers to the probe
+const claimCode = (answers) => {
+  fs.writeFileSync(path.join(state, 'claim-code'), answers);
+  const modes = answers.split(',');
+  const traffic = modes.map((mode, i) => {
+    const revisionName = 'claimaccess-' + (i + 1); fs.writeFileSync(path.join(state, revisionName + '.code'), mode);
+    return { revisionName, percent: Math.floor(100 / modes.length) + (i === 0 ? 100 % modes.length : 0), tag: 'r' + (i + 1), url: 'https://r' + (i + 1) + '---claimaccess-test.a.run.app' };
+  });
+  fs.writeFileSync(path.join(state, 'claim-traffic.json'), JSON.stringify({ metadata: { generation: 1 }, status: { observedGeneration: 1, conditions: [{ type: 'Ready', status: 'True' }], traffic } }));
+};
 const cannotRead = () => fs.writeFileSync(path.join(state, 'curl-fail'), '');
 const NEW_CODE = 'const staffUntil = now() + 1;\n', OLD_CODE = 'await adminAuth.setCustomUserClaims(auth.uid, { staff: true });\n';
 const OLD_CLAIM = '2026-09-30T22:34:44Z', NEW_CLAIM = '2026-10-09T21:50:00Z';
 const compat = (cmd, { code = NEW_CODE, env = {} } = {}) => {
   const f = path.join(tmp, 'handlers.js'); fs.writeFileSync(f, code);
   fs.rmSync(path.join(state, 'claim-n'), { force: true });
-  return run('access-compat.sh', [cmd], { ACCESS_HANDLERS_FILE: f, ACCESS_PROBE_WAIT: '0', ACCESS_PROBE_TRIES: '1', ...env });
+  return run('access-compat.sh', [cmd], { ACCESS_HANDLERS_FILE: f, ...env });
 };
 const callsLog = () => fs.readFileSync(path.join(state, 'calls.log'), 'utf8');
 
@@ -313,21 +324,21 @@ test('third check, finding 7: traffic restored to an OLDER revision after the ne
   const r = compat('allow-rules');
   assert.equal(r.code, 1, 'the rules were allowed although traffic is on an older revision:\n' + r.out);
   claimCode('new,old,new');                      // traffic split between two revisions: one old answer is enough
-  assert.equal(compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } }).code, 1, 'a split between versions must be refused');
+  assert.equal(compat('allow-rules', {}).code, 1, 'a split between versions must be refused');
   claimCode('new');
-  assert.equal(compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } }).code, 0);
+  assert.equal(compat('allow-rules', {}).code, 0);
 });
 
 test('third check, finding 7: a probe that cannot be answered, is answered wrongly, or is split between versions never allows the rules', () => {
   for (const answers of ['down', 'garbage', 'noexpiry', 'noms', 'old', 'new,new,old', 'old,new,new']) {
     claimCode(answers);
-    const r = compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } });
+    const r = compat('allow-rules', {});
     assert.equal(r.code, 1, answers + ': the rules must be refused:\n' + r.out);
   }
-  claimCode('new,new,new'); assert.equal(compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } }).code, 0);
-  claimCode('new,old,new');                                                     // by DEFAULT the question is asked more than once: traffic can be split
-  const byDefault = compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '', ACCESS_PROBE_WAIT: '0' } });
-  assert.equal(byDefault.code, 1, 'with the default number of probes a split between versions must be caught:\n' + byDefault.out);
+  claimCode('new,new,new'); assert.equal(compat('allow-rules', {}).code, 0);
+  claimCode('new,old,new');                                                     // every revision receiving traffic must answer individually
+  const byDefault = compat('allow-rules');
+  assert.equal(byDefault.code, 1, 'every serving revision must be checked:\n' + byDefault.out);
   cannotRead(); claimCode('new');
   assert.equal(compat('allow-rules').code, 1, 'when the network call fails nothing is proven');
 });
@@ -383,7 +394,7 @@ test('the deploy stages that change staff access run the check first, "older" in
 
 test('rules-back publishes the PREVIOUS rules, and leaves your checkout on the audit-fix rules both when it works and when the deploy fails', () => {
   const repo = path.join(tmp, 'repo'); fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
-  for (const f of ['deploy-quote-sending.sh', 'access-compat.sh', 'lib-run-iam.sh']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(repo, 'scripts', f));
+  for (const f of ['deploy-quote-sending.sh', 'access-compat.sh', 'access-traffic.js', 'lib-run-iam.sh']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(repo, 'scripts', f));
   const git = (...a) => spawnSync('git', ['-C', repo, '-c', 'core.autocrlf=false', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { encoding: 'utf8' });
   const put = (rules, code) => { fs.writeFileSync(path.join(repo, 'firestore.rules'), rules + '\n'); fs.writeFileSync(path.join(repo, 'storage.rules'), rules + ' // storage\n');
     fs.mkdirSync(path.join(repo, 'functions', 'lib'), { recursive: true }); fs.writeFileSync(path.join(repo, 'functions', 'lib', 'handlers.js'), code); };
@@ -415,4 +426,33 @@ test('rules-back publishes the PREVIOUS rules, and leaves your checkout on the a
   assert.notEqual(back.code, 0, back.out); assert.match(back.out, /Going back: the stage "older" is redeployed from the code of/);
   assert.equal(norm(path.join(repo, 'functions', 'lib', 'handlers.js')), NEW_CODE, 'a stopped "back" must leave your checkout on the audit-fix code');
   assert.equal(git('status', '--porcelain').stdout.trim(), '', git('status', '--porcelain').stdout);
+});
+
+// Final verification: the old checker missed an old revision after three lucky new responses.
+test('final verification 7: every serving revision is checked, including an old fourth revision and a 1 percent revision', () => {
+  claimCode('new,new,new,old');
+  const r = compat('allow-rules'); assert.equal(r.code, 1, r.out);
+  assert.match(callsLog(), /r4---claimaccess-test/);
+  claimCode('new,old');
+  const file = path.join(state, 'claim-traffic.json'), obj = JSON.parse(fs.readFileSync(file));
+  obj.status.traffic[0].percent = 99; obj.status.traffic[1].percent = 1;
+  fs.writeFileSync(file, JSON.stringify(obj)); assert.equal(compat('allow-rules').code, 1);
+  claimCode('new,new,new,new'); assert.equal(compat('allow-rules').code, 0);
+});
+test('final verification 7: inaccessible revisions, wrong identities and unknown traffic fail closed', () => {
+  for (const modes of ['new,down', 'new,wrongrev']) { claimCode(modes); assert.equal(compat('allow-rules').code, 1); }
+  claimCode('new,new');
+  const file = path.join(state, 'claim-traffic.json'), obj = JSON.parse(fs.readFileSync(file));
+  delete obj.status.traffic[1].url; fs.writeFileSync(file, JSON.stringify(obj));
+  assert.equal(compat('allow-rules').code, 1, 'cannot address one member of a split');
+  fs.writeFileSync(file, '{}'); assert.equal(compat('allow-rules').code, 1);
+  fs.rmSync(file); assert.equal(compat('allow-rules').code, 1);
+});
+
+test('final verification 7: traffic changing during verification is refused', () => {
+  claimCode('new,new');
+  const obj = JSON.parse(fs.readFileSync(path.join(state, 'claim-traffic.json')));
+  obj.status.traffic[0].percent = 99; obj.status.traffic[1].percent = 1;
+  fs.writeFileSync(path.join(state, 'claim-traffic-after.json'), JSON.stringify(obj));
+  const r = compat('allow-rules'); assert.equal(r.code, 1, r.out); assert.match(r.out, /could not be checked/);
 });

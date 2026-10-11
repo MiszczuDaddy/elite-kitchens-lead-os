@@ -82,12 +82,12 @@ async function processMedia({ db, wa, bucket }, phone, msgId, timeoutMs) {
 // they never call this again; scripts/revoke-staff.js ends it within about an hour.
 const STAFF_CLAIM_MS = 12 * 3600 * 1000;
 const ACCESS_PROBE = 'staff-claim-expiry';
-async function claimAccess(auth, { adminAuth, cfg, now = Date.now }, data) {
+async function claimAccess(auth, { adminAuth, cfg, now = Date.now, revision = process.env.K_REVISION || null }, data) {
   if (!auth) {
     // A capability probe (third check, finding 7): scripts/access-compat.sh asks the code that is ACTUALLY serving whether staff access has an expiry, because a
     // deployment date proves nothing (older code can be redeployed, or traffic moved back to an older revision). Only this exact question is answered, and
-    // it grants nothing and reveals nothing else. Older code has no such question and refuses it as an unauthenticated call.
-    if (data && data.probe === ACCESS_PROBE) return { ok: true, expiring: true, claimMs: STAFF_CLAIM_MS };
+    // it returns only the expiry capability and revision identity, never access or customer data. Older code refuses this unauthenticated call.
+    if (data && data.probe === ACCESS_PROBE) return { ok: true, expiring: true, claimMs: STAFF_CLAIM_MS, revision };
     throw new HttpsError('unauthenticated', 'Sign in first.');
   }
   if (!isAllowedUser(auth, cfg)) {

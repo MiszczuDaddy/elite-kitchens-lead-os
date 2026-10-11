@@ -42,8 +42,8 @@ test('claimAccess refuses someone who is no longer allowed AND removes the claim
 const claims = (extra) => ({ email: 'thomas@example.com', email_verified: true, ...extra });
 test('third check, finding 7: claimAccess answers ONE capability question without a sign-in ("do you give an expiry?"), grants nothing, and is wired to the request data', async () => {
   const adminAuth = fakeAdminAuth();
-  const r = await h.claimAccess(null, { adminAuth, cfg }, { probe: 'staff-claim-expiry' });
-  assert.deepEqual(r, { ok: true, expiring: true, claimMs: 12 * HOUR });
+  const r = await h.claimAccess(null, { adminAuth, cfg, revision: 'claimaccess-test' }, { probe: 'staff-claim-expiry' });
+  assert.deepEqual(r, { ok: true, expiring: true, claimMs: 12 * HOUR, revision: 'claimaccess-test' });
   assert.deepEqual(adminAuth.calls, [], 'the probe must grant nothing');
   for (const bad of [undefined, null, {}, { probe: true }, { probe: 'x' }, { probe: 'STAFF-CLAIM-EXPIRY' }, { probe: 1 }, 'staff-claim-expiry', [], { probe: ['staff-claim-expiry'] }]) {
     await assert.rejects(h.claimAccess(null, { adminAuth, cfg }, bad), (e) => e.code === 'unauthenticated', JSON.stringify(bad));

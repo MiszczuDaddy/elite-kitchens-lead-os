@@ -46,23 +46,27 @@ rules_state() {
   local f s; f=$(ruleset_requires_expiry cloud.firestore); s=$(ruleset_requires_expiry "firebase.storage/$BUCKET")
   if [ "$f" = yes ] || [ "$s" = yes ]; then echo expiry; elif [ "$f" = no ] && [ "$s" = no ]; then echo legacy; else echo unknown; fi
 }
-# The code that is ACTUALLY serving claimAccess, found by asking it (third check, finding 7). claimAccess answers one question without a sign-in: "do you give
-# staff access an expiry?" (it grants nothing and reveals nothing else); older code has no such question and refuses it as an unauthenticated call. The question is
-# asked a few times, because traffic can be split between revisions.
-CLAIM_URL="https://$REGION-$PROJECT.cloudfunctions.net/claimAccess"
-PROBE_TRIES="${ACCESS_PROBE_TRIES:-3}"; PROBE_WAIT="${ACCESS_PROBE_WAIT:-2}"
-probe_once() {                                                  # new = it says it gives an expiry | old = it refuses the question | unknown = no answer, or an unexpected one
-  local out; out=$(curl -sS --max-time 20 -X POST -H 'Content-Type: application/json' -d '{"data":{"probe":"staff-claim-expiry"}}' "$CLAIM_URL" 2>/dev/null) || { echo unknown; return; }
-  printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{try{const o=JSON.parse(s);if(o.result&&o.result.ok===true&&o.result.expiring===true&&Number(o.result.claimMs)>0)console.log("new");else if(o.error&&o.error.status==="UNAUTHENTICATED")console.log("old");else console.log("unknown")}catch(e){console.log("unknown")}})'
+# Verify EVERY revision receiving traffic, not a sample of the shared endpoint. The probe identifies
+# its immutable Cloud Run revision. Missing routes, unsettled traffic, or changes during the check fail closed.
+traffic_targets() {
+  local out; out=$(gcloud run services describe claimaccess --region "$REGION" --project "$PROJECT" --format=json 2>/dev/null) || return 1
+  printf '%s' "$out" | node "$HERE/access-traffic.js"
 }
-claim_live_state() {                                            # new only if EVERY answer is new; old if ANY answer is old; otherwise unknown
-  local i a seen_old=0 all_new=1
-  for i in $(seq 1 "$PROBE_TRIES"); do
-    a=$(probe_once)
-    [ "$a" = new ] || all_new=0
-    [ "$a" = old ] && seen_old=1
-    if [ "$i" -lt "$PROBE_TRIES" ] && [ "$PROBE_WAIT" != 0 ]; then sleep "$PROBE_WAIT"; fi
-  done
+probe_once() {
+  local out; out=$(curl -sS --max-time 20 -X POST -H 'Content-Type: application/json' -d '{"data":{"probe":"staff-claim-expiry"}}' "$2" 2>/dev/null) || { echo unknown; return; }
+  printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>{try{const o=JSON.parse(s),r=o.result;if(r&&r.ok===true&&r.expiring===true&&Number.isFinite(r.claimMs)&&r.claimMs>0&&r.revision===process.argv[1])console.log("new");else if(o.error&&o.error.status==="UNAUTHENTICATED")console.log("old");else console.log("unknown")}catch(e){console.log("unknown")}})' "$1"
+}
+claim_live_state() {
+  local before after revision url percent answer seen_old=0 all_new=1
+  before=$(traffic_targets) || { echo unknown; return; }
+  [ -n "$before" ] || { echo unknown; return; }
+  while IFS=$'\t' read -r revision url percent; do
+    answer=$(probe_once "$revision" "$url")
+    [ "$answer" = new ] || all_new=0
+    [ "$answer" = old ] && seen_old=1
+  done <<< "$before"
+  after=$(traffic_targets) || { echo unknown; return; }
+  [ "$before" = "$after" ] || { echo unknown; return; }
   if [ "$all_new" = 1 ]; then echo new; elif [ "$seen_old" = 1 ]; then echo old; else echo unknown; fi
 }
 
