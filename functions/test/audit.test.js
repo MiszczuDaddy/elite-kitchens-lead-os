@@ -678,3 +678,40 @@ test('second audit 6: a request id is optional (older screens) and checked when 
   await h.deleteCustomer(staff, { phone: NEWP, confirm: '3333' }, deps);
   assert.equal((await db.collection(`conversations/${NEWP}/sendRequests`).get()).size, 0);
 });
+
+
+// ============================================================================================================================================
+// THIRD CHECK (Astra's final targeted verification), finding 6: an answer the server could not confirm must be recognisable by the SCREEN
+// ============================================================================================================================================
+// The server answers "unavailable" both when Meta REFUSED a message (nothing was sent) and when Meta may already have ACCEPTED it (we could not tell). The screen
+// used to take every "unavailable" as a definite answer and made a NEW request id on the next press, so the same message could go out twice. The error now says which.
+const reasonOf = async (promise) => { try { await promise; return 'no error'; } catch (e) { return (e.details && e.details.reason) || ('no reason (' + e.code + ')'); } };
+
+test('third check, finding 6: every uncertain outcome says "not_confirmed" and every definite refusal says "refused" (details.reason), for replies, files and starting a conversation', async () => {
+  await live();
+  for (const mode of ['server', 'network']) {
+    meta.mode = mode;
+    assert.equal(await reasonOf(h.sendReply(staff, { phone: P, body: 'x', requestId: reqId() }, { db, wa, cfg })), 'not_confirmed', 'sendReply ' + mode);
+    assert.equal(await reasonOf(h.sendMedia(staff, { phone: P, uploadPath: await pngUpload(), caption: 'x', requestId: reqId() }, { db, wa, cfg, bucket })), 'not_confirmed', 'sendMedia ' + mode);
+    assert.equal(await reasonOf(startSC({ requestId: reqId() })), 'not_confirmed', 'startConversation ' + mode);
+  }
+  meta.mode = 'refuse';
+  assert.equal(await reasonOf(h.sendReply(staff, { phone: P, body: 'x', requestId: reqId() }, { db, wa, cfg })), 'refused', 'sendReply refused');
+  assert.equal(await reasonOf(h.sendMedia(staff, { phone: P, uploadPath: await pngUpload(), caption: 'x', requestId: reqId() }, { db, wa, cfg, bucket })), 'refused', 'sendMedia refused');
+  assert.equal(await reasonOf(startSC({ requestId: reqId() })), 'refused', 'startConversation refused');
+});
+
+test('third check, finding 6: the SAME request again after an unclear answer is still "not_confirmed" (and sends nothing); a request that is still being sent says "in_progress"', async () => {
+  await live();
+  meta.mode = 'server';
+  const a = reqId(), b = reqId(), c = reqId();
+  assert.equal(await reasonOf(h.sendReply(staff, { phone: P, body: 'x', requestId: a }, { db, wa, cfg })), 'not_confirmed');
+  assert.equal(await reasonOf(startSC({ requestId: b })), 'not_confirmed');
+  meta.mode = 'ok'; const before = meta.messages.length;
+  assert.equal(await reasonOf(h.sendReply(staff, { phone: P, body: 'x', requestId: a }, { db, wa, cfg })), 'not_confirmed', 'sendReply: the same request again');
+  assert.equal(await reasonOf(startSC({ requestId: b })), 'not_confirmed', 'startConversation: the same request again');
+  assert.equal(meta.messages.length, before, 'nothing may reach Meta again for a request nobody has resolved');
+  // a claim that is "sending" right now (the call is still running somewhere)
+  await require('../lib/outbound').begin(db, P, c);
+  assert.equal(await reasonOf(h.sendReply(staff, { phone: P, body: 'y', requestId: c }, { db, wa, cfg })), 'in_progress');
+});

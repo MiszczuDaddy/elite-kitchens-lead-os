@@ -60,6 +60,18 @@ case "$url" in
   */releases/firebase.storage/*) echo '{"rulesetName":"projects/p/rulesets/st"}' ;;
   */rulesets/fs) body "$FAKE_STATE/rules-firestore.txt" ;;
   */rulesets/st) body "$FAKE_STATE/rules-storage.txt" ;;
+  */claimAccess)
+    [ -f "$FAKE_STATE/claim-code" ] || { echo 'fake curl: no claim-code' >&2; exit 7; }
+    seq=$(cat "$FAKE_STATE/claim-code"); n=$(cat "$FAKE_STATE/claim-n" 2>/dev/null || echo 0); echo $((n + 1)) > "$FAKE_STATE/claim-n"
+    count=$(echo "$seq" | tr ',' '\n' | wc -l); mode=$(echo "$seq" | tr ',' '\n' | sed -n "$(( n % count + 1 ))p")
+    case "$mode" in
+      new) echo '{"result":{"ok":true,"expiring":true,"claimMs":43200000}}' ;;
+      old) echo '{"error":{"message":"Sign in first.","status":"UNAUTHENTICATED"}}' ;;
+      noexpiry) echo '{"result":{"ok":true,"expiring":false}}' ;;
+      noms) echo '{"result":{"ok":true,"expiring":true}}' ;;
+      garbage) echo 'not json at all' ;;
+      down) exit 7 ;;
+    esac ;;
   *) echo "fake curl: unexpected url $url" >&2; exit 2 ;;
 esac
 `;
@@ -227,21 +239,23 @@ test('an unknown option prints the help and does nothing', () => {
 const NEW_RULES = "allow read: if request.auth.token.staff == true && request.auth.token.get('staffUntil', 0) > request.time.toMillis();";
 const OLD_RULES = 'allow read: if request.auth.token.staff == true;';
 const rulesAre = (firestoreRules, storageRules = firestoreRules) => { fs.writeFileSync(path.join(state, 'rules-firestore.txt'), firestoreRules); fs.writeFileSync(path.join(state, 'rules-storage.txt'), storageRules); };
-const claimUpdated = (iso) => fs.writeFileSync(path.join(state, 'claim-updated'), iso + '\n');
+const claimUpdated = (iso) => fs.writeFileSync(path.join(state, 'claim-updated'), iso + '\n');          // when the function was last (re)deployed: NOT proof of what runs
+const claimCode = (answers) => { fs.writeFileSync(path.join(state, 'claim-code'), answers); fs.rmSync(path.join(state, 'claim-n'), { force: true }); };       // what the code that is actually SERVING claimAccess answers to the probe
 const cannotRead = () => fs.writeFileSync(path.join(state, 'curl-fail'), '');
 const NEW_CODE = 'const staffUntil = now() + 1;\n', OLD_CODE = 'await adminAuth.setCustomUserClaims(auth.uid, { staff: true });\n';
 const OLD_CLAIM = '2026-09-30T22:34:44Z', NEW_CLAIM = '2026-10-09T21:50:00Z';
 const compat = (cmd, { code = NEW_CODE, env = {} } = {}) => {
   const f = path.join(tmp, 'handlers.js'); fs.writeFileSync(f, code);
-  return run('access-compat.sh', [cmd], { ACCESS_HANDLERS_FILE: f, ACCESS_CLAIM_SINCE: '2026-10-08T05:00:00Z', ...env });
+  fs.rmSync(path.join(state, 'claim-n'), { force: true });
+  return run('access-compat.sh', [cmd], { ACCESS_HANDLERS_FILE: f, ACCESS_PROBE_WAIT: '0', ACCESS_PROBE_TRIES: '1', ...env });
 };
 const callsLog = () => fs.readFileSync(path.join(state, 'calls.log'), 'utf8');
 
 test('status tells the truth about the three parts, and calls "the rules need the expiry but claimAccess does not give it" DANGER', () => {
-  rulesAre(NEW_RULES); claimUpdated(OLD_CLAIM);
+  rulesAre(NEW_RULES); claimUpdated(NEW_CLAIM); claimCode('old');
   const danger = compat('status');
-  assert.match(danger.out, /REQUIRE an expiring staff claim/); assert.match(danger.out, /older than the expiry code/); assert.match(danger.out, /VERDICT: DANGER/); assert.match(danger.out, /rules-back/);
-  claimUpdated(NEW_CLAIM);
+  assert.match(danger.out, /REQUIRE an expiring staff claim/); assert.match(danger.out, /older: it gives NO expiry/); assert.match(danger.out, /VERDICT: DANGER/); assert.match(danger.out, /rules-back/);
+  claimCode('new');
   assert.match(compat('status').out, /VERDICT: in step/);
   rulesAre(OLD_RULES);
   assert.match(compat('status').out, /VERDICT: safe .*can be published/);
@@ -273,15 +287,63 @@ test('allow-legacy-code (an older claimAccess put back): only while the live rul
   cannotRead(); assert.equal(compat('allow-legacy-code').code, 1);
 });
 
-test('allow-rules: only if this checkout gives the expiry AND the live claimAccess is newer than the code that gives it; never when that cannot be checked', () => {
-  claimUpdated(NEW_CLAIM);
+test('allow-rules: only if this checkout gives the expiry AND the code serving claimAccess answers the probe; never when that cannot be checked', () => {
+  claimCode('new');
   const r = compat('allow-rules'); assert.equal(r.code, 0, r.out);
   const oldCheckout = compat('allow-rules', { code: OLD_CODE }); assert.equal(oldCheckout.code, 1, oldCheckout.out); assert.match(oldCheckout.out, /WITHOUT an expiry/);
-  claimUpdated(OLD_CLAIM);
-  const oldLive = compat('allow-rules'); assert.equal(oldLive.code, 1, oldLive.out); assert.match(oldLive.out, /older than the code that gives the expiry/); assert.match(oldLive.out, /older/);
-  fs.rmSync(path.join(state, 'claim-updated'));
+  claimCode('old');
+  const oldLive = compat('allow-rules'); assert.equal(oldLive.code, 1, oldLive.out); assert.match(oldLive.out, /older than the code that gives the expiry/);
+  fs.rmSync(path.join(state, 'claim-code'));
   const unknown = compat('allow-rules'); assert.equal(unknown.code, 1, unknown.out); assert.match(unknown.out, /could not be checked/);
+});
+
+test('third check, finding 7: a claimAccess REDEPLOYED just now with older code is not proof: what answers is what counts, so the rules stay blocked', () => {
+  claimUpdated(NEW_CLAIM);                       // the function was (re)deployed minutes ago: a timestamp the old checker took for "the new code"
+  claimCode('old');                              // ...but the code now serving it gives staff access no expiry (an older version was redeployed)
+  const r = compat('allow-rules');
+  assert.equal(r.code, 1, 'the rules were allowed although older code is serving claimAccess:\n' + r.out); assert.match(r.out, /REFUSED/); assert.match(r.out, /older than the code that gives the expiry/);
+  assert.match(compat('status').out, /older: it gives NO expiry/);
+});
+
+test('third check, finding 7: traffic restored to an OLDER revision after the new code was live is caught (the function\'s own timestamp does not change)', () => {
   claimUpdated(NEW_CLAIM);
+  claimCode('new');
+  assert.equal(compat('allow-rules').code, 0, 'the new code is serving: allowed');
+  claimCode('old');                              // traffic moved back to an older revision: the timestamp above is unchanged
+  const r = compat('allow-rules');
+  assert.equal(r.code, 1, 'the rules were allowed although traffic is on an older revision:\n' + r.out);
+  claimCode('new,old,new');                      // traffic split between two revisions: one old answer is enough
+  assert.equal(compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } }).code, 1, 'a split between versions must be refused');
+  claimCode('new');
+  assert.equal(compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } }).code, 0);
+});
+
+test('third check, finding 7: a probe that cannot be answered, is answered wrongly, or is split between versions never allows the rules', () => {
+  for (const answers of ['down', 'garbage', 'noexpiry', 'noms', 'old', 'new,new,old', 'old,new,new']) {
+    claimCode(answers);
+    const r = compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } });
+    assert.equal(r.code, 1, answers + ': the rules must be refused:\n' + r.out);
+  }
+  claimCode('new,new,new'); assert.equal(compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '3' } }).code, 0);
+  claimCode('new,old,new');                                                     // by DEFAULT the question is asked more than once: traffic can be split
+  const byDefault = compat('allow-rules', { env: { ACCESS_PROBE_TRIES: '', ACCESS_PROBE_WAIT: '0' } });
+  assert.equal(byDefault.code, 1, 'with the default number of probes a split between versions must be caught:\n' + byDefault.out);
+  cannotRead(); claimCode('new');
+  assert.equal(compat('allow-rules').code, 1, 'when the network call fails nothing is proven');
+});
+
+test('third check, finding 7: after "older" the script verifies that the NEW claimAccess is the one serving (only when the code deployed gives the expiry)', () => {
+  claimCode('old');
+  const bad = compat('claim-after-deploy', { code: NEW_CODE }); assert.equal(bad.code, 1, bad.out); assert.match(bad.out, /NOT serving the new code|do not run .rules./i);
+  claimCode('new');
+  assert.equal(compat('claim-after-deploy', { code: NEW_CODE }).code, 0);
+  claimCode('old');
+  const legacy = compat('claim-after-deploy', { code: OLD_CODE }); assert.equal(legacy.code, 0, legacy.out);             // going BACK to older code: nothing to prove
+  const s2 = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const i = s2.indexOf('\n  older)\n'), older = s2.slice(i, s2.indexOf('\n    ;;', i));
+  assert.match(older, /access-compat\.sh claim-after-deploy/); assert.ok(older.indexOf('check_reachable') < older.indexOf('claim-after-deploy'), 'the probe comes after the deploy');
+  assert.match(older, /for _ in 1 2 3 4 5 6; do if bash \.\/scripts\/access-compat\.sh claim-after-deploy/, 'the stage must ASK (with a few tries: a new revision takes a moment to take over)');
+  assert.match(older, /\[ "\$ok" = 1 \] \|\| \{ bash \.\/scripts\/access-compat\.sh claim-after-deploy; exit 1; \}/, 'and STOP when the new code is not the one serving');
 });
 
 test('ACCESS_COMPAT_FORCE=yes lets a person who has checked by hand go on (and says so); nothing else does', () => {

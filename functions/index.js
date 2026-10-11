@@ -38,7 +38,7 @@ exports.webhook = onRequest({ secrets: SECRETS, timeoutSeconds: 90, memory: '512
   res.sendStatus(await h.webhookReceive({ rawBody: req.rawBody, body: req.body, signature: req.get('x-hub-signature-256') }, d));
 });
 
-exports.claimAccess = onCall({ secrets: SECRETS }, (req) => h.claimAccess(req.auth, deps()));
+exports.claimAccess = onCall({ secrets: SECRETS }, (req) => h.claimAccess(req.auth, deps(), req.data));
 exports.startConversation = onCall({ secrets: SECRETS }, (req) => h.startConversation(req.auth, req.data, deps()));
 exports.markRead = onCall({ secrets: SECRETS }, (req) => h.markRead(req.auth, req.data, deps()));
 exports.setConversationStatus = onCall({}, (req) => h.setConversationStatus(req.auth, req.data, {

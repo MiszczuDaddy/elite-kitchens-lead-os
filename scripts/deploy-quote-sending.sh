@@ -203,6 +203,10 @@ case "${1:-}" in
     save_revisions $OLDER_FUNCS
     deploy_functions $OLDER_FUNCS
     check_reachable "$OLDER_FUNCS"
+    echo "==> checking that the claimAccess now SERVING gives staff access an expiry (it is asked, not assumed: a deployment date proves nothing)"
+    ok=0; for _ in 1 2 3 4 5 6; do if bash ./scripts/access-compat.sh claim-after-deploy >/dev/null 2>&1; then ok=1; break; fi; sleep 10; done
+    [ "$ok" = 1 ] || { bash ./scripts/access-compat.sh claim-after-deploy; exit 1; }
+    echo "   claimAccess: the new code is serving (ok)"
     echo "Done. Staff access now carries an expiry and is renewed by the new screen. Do NOT run \"rules\" until the new screen (Phase 6.1) is live and you have reloaded Elite OS once."
     echo "To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;

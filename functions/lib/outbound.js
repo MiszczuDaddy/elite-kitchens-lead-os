@@ -36,8 +36,8 @@ async function begin(db, phone, requestId, nowMs = Date.now()) {
     if (d.state === 'sent') return { done: true };
     if (d.state === 'failed') { tx.update(ref, { state: 'sending', claimedAt: now }); return { go: true }; }
     const age = nowMs - (d.claimedAt ? d.claimedAt.toMillis() : 0);
-    if (d.state === 'sending' && age < STUCK_MS) throw new HttpsError('failed-precondition', 'This message is already being sent.');
-    throw new HttpsError('failed-precondition', NOT_CONFIRMED);                                 // unknown, or "sending" for too long
+    if (d.state === 'sending' && age < STUCK_MS) throw new HttpsError('failed-precondition', 'This message is already being sent.', { reason: 'in_progress' });
+    throw new HttpsError('failed-precondition', NOT_CONFIRMED, { reason: 'not_confirmed' });    // unknown, or "sending" for too long: nobody has resolved it
   });
 }
 

@@ -636,15 +636,66 @@ const finishPending = (p, phone) => {
 // One request id per message (audit finding 6). The server sends a request once, and never a second time after an answer it could not confirm.
 // If the answer never ARRIVED here (the connection dropped) and the SAME message is sent again to the same customer within 5 minutes, the same
 // id is reused, so the server recognises it and nothing goes out twice. A message that was refused or answered is a new request next time.
+//
+// Third check, finding 6: an answer the SERVER could not confirm ("not confirmed": Meta may already have accepted the message) is NOT a refusal. The server says
+// which kind it is (details.reason: "refused" / "not_confirmed" / "in_progress"); "unavailable" on its own used to be taken for a refusal, so the next press made a NEW
+// request and the same message could go out twice. Now an uncertain outcome keeps its identity until a person RESOLVES it ("it arrived" / "it did not arrive"): pressing Send
+// again, retyping the same words, or reloading the page sends nothing. Only "it did not arrive" frees the next press, and that press is a genuinely new request.
 const newRid = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+const UNRES_KEY = 'ek-unresolved-sends', UNRES_TTL = 24 * 3600 * 1000;
+const unresolvedMem = new Map();
+function unresolvedLoad() { try { return JSON.parse(sessionStorage.getItem(UNRES_KEY) || '{}') || {}; } catch (e) { return {}; } }
+const unresolved = {
+  get(k) { const v = unresolvedMem.get(k) || unresolvedLoad()[k]; return v && Date.now() - v.at < UNRES_TTL ? v : null; },
+  set(k, requestId) { const v = { requestId, at: Date.now() }; unresolvedMem.set(k, v); try { const o = unresolvedLoad(); o[k] = v; sessionStorage.setItem(UNRES_KEY, JSON.stringify(o)); } catch (e) { /* kept in memory */ } },
+  clear(k) { lastTry = null; unresolvedMem.delete(k); try { const o = unresolvedLoad(); delete o[k]; sessionStorage.setItem(UNRES_KEY, JSON.stringify(o)); } catch (e) { /* nothing to clear */ } },
+};
+const sendKey = (phone, key) => phone + '|' + key;
 let lastTry = null;
 function requestFor(phone, key) {
+  const held = unresolved.get(sendKey(phone, key));
+  if (held) return held.requestId;                                            // an outcome nobody has resolved keeps its identity: never a new request by accident
   const again = lastTry && lastTry.phone === phone && lastTry.key === key && lastTry.unsure && Date.now() - lastTry.at < 5 * 60 * 1000;
   lastTry = { phone, key, requestId: again ? lastTry.requestId : newRid(), at: Date.now(), unsure: false };
   return lastTry.requestId;
 }
-const answered = (err) => !!(err && /^functions\/(unavailable|failed-precondition|invalid-argument|permission-denied|not-found|unauthenticated|resource-exhausted)$/.test(err.code));
+const reasonOf = (err) => (err && err.details && err.details.reason) || null;
+// Is the outcome UNCERTAIN (the message may already have gone)? "unavailable" is definite only when the server says "refused": an older server that says nothing is treated as uncertain.
+const uncertain = (err) => !!err && (reasonOf(err) === 'not_confirmed' || (err.code === 'functions/unavailable' && reasonOf(err) !== 'refused' && reasonOf(err) !== 'in_progress'));
+const answered = (err) => !!(err && /^functions\/(unavailable|failed-precondition|invalid-argument|permission-denied|not-found|unauthenticated|resource-exhausted)$/.test(err.code)) && !uncertain(err) && reasonOf(err) !== 'in_progress';
 const noteUnsure = (err) => { if (lastTry && !answered(err)) lastTry.unsure = true; };
+// After a failed send: an answer that never arrived or is still in progress continues as the SAME request (within 5 minutes); an answer that could not be confirmed is held until resolved.
+function noteOutcome(phone, key, err) {
+  if (uncertain(err)) { unresolved.set(sendKey(phone, key), (lastTry && lastTry.requestId) || newRid()); if (lastTry) lastTry.unsure = false; }      // held until resolved: NOT a "same request within 5 minutes"
+  else noteUnsure(err);
+}
+const UNCONFIRMED = 'We could not confirm that WhatsApp sent this. Check the chat on your phone before doing anything else: Elite OS will not send it a second time by itself.';
+// The decision a person takes before a genuinely new attempt. The buttons send nothing themselves.
+function decision(box, text, onArrived, onNotArrived) {
+  box.replaceChildren(document.createTextNode(text + ' '));
+  const a = el('button', 'linkbtn', 'It arrived'); a.type = 'button'; a.dataset.decision = 'arrived'; a.onclick = onArrived;
+  const n = el('button', 'linkbtn', 'It did not arrive: I will send it again'); n.type = 'button'; n.dataset.decision = 'not_arrived'; n.onclick = onNotArrived;
+  box.append(a, ' · ', n); box.hidden = false;
+}
+function textDecision(phone, body) {
+  const k = sendKey(phone, body);
+  decision($('banner'), UNCONFIRMED,
+    () => { unresolved.clear(k); if (ta.value.trim() === body) { ta.value = ''; ta.style.height = 'auto'; } banner(''); },        // it arrived: nothing more to do
+    () => { unresolved.clear(k); ta.value = body; banner(''); ta.focus(); });                                                        // it did not arrive: the words are here; the next Send is a NEW request
+}
+function mediaDecision(phone, mkey) {
+  const k = sendKey(phone, mkey);
+  decision($('banner'), UNCONFIRMED,
+    () => { unresolved.clear(k); clearAttachment(); ta.value = ''; ta.style.height = 'auto'; banner(''); },                          // it arrived
+    () => { unresolved.clear(k); banner(''); ta.focus(); });                                                                         // it did not arrive: the file is still here; the next Send is a NEW request
+}
+function startDecision(phone, name) {
+  const k = sendKey(phone, 'start|' + name);
+  decision($('n-err'), UNCONFIRMED,
+    () => { unresolved.clear(k); dlg.close(); openConversation(phone); },                                                           // it arrived: carry on in the conversation
+    () => { unresolved.clear(k); $('n-err').textContent = ''; });                                                                    // it did not arrive: pressing Start again is a NEW request
+  $('n-go').disabled = false;
+}
 
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -655,6 +706,7 @@ $('composer').addEventListener('submit', async (e) => {
   const body = ta.value.trim();
   if (S.attach) return sendAttachment(phone, body);
   if (!body) return;
+  if (unresolved.get(sendKey(phone, body))) { textDecision(phone, body); return; }                    // an earlier send of exactly this was never confirmed: decide first
   banner('');
   const p = { body, at: Date.now(), seq: S.snapSeq, done: false };
   S.pending.push(p);
@@ -664,12 +716,12 @@ $('composer').addEventListener('submit', async (e) => {
     await call('sendReply')({ phone, body, requestId: requestFor(phone, body) });
     finishPending(p, phone);
   } catch (err) {
-    noteUnsure(err);
+    noteOutcome(phone, body, err);
     S.pending = S.pending.filter((x) => x !== p);
     // Meta rejections are recorded as a failed message by the server; other errors leave nothing behind, so keep the text.
     if (S.selected === phone) {
-      if (err && err.code !== 'functions/unavailable') ta.value = body;
-      banner('Message not sent: ' + errText(err));
+      if (uncertain(err)) { ta.value = body; textDecision(phone, body); }                            // not confirmed: the words stay, and a person decides before anything is sent again
+      else { if (err && err.code !== 'functions/unavailable') ta.value = body; banner('Message not sent: ' + errText(err)); }
       renderMessages();
     }
   }
@@ -731,6 +783,8 @@ thread.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTra
 async function sendAttachment(phone, caption) {
   const att = S.attach, user = auth.currentUser;
   if (!att || !user) return;
+  const mkey = `${att.file.name}|${att.file.size}|${caption}`;
+  if (unresolved.get(sendKey(phone, mkey))) { mediaDecision(phone, mkey); return; }               // an earlier send of exactly this file was never confirmed: decide first
   banner('');
   const p = { body: caption, at: Date.now(), seq: S.snapSeq, done: false, attach: { name: att.file.name }, kind: att.kind, progress: 0 };
   S.pending.push(p);
@@ -743,16 +797,16 @@ async function sendAttachment(phone, caption) {
     task.on('state_changed', (s) => { p.progress = Math.round(100 * s.bytesTransferred / Math.max(1, s.totalBytes)); if (S.selected === phone) renderMessages(); });
     await task;
     p.progress = null; if (S.selected === phone) renderMessages();        // uploaded; now handing it to WhatsApp
-    await call('sendMedia')({ phone, uploadPath: path, caption, filename: att.file.name, requestId: requestFor(phone, `${att.file.name}|${att.file.size}|${caption}`) });
+    await call('sendMedia')({ phone, uploadPath: path, caption, filename: att.file.name, requestId: requestFor(phone, mkey) });
     finishPending(p, phone);
   } catch (err) {
-    noteUnsure(err);
+    noteOutcome(phone, mkey, err);
     S.pending = S.pending.filter((x) => x !== p);
     if (S.selected === phone) {                                              // put everything back so nothing is lost
-      if (!(err && err.code === 'functions/unavailable')) { S.attach = { ...keep, url: keep.kind === 'image' ? URL.createObjectURL(keep.file) : null }; $('attach-bar').hidden = false;
+      if (uncertain(err) || !(err && err.code === 'functions/unavailable')) { S.attach = { ...keep, url: keep.kind === 'image' ? URL.createObjectURL(keep.file) : null }; $('attach-bar').hidden = false;
         $('attach-thumb').replaceChildren(); if (S.attach.url) { const i = el('img'); i.alt = ''; i.src = S.attach.url; $('attach-thumb').append(i); } else $('attach-thumb').textContent = { video: '🎥', audio: '🎤', document: '📄' }[keep.kind];
         $('attach-name').textContent = keep.file.name; $('attach-sub').textContent = SIZE(keep.file.size); ta.value = caption; }
-      banner('File not sent: ' + errText(err));
+      if (uncertain(err)) mediaDecision(phone, mkey); else banner('File not sent: ' + errText(err));
       renderMessages();
     }
   }
@@ -822,6 +876,7 @@ $('new-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const phone = normalizePhoneInput($('n-phone').value);
   const name = $('n-name').value.trim();
+  if (unresolved.get(sendKey(phone, 'start|' + name))) { startDecision(phone, name); return; }       // an earlier start was never confirmed: decide first
   $('n-err').textContent = '';
   $('n-go').disabled = true;
   try {
@@ -829,8 +884,8 @@ $('new-form').addEventListener('submit', async (e) => {
     dlg.close();
     openConversation(r.data.phone);
   } catch (err) {
-    noteUnsure(err);                                                // an answer that never arrived: the same press again is the SAME request
-    $('n-err').textContent = errText(err);
+    noteOutcome(phone, 'start|' + name, err);                       // an answer that never arrived: the same press again is the SAME request; one that could not be confirmed waits for a decision
+    if (uncertain(err)) startDecision(phone, name); else $('n-err').textContent = errText(err);
     $('n-go').disabled = false;
   }
 });

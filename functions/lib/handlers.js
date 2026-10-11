@@ -81,8 +81,15 @@ async function processMedia({ db, wa, bucket }, phone, msgId, timeoutMs) {
 // again) only while the address is still on the list. So removing someone from ALLOWED_EMAILS ends their access within STAFF_CLAIM_MS even if
 // they never call this again; scripts/revoke-staff.js ends it within about an hour.
 const STAFF_CLAIM_MS = 12 * 3600 * 1000;
-async function claimAccess(auth, { adminAuth, cfg, now = Date.now }) {
-  if (!auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+const ACCESS_PROBE = 'staff-claim-expiry';
+async function claimAccess(auth, { adminAuth, cfg, now = Date.now }, data) {
+  if (!auth) {
+    // A capability probe (third check, finding 7): scripts/access-compat.sh asks the code that is ACTUALLY serving whether staff access has an expiry, because a
+    // deployment date proves nothing (older code can be redeployed, or traffic moved back to an older revision). Only this exact question is answered, and
+    // it grants nothing and reveals nothing else. Older code has no such question and refuses it as an unauthenticated call.
+    if (data && data.probe === ACCESS_PROBE) return { ok: true, expiring: true, claimMs: STAFF_CLAIM_MS };
+    throw new HttpsError('unauthenticated', 'Sign in first.');
+  }
   if (!isAllowedUser(auth, cfg)) {
     // Removed from the allowlist? Revoke any claim they still carry so Firestore rules stop serving them.
     if (auth.token && auth.token.staff === true) await adminAuth.setCustomUserClaims(auth.uid, { staff: false });
@@ -112,7 +119,7 @@ async function startConversation(auth, data, { db, wa, cfg }) {
     log('error', definite ? 'template refused' : 'template not confirmed', { code: (e && e.code) || null });          // a code only: never the provider's words
     await outbound.settle(db, phone, requestId, { state: definite ? 'failed' : 'unknown' });
     await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: text }).catch(() => {});
-    throw new HttpsError('unavailable', text);
+    throw new HttpsError('unavailable', text, { reason: definite ? 'refused' : 'not_confirmed' });
   }
   await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
   try { await store.storeOutbound(db, phone, { wamid, type: 'template', body }); }
@@ -142,7 +149,7 @@ async function sendReply(auth, data, { db, wa, cfg }) {
     log('error', definite ? 'text refused' : 'text not confirmed', { code: (e && e.code) || null });          // a code only: never the provider's words
     await outbound.settle(db, phone, requestId, { state: definite ? 'failed' : 'unknown' });
     await store.storeFailedOutbound(db, phone, { type: 'text', body, error: text }).catch(() => {});
-    throw new HttpsError('unavailable', text);
+    throw new HttpsError('unavailable', text, { reason: definite ? 'refused' : 'not_confirmed' });
   }
   await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
   try { await store.storeOutbound(db, phone, { wamid, type: 'text', body }); }
@@ -295,7 +302,7 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
     await cleanup();
     await outbound.settle(db, phone, requestId, { state: definite ? 'failed' : 'unknown' });
     await store.storeFailedOutbound(db, phone, { type: kind, body: shown || `[${kind}]`, error: text }).catch(() => {});
-    throw new HttpsError('unavailable', text);
+    throw new HttpsError('unavailable', text, { reason: definite ? 'refused' : 'not_confirmed' });
   }
   await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
   // It went. Keeping our own copy and the chat record are best effort: neither can turn it into a failure.

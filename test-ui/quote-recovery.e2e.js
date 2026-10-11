@@ -47,6 +47,7 @@ const meta = http.createServer((req, res) => {
     if (req.method === 'POST' && /\/111\/media$/.test(req.url)) { state.media.push(filePart(buf, req.headers['content-type'])); return json({ id: 'UPMEDIA' + state.media.length }); }
     if (req.method === 'POST' && /\/111\/messages$/.test(req.url)) {
       state.messages.push(JSON.parse(buf.toString() || '{}'));
+      if (state.mode === 'server') return json({ error: { code: 1, message: 'Unknown error' } }, 500);                 // Meta fails: nobody can tell whether the message went
       return state.mode === 'refuse' ? json({ error: { code: 131026, message: 'Message undeliverable' } }, 400) : json({ messages: [{ id: 'wamid.OUT' + ++gid }] });
     }
     json({ error: { message: 'unexpected' } }, 404);
@@ -373,6 +374,82 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   assert.equal(startReqs[1].requestId, startReqs[0].requestId, 'the second try must be the same request');
   assert.equal(state.messages.filter((m) => m.to === NEWNUM).length, 1, 'the template went out more than once');
   ok('starting a conversation: the request has an id, and pressing again after an answer that never arrived is the SAME request (one template)');
+  // ================================================== third check, finding 6: an answer the SERVER could not confirm is not a refusal ==============
+  // Astra's exact failure: Meta answers 500, the real backend cannot tell whether the message went and keeps an "unknown" claim, but the screen took the answer for a
+  // definite refusal and made a NEW request id on the next press: the same message went out twice. Now the identity is kept, and a new attempt needs a decision.
+  const GINA = '353860000098', toGina = () => state.messages.filter((m) => m.to === GINA);
+  startReqs.length = 0;
+  await page.click('#new-btn'); await page.waitForSelector('#n-phone', { state: 'visible' });
+  await page.fill('#n-phone', '+353 86 000 0098'); await page.fill('#n-name', 'Gina');
+  state.mode = 'server';
+  await page.click('#n-go');
+  await page.waitForFunction(() => document.getElementById('n-err').textContent.length > 0);
+  assert.equal(toGina().length, 1);
+  assert.equal(await page.locator('#n-err button[data-decision="not_arrived"]').count(), 1, 'the decision must be on screen as soon as the outcome is unclear');
+  state.mode = 'ok';                                                                              // Meta is fine again
+  await page.waitForFunction(() => !document.getElementById('n-go').disabled);
+  await page.click('#n-go');                                                                      // pressed again, as a person would
+  await sleep(1500);
+  assert.equal(toGina().length, 1, 'a welcome template that may already have gone out was sent AGAIN');
+  assert.ok(startReqs.every((r) => r.requestId === startReqs[0].requestId), 'a new request id was made for an outcome nobody had resolved');
+  await page.waitForSelector('#n-err button[data-decision="arrived"]');                           // the screen waits for a person to decide
+  assert.match(await page.textContent('#n-err'), /could not confirm/i);
+  await page.click('#n-err button[data-decision="not_arrived"]');                                 // the explicit decision: "it did not arrive"
+  await page.click('#n-go');                                                                      // now a genuinely new attempt
+  await until(async () => toGina().length === 2, 'the deliberate second attempt');
+  assert.notEqual(startReqs[startReqs.length - 1].requestId, startReqs[0].requestId, 'the deliberate attempt must be a NEW request');
+  await page.waitForFunction((p) => location.hash === '#c/' + p, GINA);                           // the app opens her conversation by itself: wait, or the next step races it
+  ok('starting a conversation, Meta fails (500): the screen says it could not confirm, pressing Start again sends NOTHING and keeps the same request, and only "it did not arrive" allows a new attempt');
+
+  // the same for a reply typed in the inbox, and for a file
+  await page.evaluate((p) => { location.hash = '#c/' + p; }, ph.cara);
+  await page.waitForSelector('#text'); await page.waitForFunction(() => !document.getElementById('text').disabled);
+  const toCara = (type) => state.messages.filter((m) => m.to === ph.cara && m.type === type);
+  const caraTexts0 = toCara('text').length;
+  await page.fill('#text', 'Is this one lost?');
+  state.mode = 'server'; await page.click('#send');
+  await page.waitForFunction(() => !document.getElementById('banner').hidden && document.getElementById('banner').textContent.length > 0);
+  assert.equal(toCara('text').length, caraTexts0 + 1);
+  assert.equal(await page.locator('#banner button[data-decision="not_arrived"]').count(), 1, 'the decision must be on screen as soon as the outcome is unclear');
+  assert.equal(await page.inputValue('#text'), 'Is this one lost?', 'the words must be put back, not lost');
+  state.mode = 'ok';
+  await page.fill('#text', 'Is this one lost?'); await page.click('#send');                       // the same words again, as a person would
+  await sleep(1500);
+  assert.equal(toCara('text').length, caraTexts0 + 1, 'a reply that may already have gone out was sent AGAIN');
+  await page.waitForSelector('#banner button[data-decision="not_arrived"]');
+  await page.click('#banner button[data-decision="not_arrived"]'); await page.click('#send');
+  await until(async () => toCara('text').length === caraTexts0 + 2, 'the deliberate second attempt');
+  ok('a reply in the inbox: the same rule: not confirmed means pressing Send again (or retyping it) sends nothing until "it did not arrive" is chosen');
+
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await page.setInputFiles('#file', { name: 'site.png', mimeType: 'image/png', buffer: PNG });
+  await page.fill('#text', 'photo of the wall');
+  state.mode = 'server'; await page.click('#send');
+  await page.waitForFunction(() => !document.getElementById('banner').hidden && /could not confirm/i.test(document.getElementById('banner').textContent));
+  assert.equal(toCara('image').length, 1);
+  state.mode = 'ok';
+  await page.click('#send'); await sleep(1500);                                                   // the photo was put back so nothing is lost; sending it again must wait for a decision
+  assert.equal(toCara('image').length, 1, 'a photo that may already have gone out was sent AGAIN');
+  await page.click('#banner button[data-decision="not_arrived"]'); await page.click('#send');
+  await until(async () => toCara('image').length === 2, 'the deliberate second attempt');
+  ok('a photo: the same rule, and the photo is put back so it is not lost while someone decides');
+
+  // an OLDER server that answers "unavailable" without saying which kind: the safe reading is "uncertain" (nothing is sent again until a person decides)
+  const ZED = '353860000097';
+  startReqs.length = 0;
+  await page.route('**/startConversation', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Not confirmed: we could not tell whether WhatsApp sent the template.', status: 'UNAVAILABLE' } }) }));
+  await page.click('#new-btn'); await page.waitForSelector('#n-phone', { state: 'visible' });
+  await page.fill('#n-phone', '+353 86 000 0097'); await page.fill('#n-name', 'Zed');
+  await page.click('#n-go');
+  await page.waitForSelector('#n-err button[data-decision="not_arrived"]');                      // no reason came with the answer: it is treated as uncertain
+  await page.unroute('**/startConversation');
+  const callsBefore = startReqs.length;
+  await page.click('#n-go'); await sleep(1000);
+  assert.equal(startReqs.length, callsBefore, 'a send whose outcome nobody resolved reached the server again');
+  assert.equal(state.messages.filter((m) => m.to === ZED).length, 0);
+  await page.click('#n-cancel');
+  ok('an older server that says "unavailable" without a reason is read as uncertain (the safe reading): nothing is sent again until a person decides');
+
   assert.deepEqual(errors, [], 'browser errors: ' + JSON.stringify(errors)); ok('no JavaScript errors in the browser');
   console.log(`ALL ${n} CHECKS PASSED`);
   await browser.close(); web.close(); meta.close(); gmail.close(); process.exit(0);

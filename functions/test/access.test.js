@@ -40,6 +40,24 @@ test('claimAccess refuses someone who is no longer allowed AND removes the claim
 
 // ============================================================ the rules =====================================================
 const claims = (extra) => ({ email: 'thomas@example.com', email_verified: true, ...extra });
+test('third check, finding 7: claimAccess answers ONE capability question without a sign-in ("do you give an expiry?"), grants nothing, and is wired to the request data', async () => {
+  const adminAuth = fakeAdminAuth();
+  const r = await h.claimAccess(null, { adminAuth, cfg }, { probe: 'staff-claim-expiry' });
+  assert.deepEqual(r, { ok: true, expiring: true, claimMs: 12 * HOUR });
+  assert.deepEqual(adminAuth.calls, [], 'the probe must grant nothing');
+  for (const bad of [undefined, null, {}, { probe: true }, { probe: 'x' }, { probe: 'STAFF-CLAIM-EXPIRY' }, { probe: 1 }, 'staff-claim-expiry', [], { probe: ['staff-claim-expiry'] }]) {
+    await assert.rejects(h.claimAccess(null, { adminAuth, cfg }, bad), (e) => e.code === 'unauthenticated', JSON.stringify(bad));
+  }
+  // a signed-in person who sends the probe is just signed in: nothing changes for them (and a stranger still gets nothing)
+  const now = 1_800_000_000_000, again = fakeAdminAuth();
+  const mine = await h.claimAccess(user('thomas@example.com'), { adminAuth: again, cfg, now: () => now }, { probe: 'staff-claim-expiry' });
+  assert.deepEqual(again.calls, [['u-thomas@example.com', { staff: true, staffUntil: now + 12 * HOUR }]]); assert.equal(mine.staffUntil, now + 12 * HOUR);
+  await assert.rejects(h.claimAccess(user('stranger@gmail.com'), { adminAuth: fakeAdminAuth(), cfg }, { probe: 'staff-claim-expiry' }), (e) => e.code === 'permission-denied');
+  // the exported function must hand the request's data to claimAccess, or the real function never hears the question
+  const index = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
+  assert.match(index, /h\.claimAccess\(req\.auth, deps\(\), req\.data\)/);
+});
+
 test('Firestore rules: a staff claim works only while it has not expired; no expiry, an old one or a malformed one is the same as no access', async () => {
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { host, port: Number(port), rules: fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8') } });
