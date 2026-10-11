@@ -1,11 +1,15 @@
 # Phase 6.1 — Direct quote sending and "Reopen conversation" (agreed design)
 
-Status (2026-10-05): **M0 to M5 are built and tested** (design, Reopen conversation, delivery foundation, WhatsApp, email, the Send screen), in
-a state ready for the owner's review. **Nothing is deployed, nothing real has been sent, nothing outside this repository has been changed.**
-Next: the owner's review, then M6 (backend deploy, preview with a controlled test customer, live, merge and tag: each only with explicit
-approval; see "Testing the preview" and "Rollout"). Branch `phase-6-1-quote-sending`, started from tag `phase-6-quotes-complete`
-(`ab84a7d`). The first half of this document is the agreed specification; "Built so far" records what was built and how it was tested. A rule in
-the specification changes only with the owner's approval.
+Status (2026-10-11): **COMPLETE. Phase 6.1 is live, merged into `main` and tagged `phase-6-1-quote-sending-complete`.** Everything (the 21 quote
+functions, the five older functions with the audit fixes, the screen and the security rules) was deployed stage by stage by the owner and
+verified after each stage (see "Rollout"); email sending is ON. On 2026-10-11 the owner reported that every real-world test works: the WhatsApp
+Reopen message, the quote by WhatsApp and the quote by email. The code deployed is commit `9f00740`; the commits after it only changed the
+rollback and deploy scripts, their tests and the docs (nothing that is deployed; checked with `git diff`, and the 13 files the production site serves
+are byte-for-byte the files in git). Branch `phase-6-1-quote-sending`, started from tag `phase-6-quotes-complete` (`ab84a7d`).
+**Not done, said plainly:** no full regression run of the exact final commit (the last full runs, backend 447 and 14 browser suites, were on the code of the
+third check; everything after was tested with targeted suites), Astra's final sign-off was not seen by the assistant (the owner went ahead without
+it), and the SPF/DKIM/DMARC header result was not recorded (no DNS was changed). The first half of this document is the agreed specification;
+"Built so far" records what was built and how it was tested. A rule in the specification changes only with the owner's approval.
 
 Phase 6 (docs/QUOTES.md) is live, merged and tagged. Phase 6.1 must not destabilise it: every Phase 6 test and the full
 regression suite must keep passing unchanged.
@@ -871,12 +875,12 @@ their@address`, and remove them from `ALLOWED_EMAILS`. The provider-timeout fix 
 **What this review could not verify** (as the audit said, and still true): Meta and Google behaviour with real accounts (the closed-window template, email
 bounces and delivery), the shell scripts against a real `gcloud` (they are tested against a pretend one), and the live IAM state of the production services.
 
-## Rollout (M6, in progress)
+## Rollout (M6, done 2026-10-11)
 
 Every step is run by the owner in Cloud Shell, after approval, one stage at a time; each functions step asks for "yes" and saves the
 revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollback-quote-sending.sh`). **Done first (2026-10-07, owner's Cloud Shell, with approval):** steps 1 to 5.
 
-**Status 2026-10-11: everything is deployed and was verified stage by stage, the audit fixes included.** `backend` (21 functions: 21 times "401" without sign-in, a sent quote's PDF opens), `older` (the five older functions; `access-compat.sh status` read "in step": the live rules require the expiry **and** the serving `claimAccess` answered the probe), `preview` (Revise, change, "Save draft" gave "Draft saved": the new draft-revision save works on the real backend) and `live` (the wide Quote Details page and "Send…" per version). The security rules were already live (that stage had been run earlier); email is ON. **Not merged to `main` (still `ab84a7d`), and no final recovery tag.** Still open: the real closed-window WhatsApp test (the quote arrives in the approved quotation template), the email-authentication header check, Astra's final sign-off. The lesson of the `backend` run is under "What the real rollout taught (2026-10-11)" below.
+**Status 2026-10-11: everything is deployed and was verified stage by stage, the audit fixes included.** `backend` (21 functions: 21 times "401" without sign-in, a sent quote's PDF opens), `older` (the five older functions; `access-compat.sh status` read "in step": the live rules require the expiry **and** the serving `claimAccess` answered the probe), `preview` (Revise, change, "Save draft" gave "Draft saved": the new draft-revision save works on the real backend) and `live` (the wide Quote Details page and "Send…" per version). The security rules were already live (that stage had been run earlier); email is ON. Afterwards the owner reported that the real WhatsApp and email tests all work, and approved the merge into `main` and the tag `phase-6-1-quote-sending-complete` (done the same day; step 8). The lesson of the `backend` run is under "What the real rollout taught (2026-10-11)" below.
 
 1. **Clone on the Phase 6.1 branch:** `cd ~/elite-kitchens-lead-os && git fetch && git checkout phase-6-1-quote-sending && git pull`.
 2. **Check (changes nothing):** `./scripts/deploy-quote-sending.sh check`.
@@ -897,7 +901,7 @@ revisions it replaces first (`scripts/deploy-quote-sending.sh`, `scripts/rollbac
    the preview".
 6. **Email on, when the test plan reaches it:** `./scripts/deploy-quote-sending.sh mail on` (kill switch: `mail off`).
 7. **Live (approval):** `./scripts/deploy-quote-sending.sh live`. Then reload Elite OS.
-8. **Merge and tag (approval), after live is confirmed:** merge `phase-6-1-quote-sending` into `main` and tag it.
+8. **Merge and tag (approval), after live is confirmed:** merge `phase-6-1-quote-sending` into `main` and tag it. **Done 2026-10-11** with the owner's approval: `main` was fast-forwarded to this branch (a straight history, like Phases 5 and 6) and the tag `phase-6-1-quote-sending-complete` was put on the same commit. Nothing was deployed by the merge.
 
 ### Second audit (2026-10-09): the findings that were only partly fixed
 
