@@ -174,19 +174,23 @@ async function complete({ db }, actor, data, { nowMs = Date.now() } = {}) {
   });
 }
 
-// ---- remove a project made by mistake: only when nothing has been ticked and no render is attached ----
-async function remove({ db }, actor, data, { nowMs = Date.now() } = {}) {
+// ---- delete a project: always allowed (made by mistake, a duplicate, a job that was cancelled), with whatever is in it: its checklist, notes, date and render file ----
+// The quote and the customer are never touched. The screen asks for a confirmation that says what will be lost. The audit entry holds no personal content.
+async function remove({ db, bucket }, actor, data, { nowMs = Date.now() } = {}) {
   onlyKeys(data, ['id']);
   const ref = projectRef(db, data.id);
-  return db.runTransaction(async (tx) => {
+  const gone = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists) return { id: ref.id, removed: false };
+    if (!snap.exists) return null;
     const p = snap.data();
-    if (STEPS.some((k) => p.steps && p.steps[k] && p.steps[k].done) || p.render) throw refused('A project with ticked steps or an attached render cannot be removed.');
     tx.delete(ref);
-    tx.set(db.collection('auditLog').doc(), { action: 'deleteProject', projectId: ref.id, by: actor.id, at: at(nowMs) });       // no personal content
-    return { id: ref.id, removed: true };
+    tx.set(db.collection('auditLog').doc(), { action: 'deleteProject', projectId: ref.id, ticked: STEPS.filter((k) => p.steps && p.steps[k] && p.steps[k].done).length, hadRender: !!p.render, by: actor.id, at: at(nowMs) });
+    return { phone: p.phone };
   });
+  if (!gone) return { id: ref.id, removed: false };
+  // Every file of THIS project (the current render and any it replaced), nothing of the customer's other projects. A private file left behind by a failure here is erased with the customer.
+  if (bucket) await bucket.deleteFiles({ prefix: `projects/${gone.phone}/${ref.id}/`, force: true }).catch(() => {});
+  return { id: ref.id, removed: true };
 }
 
 // ---- the approved 3D render: the browser drops the file in its own uploads/ folder, this validates it and files it with the project ----

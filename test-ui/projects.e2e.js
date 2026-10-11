@@ -195,13 +195,17 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   await until(async () => (await proj(pa.id)).status === 'active', 'reopened'); await page.waitForSelector('#pj-complete'); assert.equal(await page.isDisabled('#pj-step-installed'), false);
   ok('a project can be marked completed (with a warning when steps are missing), leaves the active list and the "to order" numbers, and can be reopened');
 
-  // ------------------------------------------------------------------ 8. removing a project made by mistake
-  await go('#projects/' + pb.id, '#pj-actions'); assert.equal(await page.locator('#pj-remove').count(), 1);
-  await go('#projects/' + pa.id, '#pj-actions'); assert.equal(await page.locator('#pj-remove').count(), 0, 'a project with ticked steps or a render cannot be removed');
-  await go('#projects/' + pb.id, '#pj-remove'); await page.click('#pj-remove'); await page.waitForSelector('#pj-remove-yes'); await page.click('#pj-remove-no'); assert.ok(await proj(pb.id));
+  // ------------------------------------------------------------------ 8. deleting a project: always possible, and the confirmation says what will be lost
+  await go('#projects/' + pa.id, '#pj-remove'); await page.click('#pj-remove'); await page.waitForSelector('#pj-remove-yes');            // Anna's has ticks, a date, notes and a render
+  const warn = await page.textContent('#pj-remove-text');
+  assert.match(warn, /its checklist \(2 steps ticked\)/); assert.match(warn, /the installation date/); assert.match(warn, /the notes/); assert.match(warn, /the attached render/);
+  assert.match(warn, /quote and the customer are not touched/); assert.match(warn, /cannot be undone/);
+  await page.click('#pj-remove-no'); assert.ok(await proj(pa.id), 'Cancel deletes nothing');
+  await go('#projects/' + pb.id, '#pj-remove'); await page.click('#pj-remove'); await page.waitForSelector('#pj-remove-yes');            // Brian's has nothing in it
+  assert.doesNotMatch(await page.textContent('#pj-remove-text'), /erases/); await page.click('#pj-remove-no'); assert.ok(await proj(pb.id));
   await page.click('#pj-remove'); await page.click('#pj-remove-yes'); await page.waitForSelector('#pj-list-view:not([hidden])');
-  await until(async () => !(await proj(pb.id)), 'removed'); assert.equal((await quote(qBrian)).status, 'accepted', 'the quote itself is untouched');
-  ok('a project made by mistake (nothing ticked, no render) can be removed after a confirmation; one with work in it cannot');
+  await until(async () => !(await proj(pb.id)), 'deleted'); assert.equal((await quote(qBrian)).status, 'accepted', 'the quote itself is untouched');
+  ok('a project can always be deleted: the confirmation says what is lost (checklist, date, notes, render), Cancel changes nothing, and the quote is untouched');
 
   // ------------------------------------------------------------------ 9. by hand, from the customer profile; and linking an accepted quote that has no project
   await page.evaluate(() => { location.hash = '#c/353860000023'; }); await page.waitForSelector('#d-project-new');
@@ -234,6 +238,17 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   const blk = await page.textContent('#d-projects-list'); assert.match(blk, new RegExp(pa.quoteRef)); assert.match(blk, /Install 20 Nov 2026/); assert.match(blk, /Everything ordered/);
   await page.click('#d-projects-list .d-quote'); await page.waitForSelector('#pj-step-doorsOrdered'); await page.click('#pj-back'); await page.waitForSelector('#d-projects-list .d-quote');
   ok('reopening the quote flags the project (nothing lost) and accepting again clears the flag without a second project; the customer profile lists the project and opens it');
+
+  // ------------------------------------------------------------------ 10b. deleting a project that has work and a render in it (and a completed one)
+  await go('#projects/' + pc.id, '#pj-step-designApproved'); await page.click('#pj-step-designApproved'); await until(async () => (await proj(pc.id)).steps.designApproved.done, 'design ticked');
+  await page.setInputFiles('#pj-file', { name: 'cara.png', mimeType: 'image/png', buffer: PNG }); await page.waitForSelector('#pj-render-img');
+  assert.equal((await bucket.getFiles({ prefix: 'projects/' + ph.cara + '/' }))[0].length, 1);
+  await page.click('#pj-complete'); await page.click('#pj-complete-yes'); await until(async () => (await proj(pc.id)).status === 'completed', 'completed');           // delete it while completed
+  await page.waitForSelector('#pj-remove'); await page.click('#pj-remove'); assert.match(await page.textContent('#pj-remove-text'), /1 step ticked\)/);
+  await page.click('#pj-remove-yes'); await page.waitForSelector('#pj-list-view:not([hidden])'); await until(async () => !(await proj(pc.id)), 'deleted with its render');
+  assert.equal((await bucket.getFiles({ prefix: 'projects/' + ph.cara + '/' }))[0].length, 0, 'its render file is gone from storage');
+  assert.ok((await db.doc('conversations/' + ph.cara).get()).exists, 'the customer is untouched'); assert.ok(await proj(pd.id), 'another customer\'s project is untouched');
+  ok('a completed project with ticked steps and an attached render can be deleted: the record and its render file are erased, the customer and other projects are not');
 
   // ------------------------------------------------------------------ 11. a phone
   await ctx.close();

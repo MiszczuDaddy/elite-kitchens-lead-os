@@ -252,19 +252,30 @@ test('completed: leaves the active list, can be undone, and a completed project 
   await rejects(runP(PR.complete, { id: projectId, reopen: 'no' }), 'invalid-argument'); await rejects(runP(PR.complete, { id: projectId, x: 1 }), 'invalid-argument');
 });
 
-test('remove: only a project nothing has been ticked on and no render is attached to; it leaves an audit entry with no personal content', async () => {
+test('delete: always allowed, with ticked steps, a date, notes and a render, even when completed; it erases that project\'s files only; the audit entry holds no personal content; the quote and the customer are untouched', async () => {
   const { quoteId, projectId } = await accepted();
-  await tick(projectId, 'designApproved');
-  await rejects(runP(PR.remove, { id: projectId }), 'failed-precondition', /cannot be removed/); assert.ok(await proj(projectId));
-  await tick(projectId, 'designApproved', false);
-  await runP(PR.attachRender, { id: projectId, uploadPath: await upload(JPG, { type: 'image/jpeg', name: 'render.jpg' }) });
-  await rejects(runP(PR.remove, { id: projectId }), 'failed-precondition');
-  const { projectId: p2 } = await accepted(P);
-  const r = await runP(PR.remove, { id: p2 }, NOW + 9000); assert.deepEqual(r, { id: p2, removed: true }); assert.equal(await proj(p2), null);
+  await tick(projectId, 'designApproved'); await tick(projectId, 'doorsOrdered');
+  await runP(PR.save, { id: projectId, expectedRev: 1, installDate: '2026-11-20', notes: 'Gate code 1234' });
+  await runP(PR.attachRender, { id: projectId, uploadPath: await upload(JPG, { type: 'image/jpeg', name: 'one.jpg' }) });
+  await runP(PR.attachRender, { id: projectId, uploadPath: await upload(PNG, { type: 'image/png', name: 'two.png' }) });         // replaces the first
+  await runP(PR.complete, { id: projectId });                                                                                      // a completed project can be deleted too
+  const other = (await accepted(P)).projectId;                                                                                     // the same customer's other project, with its own render
+  await runP(PR.attachRender, { id: other, uploadPath: await upload(JPG, { type: 'image/jpeg', name: 'other.jpg' }) });
+  const mine = (await proj(projectId)).render.path, otherPath = (await proj(other)).render.path;
+  assert.deepEqual((await files(`projects/${P}/`)).sort(), [mine, otherPath].sort());
+  const r = await runP(PR.remove, { id: projectId }, NOW + 9000);
+  assert.deepEqual(r, { id: projectId, removed: true }); assert.equal(await proj(projectId), null);
+  assert.deepEqual(await files(`projects/${P}/`), [otherPath], 'its render file is gone, and the customer\'s other project keeps its own');
+  assert.ok(await proj(other), 'the other project is untouched');
   const audit = (await db.collection('auditLog').where('action', '==', 'deleteProject').get()).docs.map((d) => d.data());
-  assert.equal(audit.length, 1); assert.equal(audit[0].projectId, p2); assert.equal(audit[0].by, 'thomas@example.com'); assert.ok(!JSON.stringify(audit[0]).includes(P), 'no phone number in the audit entry');
-  assert.deepEqual(await runP(PR.remove, { id: p2 }), { id: p2, removed: false });                       // already gone: fine
-  assert.equal((await quote(quoteId)).status, 'accepted', 'the quote is untouched');
+  assert.equal(audit.length, 1); assert.equal(audit[0].projectId, projectId); assert.equal(audit[0].ticked, 2); assert.equal(audit[0].hadRender, true); assert.equal(audit[0].by, 'thomas@example.com');
+  assert.ok(!JSON.stringify(audit[0]).includes(P), 'no phone number in the audit entry'); assert.ok(!JSON.stringify(audit[0]).includes('Gate code'), 'no notes in the audit entry');
+  assert.equal((await quote(quoteId)).status, 'accepted', 'the quote is untouched'); assert.ok((await db.doc('conversations/' + P).get()).exists, 'the customer is untouched');
+  assert.deepEqual(await runP(PR.remove, { id: projectId }), { id: projectId, removed: false });                                   // already gone: fine
+  const plain = (await accepted(P)).projectId; const r3 = await runP(PR.remove, { id: plain });                                    // nothing in it: still works
+  assert.equal(r3.removed, true); const a2 = (await db.collection('auditLog').where('projectId', '==', plain).get()).docs[0].data(); assert.deepEqual([a2.ticked, a2.hadRender], [0, false]);
+  await rejects(runP(PR.remove, { id: other, x: 1 }), 'invalid-argument'); await rejects(runP(PR.remove, { id: 'p_nope' }), 'invalid-argument');
+  assert.ok(await proj(other));
 });
 
 // =========================================================== the render ===================================================

@@ -11,7 +11,7 @@ A simple way to see where each customer's kitchen job stands, and whether everyt
 4. **One project:** customer details (live from the customer record), the linked quote, the checklist, expected installation date, notes, the approved 3D render.
 5. **Checklist** (five boxes): Final 3D design approved, Carcasses ordered, Doors ordered, Ready for installation, Installation completed. **All five are independent**: any box can be ticked or cleared at any time, in any order. Each tick records who and when.
 6. **Mark project completed** (warns if boxes are not ticked; can be undone with "Reopen project"). A completed project leaves the active list and waits for nothing. A completed project cannot be changed until it is reopened.
-7. **Remove project (made by mistake)**: only when nothing is ticked and no render is attached.
+7. **Delete project**: always possible, whatever is in it (ticked steps, date, notes, a render, even when completed). The confirmation says exactly what will be erased; the quote and the customer are never touched; the render file is erased from storage with the record. It cannot be undone. (Until 2026-10-11 deleting was only allowed for a project with nothing ticked and no render; the owner asked for it to be always possible.)
 
 ## Data: `projects/{id}`
 | Field | Meaning |
@@ -41,9 +41,9 @@ Seven staff-only callables: `createProject`, `saveProject` (date and notes, agai
 The model (steps, "waiting for", status, filters, counts, order, search) is pure and unit-tested; the screen draws it. The project page is built once and updated in place by the live data, so ticking a box, typing, or keyboard focus are never lost; typing is never overwritten by someone else's save, and a save is checked against the revision the form was loaded from (a clash is explained, with "Load the latest"). On phones there is a "Projects" link under the caption (a sixth header button would squeeze the title).
 
 ## Tests
-* `functions/test/projects.test.js` (17, emulators): who may call, accept makes exactly one project and is atomic, two accepts at once, reopen and accept again, manual creation, independent steps (also five ticks at once), date and notes, completed, remove, render checks, render link, erasure, security rules. **15 planted errors, all caught.**
+* `functions/test/projects.test.js` (17, emulators): who may call, accept makes exactly one project and is atomic, two accepts at once, reopen and accept again, manual creation, independent steps (also five ticks at once), date and notes, completed, remove, render checks, render link, erasure, security rules. **20 planted errors (5 on the delete), all caught.**
 * `functions/test/project-model.test.js` (7, no emulator). **9 planted errors, all caught.**
-* `test-ui/projects.e2e.js` (12, `bash test-ui/run.sh projects.e2e.js`): accepting in the real screen, the dashboard and its filters, the checklist, date/notes and a clash, the render, completing, removing, manual creation, the reopened-quote flag, the phone layout. A planted bug (save against the live revision) is caught.
+* `test-ui/projects.e2e.js` (13, `bash test-ui/run.sh projects.e2e.js`): accepting in the real screen, the dashboard and its filters, the checklist, date/notes and a clash, the render, completing, deleting (also with work and a render in it), manual creation, the reopened-quote flag, the phone layout. A planted bug (save against the live revision) is caught.
 * Existing suites that share the screen still pass: backend `quotes`, `customers`, `audit`; browser `ui`, `appointments`, `quotes`, `readability`, `pwa`. (`appointments.e2e.js` now expects Projects to have left the "Coming later" list.)
 * Not run: the full backend and browser regression of the whole branch.
 

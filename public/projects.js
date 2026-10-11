@@ -231,9 +231,19 @@ window.PROJ = (() => {
     const o = p.quoteOption;
     host.replaceChildren(a, el('div', 'pjv-sub', o ? `${o.name || 'Accepted option'}${o.incVat != null ? ' · ' + eur(o.incVat) + ' inc VAT' : ''}` : 'Accepted'));
   }
+  // What deleting this project would lose, in plain words (the quote and the customer are never touched).
+  function deleteWarning(p) {
+    const ticked = M.progress(p).done, lost = [];
+    if (ticked) lost.push(`its checklist (${ticked} ${ticked === 1 ? 'step' : 'steps'} ticked)`);
+    if (p.installDate) lost.push('the installation date');
+    if (p.notes) lost.push('the notes');
+    if (p.render) lost.push('the attached render');
+    const list = lost.length > 1 ? lost.slice(0, -1).join(', ') + ' and ' + lost[lost.length - 1] : lost[0];
+    return `Delete this project?${list ? ' This erases ' + list + '.' : ''} The quote and the customer are not touched. It cannot be undone.`;
+  }
   function renderActions(p, done) {
     const host = $('pj-actions'), missing = M.STEPS.filter((s) => !M.done(p, s.key)).length;
-    const removable = !done && !p.render && M.progress(p).done === 0, kids = [];
+    const kids = [];
     if (done) {
       const b = el('button', 'btn btn-ghost btn-sm', 'Reopen project'); b.type = 'button'; b.id = 'pj-reopen'; b.disabled = P.busy.has('complete'); b.onclick = () => completeProject(true); kids.push(b);
     } else if (P.confirm === 'complete') {
@@ -245,14 +255,14 @@ window.PROJ = (() => {
       const b = el('button', 'btn btn-primary btn-sm', 'Mark project completed'); b.type = 'button'; b.id = 'pj-complete'; b.disabled = P.busy.has('complete');
       b.onclick = () => { P.confirm = 'complete'; renderProject(); }; kids.push(b);
     }
-    if (removable && P.confirm !== 'complete') {
+    if (P.confirm !== 'complete') {                                                         // a project can always be deleted, with whatever is in it
       if (P.confirm === 'remove') {
-        const q = el('p', 'pjv-confirm', 'Remove this project? Use this only if it was made by mistake. It cannot be undone.');
-        const yes = el('button', 'btn btn-ghost btn-sm qv-danger', 'Remove project'); yes.type = 'button'; yes.id = 'pj-remove-yes'; yes.onclick = removeProject;
+        const q = el('p', 'pjv-confirm', deleteWarning(p)); q.id = 'pj-remove-text';
+        const yes = el('button', 'btn btn-ghost btn-sm qv-danger', 'Delete project'); yes.type = 'button'; yes.id = 'pj-remove-yes'; yes.onclick = removeProject;
         const no = el('button', 'btn btn-ghost btn-sm', 'Cancel'); no.type = 'button'; no.id = 'pj-remove-no'; no.onclick = () => { P.confirm = null; renderProject(); };
         const row = el('div', 'pjv-row'); row.append(yes, no); kids.push(q, row);
       } else {
-        const b = el('button', 'linkbtn pjv-remove', 'Remove project (made by mistake)'); b.type = 'button'; b.id = 'pj-remove'; b.onclick = () => { P.confirm = 'remove'; renderProject(); }; kids.push(b);
+        const b = el('button', 'linkbtn pjv-remove', 'Delete project…'); b.type = 'button'; b.id = 'pj-remove'; b.onclick = () => { P.confirm = 'remove'; renderProject(); }; kids.push(b);
       }
     }
     host.replaceChildren(...kids);
@@ -286,7 +296,7 @@ window.PROJ = (() => {
   }
   async function removeProject() {
     const p = P.project; if (!p) return;
-    try { await run('removeProject', { id: p.id }); P.dirty = false; P.confirm = null; note('The project was removed.'); location.hash = '#projects'; }
+    try { await run('removeProject', { id: p.id }); P.dirty = false; P.confirm = null; note('The project was deleted.'); location.hash = '#projects'; }
     catch (e) { note(e.message, 'err'); P.confirm = null; renderProject(); }
   }
 
