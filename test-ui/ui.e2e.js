@@ -493,16 +493,18 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   await mp.waitForFunction(() => document.getElementById('conversation-status').value === 'booked');
   ok('statuses: missing values default to Inbox; Booked persists and synchronises without losing the draft');
 
-  await page.fill('#search', 'Brian'); assert.equal(await page.locator('.conv').count(), 0);
+  // f18fc80 (on purpose): a search looks through ALL stages; the list is limited to the chosen stage only while the search box is empty.
+  // Here the chosen stage is Booked and Brian is a New lead: he is found, and he is gone again when the search is cleared.
+  await page.fill('#search', 'Brian'); assert.equal(await page.locator('.conv').count(), 1); assert.equal(await page.locator(`.conv[data-phone="${B}"]`).count(), 1);
   await page.fill('#search', 'Anna'); assert.equal(await page.locator('.conv').count(), 1);
-  await page.fill('#search', '');
+  await page.fill('#search', ''); assert.equal(await page.locator(`.conv[data-phone="${B}"]`).count(), 0);
   for (const status of ['quoted', 'won', 'closed', 'inbox']) {
     await page.selectOption('#conversation-status', status); await statusSaved(A, status);
     await page.waitForFunction(() => !document.getElementById('conversation-status').disabled);
     await filter(page, status).click(); await page.waitForSelector(`.conv[data-phone="${A}"]`);
     await mp.waitForFunction(s => document.getElementById('conversation-status').value === s, status);
   }
-  ok('statuses: all five filters and scoped search work; another open client updates its selector');
+  ok('statuses: all five filters work, a search finds customers in every stage, and another open client updates its selector');
 
   await page.route('**/setConversationStatus', route => route.fulfill({ status: 400,
     headers: { 'access-control-allow-origin': '*', 'content-type': 'application/json' },
