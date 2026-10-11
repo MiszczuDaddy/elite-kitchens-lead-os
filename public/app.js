@@ -217,18 +217,16 @@ function matchesQuery(c, q) {
 function renderList() {
   const q = S.query.trim().toLowerCase();
   const stage = INBOX_STATUSES[S.statusFilter];
-  $('search').placeholder = 'Search ' + stage + '…';
-  $('search').setAttribute('aria-label', 'Search ' + stage + ' conversations');
   const list = $('list');
   const keep = list.scrollTop;
-  const shown = S.convs.filter((c) => inboxStatus(c) === S.statusFilter && matchesQuery(c, q));
+  const shown = S.convs.filter((c) => q ? matchesQuery(c, q) : inboxStatus(c) === S.statusFilter);
   list.replaceChildren(...shown.map(convItem));
   list.scrollTop = keep;
 
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
   else if (!S.convs.length) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search in ' + stage + '. Try another stage or change your search.' : 'No conversations marked ' + stage + '. Choose another stage to find a customer.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search across the stages. Try another name, phone number or location.' : 'No conversations marked ' + stage + '. Choose another stage to find a customer.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;
@@ -255,7 +253,7 @@ function convItem(c) {
   const top = el('div', 'conv-top');
   top.append(el('div', 'conv-name', displayName(c)), el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
-  const tag = [c.projectType, c.location].filter(Boolean).join(' · ');
+  const tag = [S.query.trim() ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
   if (tag) body.append(el('div', 'conv-sub', tag));
   const prev = el('div', 'conv-prev');
   prev.append(el('span', 't', previewOf(c) || ' '));

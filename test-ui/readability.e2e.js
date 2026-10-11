@@ -2,6 +2,7 @@
 // Focused UI refinements only. Real frontend + demo emulators; synthetic customers, no provider sends.
 // bash test-ui/run.sh readability.e2e.js
 // Optional UI_BEFORE_REF=<commit> captures matching before screenshots without checking out or editing that revision.
+// UI_SEARCH_ONLY=1 runs just the cross-stage conversation search checks.
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
 const { execFileSync } = require('child_process');
 const { chromium } = require('playwright');
@@ -87,18 +88,33 @@ async function noOverflow(p, selectors) {
     if (!before) {
       for (let i = 0; i < stages.length; i++) {
         await page.click(`#status-filters [data-status="${stages[i]}"]`);
-        assert.equal(await page.getAttribute('#search', 'placeholder'), `Search ${labels[i]}…`);
-        assert.equal(await page.getAttribute('#search', 'aria-label'), `Search ${labels[i]} conversations`);
+        assert.equal(await page.getAttribute('#search', 'placeholder'), 'Search all stages…');
+        assert.equal(await page.getAttribute('#search', 'aria-label'), 'Search conversations across all stages');
+        for (let j = 0; j < stages.length; j++) {
+          await page.fill('#search', names[j]);
+          assert.equal(await page.locator('.conv').count(), 1);
+          assert.equal(await page.locator('.conv').getAttribute('data-phone'), phones[j]);
+          assert.ok((await page.locator('.conv-sub').textContent()).startsWith(labels[j]));
+        }
+        await page.fill('#search', '   ');
+        assert.equal(await page.locator('.conv').count(), 1);
+        assert.equal(await page.locator('.conv').getAttribute('data-phone'), phones[i]);
       }
       await page.click('#status-filters [data-status=inbox]');
-      await page.fill('#search', names[1]);
+      await page.fill('#search', 'missing customer');
       assert.equal(await page.locator('.conv').count(), 0);
-      assert.match(await page.textContent('#list-empty'), /New lead\. Try another stage/);
+      assert.match(await page.textContent('#list-empty'), /across the stages/);
+      await page.fill('#search', phones[4]);
+      assert.equal(await page.locator('.conv').getAttribute('data-phone'), phones[4]);
+      await page.fill('#search', 'swords');
+      assert.equal(await page.locator('.conv').count(), 5);
+      await page.fill('#search', names[1]);
       await page.click('#status-filters [data-status=booked]');
       assert.equal(await page.locator('.conv').count(), 1);
       assert.equal(await page.inputValue('#search'), names[1]);
       await page.fill('#search', ''); await page.click('#status-filters [data-status=inbox]');
-      ok('search labels follow all five stages; matching remains stage-scoped and the query survives a stage change');
+      ok('names match across all five stages from every tab; phone/location search, empty results and clearing the query work');
+      if (process.env.UI_SEARCH_ONLY) { await ctx.close(); continue; }
       assert.equal(await css(page, '.conv-time', 'fontSize'), '13px');
       assert.equal(await css(page, '.conv-prev .t', 'fontSize'), '14px');
       ok('operational list text uses the readable primary/secondary scale');
