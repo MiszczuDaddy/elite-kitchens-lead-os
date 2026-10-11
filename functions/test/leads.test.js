@@ -271,6 +271,7 @@ test('any form works: different field names and custom questions are understood;
   assert.equal(flat.body.status, 'processed');
   const c = await doc('contacts/353861112222'); assert.deepEqual([c.name, c.email, c.location, c.projectType, c.budget], ['Niamh Kelly', 'niamh@example.com', 'Dublin', 'Wardrobes', '€5k']);
   assert.match(c.notes, /Preferred contact time: Evenings/); assert.match(c.notes, /Eircode/);
+  assert.equal(c.address, 'D02 X285');
   await wipe();
   const kitchens = await call({ leadId: 'FORMTHREE01', formName: 'Kitchen showroom enquiry', fields: { full_name: 'Tom Ryan', phone_number: '+353861234567', email: 'bad email', town: 'Skerries', 'Do you have plans?': 'Yes' } });
   assert.equal(kitchens.body.status, 'processed');
@@ -279,6 +280,35 @@ test('any form works: different field names and custom questions are understood;
   await wipe();
   const unknown = await call({ leadId: 'FORMFOUR001', formName: 'Totally new form', 'Phone number': '0861112222', 'Colour of your cat': 'Some answer' });
   assert.equal(unknown.body.status, 'processed'); assert.match((await doc('contacts/353861112222')).notes, /Colour of your cat: Some answer/);
+});
+
+test('address intake: fills the blank address, retains notes, and duplicate delivery does not send again', async () => {
+  const body = META({ eircode: 'k67x123', home_address: '12 Main Street, Swords' });
+  await call(body);
+  const first = await doc('contacts/353891234567');
+  assert.equal(first.address, '12 Main Street, Swords, K67 X123');
+  assert.match(first.notes, /Eircode \/ postcode: k67x123/);
+  await call(body);
+  const second = await doc('contacts/353891234567');
+  assert.equal(second.address, first.address); assert.equal(second.notes, first.notes);
+  assert.equal(sends.length, 1);
+});
+
+test('address intake: existing saved addresses and conflicting earlier notes are protected', async () => {
+  for (const [existing, expected] of [
+    [{ address: 'Staff confirmed address', notes: 'Keep my notes' }, 'Staff confirmed address'],
+    [{ address: null, notes: 'Eircode: D02 X285' }, null],
+    [{ address: null, notes: 'Eircode: K67 X123' }, 'K67 X123']
+  ]) {
+    await wipe();
+    await db.doc('contacts/353891234567').set({ phone: '353891234567', ...existing });
+    await db.doc('conversations/353891234567').set({ phone: '353891234567', inboxStatus: 'quoted' });
+    await call(META({ eircode: 'K67 X123' }));
+    const contact = await doc('contacts/353891234567');
+    assert.equal(contact.address, expected);
+    assert.ok(contact.notes.startsWith(existing.notes));
+    assert.equal((await doc('conversations/353891234567')).inboxStatus, 'quoted');
+  }
 });
 
 test('circuit breaker: a runaway flood is stopped before it can message anyone; known leads are unaffected', async () => {

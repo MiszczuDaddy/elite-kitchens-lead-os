@@ -979,11 +979,14 @@ function renderDetails(force) {
   if (!S.selected || !detailsOpen()) return;
   if (S.dirty && !force) return;              // never overwrite what someone is typing
   const c = S.contact || {}, conv = selectedConv() || {};
+  const address = LeadAddress.resolve(c);
   $('d-phone').textContent = formatPhone(S.selected);
   for (const k of DETAIL_FIELDS) {
     const v = k === 'name' ? (c.name != null ? c.name : conv.name) : k === 'quoteValue' ? CRM.money(c.quoteValue) : c[k];
     $('d-' + k).value = v || '';
   }
+  if (address.source === 'notes') $('d-address').value = address.value;
+  $('d-address-help').textContent = address.source === 'notes' ? 'Found in customer notes. Save to use on quotes.' : address.conflict ? 'Different or unclear addresses in notes. Check before saving.' : 'Printed on quotes.';
   // a stored value that is not in the dropdown (e.g. from a future lead import) must still show
   for (const k of ['projectType', 'source']) {
     const sel = $('d-' + k), v = sel.value;
@@ -999,7 +1002,7 @@ function renderDetails(force) {
     for (const k of DETAIL_FIELDS) $('d-'+k).value = draft[k];
     S.dirty = true; $('d-save').disabled = false; setDetailMsg('Unsaved changes');
   } else {
-    S.dirty = false; $('d-save').disabled = true;
+    S.dirty = false; $('d-save').disabled = address.source !== 'notes';
     // A late snapshot must not erase the confirmation from a completed save.
     if ($('d-msg').textContent !== 'Saved') setDetailMsg('');
   }
@@ -1011,7 +1014,7 @@ $('details-form').addEventListener('input', () => { S.dirty = true; $('d-save').
 $('details-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const phone = S.selected;
-  if (!phone || !S.dirty) return;
+  if (!phone || (!S.dirty && LeadAddress.resolve(S.contact).source !== 'notes')) return;
   const fields = {};
   for (const k of DETAIL_FIELDS) if (k !== 'quoteValue') fields[k] = $('d-' + k).value;
   const qv = CRM.parseMoney($('d-quoteValue').value), had = (S.contact && S.contact.quoteValue) || null;

@@ -8,6 +8,7 @@ const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const store = require('./store');
 const { normalizeLeadPhone } = require('./phone');
 const { mapLead, buildNote } = require('./leadmap');
+const LeadAddress = require('./leadAddress');
 
 const MAX_BODY = 32 * 1024;
 const STALE_CLAIM_MS = 90 * 1000;          // an in-flight claim older than this is considered abandoned
@@ -47,6 +48,8 @@ async function upsertLeadCustomer(db, phone, lead, now) {
     fill('budget', lead.budget); fill('projectType', lead.projectType); fill('source', 'Meta Ads');
     if (!c.exists) upd.createdAt = FieldValue.serverTimestamp();
     const old = cd.notes || '';
+    // Only fill a blank; old/conflicting notes cannot silently select a different property.
+    if (lead.address) fill('address', LeadAddress.fromNotes([old, 'Address: ' + lead.address].filter(Boolean).join('\n\n')).value);
     if (!old.includes(`Lead ID: ${lead.leadId}`)) {                       // already recorded? then this is a retry: add nothing
       const block = buildNote(lead, when);
       const room = 5000 - (old ? old.length + 2 : 0);

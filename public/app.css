@@ -574,6 +574,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .agenda-lead { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px 12px; margin: 2px 0 14px; }
 .agenda-lead dt { color: var(--muted); font-size: 13px; }
 .agenda-lead dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.agenda-lead-source { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; }
 .agenda-lead .agenda-lead-error { grid-column: 1 / -1; }
 .agenda-notes { margin: 12px 0; }
 .agenda-notes strong { font-size: 13px; font-weight: 600; }

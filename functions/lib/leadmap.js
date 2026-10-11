@@ -1,5 +1,6 @@
 // Turn whatever Make/Meta sends for a lead into one normalised shape. Matching is by (loosely normalised) field name, so a NEW
 // lead form with standard Meta fields or custom questions works with no code change; anything unrecognised is kept verbatim in Notes.
+const LeadAddress = require('./leadAddress');
 const CONTROL = /[\u0000-\u001f\u007f​-‏‪-‮⁠﻿]/g;
 const clean = (v, max = 300) => String(v == null ? '' : v).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -66,7 +67,10 @@ function mapLead(body) {
     platform: clean(body.platform, 20) || null,
     first: null, last: null, full: null, emails: [], phones: [], locations: {}, budget: null, requirements: [], projectTypes: [], extras: [],
   };
-  for (const e of entriesOf(body)) {
+  const entries = entriesOf(body);
+  // Keep the original answers in Notes as before, while filling the dedicated address when unambiguous.
+  lead.address = LeadAddress.fromNotes(entries.map(e => `${e.label}: ${e.value}`).join('\n')).value;
+  for (const e of entries) {
     const { key, value } = e, t = tokens(key);
     if (has(key, 'email', 'e_mail')) { if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) lead.emails.push(value.slice(0, 200)); else lead.extras.push(e); continue; }
     if (t.some((x) => ['phone', 'mobile', 'whatsapp', 'telephone', 'tel', 'cell'].includes(x))) { lead.phones.push(value); continue; }
@@ -74,7 +78,7 @@ function mapLead(body) {
     if (t.includes('last') && t.includes('name') || ['lastname', 'surname', 'family_name'].includes(key)) { lead.last = lead.last || value; continue; }
     if (['full_name', 'fullname', 'name', 'your_name', 'customer_name', 'contact_name'].includes(key)) { lead.full = lead.full || value; continue; }
     if (has(key, 'budget')) { lead.budget = lead.budget ? `${lead.budget}; ${value}` : value; continue; }
-    if (t.some((x) => ['zip', 'post', 'postcode', 'postal', 'eircode'].includes(x))) { lead.extras.push({ ...e, label: 'Eircode / postcode' }); continue; }
+    if (t.some((x) => ['zip', 'post', 'postcode', 'postal', 'eircode'].includes(x))) { lead.extras.push({ ...e, label: LeadAddress.fieldKind(e.label) === 'code' ? 'Eircode / postcode' : e.label }); continue; }
     const loc = ['city', 'town', 'village', 'suburb', 'location', 'located', 'area', 'county'].find((x) => t.includes(x));
     if (loc && !has(key, 'budget')) { lead.locations[loc] = lead.locations[loc] || value; continue; }
     if (has(key, 'requirement', 'message', 'comment', 'tell_us', 'describe', 'about_your', 'additional', 'anything_else', 'question', 'details')) { lead.requirements.push(value); continue; }

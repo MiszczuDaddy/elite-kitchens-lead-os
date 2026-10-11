@@ -390,7 +390,10 @@ window.APPT = (() => {
     const info = host.dataset.phone === A.leadPhone ? A.leadInfo : null;
     const missing = !info?.loaded ? 'Loading…' : info.error ? 'Unavailable' : 'Not provided';
     const value = key => typeof info?.data?.[key] === 'string' && info.data[key].trim() ? info.data[key] : missing;
-    host.replaceChildren(el('dt', null, 'Address'), el('dd', 'agenda-lead-address', value('address')), el('dt', null, 'Budget'), el('dd', 'agenda-lead-budget', value('budget')));
+    const address = LeadAddress.resolve(info?.data);
+    const addressValue = el('dd', 'agenda-lead-address', address.value || (address.conflict ? 'Check address in customer notes' : missing));
+    if (address.source === 'notes') addressValue.append(el('span', 'agenda-lead-source', 'From customer notes'));
+    host.replaceChildren(el('dt', null, 'Address'), addressValue, el('dt', null, 'Budget'), el('dd', 'agenda-lead-budget', value('budget')));
     if (info?.error) {
       const retry = button('Retry customer details', 'linkbtn', () => { const phone = A.leadPhone; watchAgendaLead(null); watchAgendaLead(phone); });
       const message = el('dd', 'agenda-lead-error'); message.append(retry); host.append(message);
@@ -413,7 +416,7 @@ window.APPT = (() => {
     A.unsubLead = db.collection('contacts').doc(phone).onSnapshot(doc => {
       if (A.leadPhone !== phone || A.leadInfo !== request) return;
       const data = doc.exists ? doc.data() : {};
-      request.data = { address: data.address, budget: data.budget }; request.loaded = true; request.error = false; refresh();
+      request.data = { address: data.address, notes: data.notes, budget: data.budget }; request.loaded = true; request.error = false; refresh();
     }, () => {
       if (A.leadPhone !== phone || A.leadInfo !== request) return;
       request.data = {}; request.loaded = true; request.error = true; refresh();

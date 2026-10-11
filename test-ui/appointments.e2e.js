@@ -202,6 +202,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await page.locator('.agenda-entry[open] .agenda-lead-budget').textContent(), 'Not provided');
   assert.doesNotMatch(await page.locator('.agenda-entry[open]').innerText(), /Oak Avenue|€20–25k/);
   ok('a different lead with missing address/budget shows Not provided and never inherits the previous customer’s information');
+  await require('./lead-address-checks')({ page, db, phone: ph.closed, ok, shots: SHOTS });
   await page.click('.agenda-entry[open] button:has-text("Reschedule")');
   await page.waitForSelector('#appt-dlg[open]');
   assert.equal(await page.inputValue('#a-time'), '09:00');
@@ -413,6 +414,13 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await mp.waitForFunction(() => document.querySelector('#appt-detail-content .agenda-lead-budget')?.textContent === '€20–25k');
   assert.equal(await mp.locator('#appt-detail-content .agenda-lead-address').textContent(), '17 Oak Avenue, Swords, K67 AB12');
   ok('mobile appointment details show the same saved customer address and budget');
+  await db.doc('contacts/' + ph.lead).update({ address: null, notes: 'Eircode: K67 X123' });
+  await mp.waitForFunction(() => document.querySelector('#appt-detail-content .agenda-lead-address')?.textContent.includes('K67 X123'));
+  assert.equal(await mp.locator('#appt-detail-content .agenda-lead-source').innerText(), 'From customer notes');
+  await mp.screenshot({ path: path.join(SHOTS, 'calendar-mobile-address-from-notes.png') });
+  await db.doc('contacts/' + ph.lead).update({ address: '17 Oak Avenue, Swords, K67 AB12', notes: '' });
+  await mp.waitForFunction(() => document.querySelector('#appt-detail-content .agenda-lead-address')?.textContent === '17 Oak Avenue, Swords, K67 AB12');
+  ok('mobile details also read Eircodes from notes and switch back to saved addresses live');
   assert.equal(await mp.getByRole('button', { name: 'Edit appointment', exact: true }).isVisible(), true);
   const detailId = await mp.locator('.agenda-entry').first().getAttribute('data-id');
   await mp.getByRole('button', { name: 'Edit appointment', exact: true }).focus();
@@ -522,7 +530,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
     // Populate today's agenda for the interactive demo, after assertions are complete.
     for (const [i, name, type, location] of [[0, 'Anna Murphy', 'consultation', '12 Oak Avenue, Swords'], [1, 'Brian O’Connell', 'consultation', '24 Harbour Road, Malahide']]) {
       const phone = '35386000001' + i;
-      await seed(phone, { inboxStatus: 'booked', location }, { name, location, address: location, budget: i ? '€20–25k' : '€15–20k' });
+      await seed(phone, { inboxStatus: 'booked', location }, { name, location, address: i ? location : null, notes: i ? '' : 'Eircode: K67 X123', budget: i ? '€20–25k' : '€15–20k' });
       await page.evaluate(async data => firebase.app().functions('europe-west1').httpsCallable('createAppointment')(data), {
         phone, type, location, date: TODAY, time: i ? '13:00' : '10:00', durationMin: 60, requestId: 'calendar-preview-' + i,
         notes: i ? 'Bring the oak sample door.' : 'Discuss the island layout and storage.' });
