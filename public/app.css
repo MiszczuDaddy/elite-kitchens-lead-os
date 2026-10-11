@@ -72,6 +72,7 @@ h1, h2, p { overflow-wrap: anywhere; }
 .new-conversation { border: 1px solid var(--line); width: 36px; min-height: 36px; }
 .count { vertical-align: middle; margin-left: 5px; font-size: 12px; font-weight: 600; background: var(--selected); color: var(--accent); padding: 2px 7px; border-radius: 4px; letter-spacing: 0; }
 .pane-caption { color: var(--muted); font-size: 13px; margin: 4px 22px 10px; }
+.install-m { margin: -6px 10px 6px; min-height: 40px; font-weight: 500; }                /* phones only (.only-mobile), and only while the browser offers installation (Phase 6.2) */
 .status-filters { display: flex; gap: 1px; padding: 0 10px 12px; flex: none; }
 .status-filters button { position: relative; flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 7px 3px; white-space: nowrap; border: 0; border-radius: 5px; background: transparent; font-size: 13px; color: var(--muted); cursor: pointer; }
 .status-filters button:hover { background: var(--hover); }

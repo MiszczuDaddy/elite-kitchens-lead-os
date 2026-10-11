@@ -10,6 +10,9 @@
 <meta name="theme-color" content="#f7f7f4">
 <meta name="darkreader-lock">
 <title>Inbox · Elite Kitchens</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -49,6 +52,9 @@
       <div class="planned-areas"><span>Leads</span><span>Projects</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
     </details>
     <div class="rail-spacer"></div>
+    <button id="install-app" type="button" class="rail-item" data-install-app hidden title="Install Elite OS as an app" aria-label="Install Elite OS">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg><span class="nav-label">Install Elite OS</span>
+    </button>
     <button id="signout" class="rail-item rail-out" title="Sign out" aria-label="Sign out">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg><span class="nav-label">Sign out</span>
     </button>
@@ -66,6 +72,7 @@
       </div>
     </header>
     <p class="pane-caption">WhatsApp conversations</p>
+    <button id="install-app-m" type="button" class="btn btn-link btn-sm only-mobile install-m" data-install-app hidden aria-label="Install Elite OS">Install Elite OS</button>
     <div id="status-filters" class="status-filters" role="group" aria-label="Filter conversations by status">
       <button type="button" data-status="inbox" aria-pressed="true">New lead<span class="status-unread" hidden></span></button>
       <button type="button" data-status="booked" aria-pressed="false">Booked<span class="status-unread" hidden></span></button>
@@ -512,6 +519,7 @@
 </dialog>
 
 <!-- Firebase config is served automatically by Firebase Hosting (public identifiers, not secrets). -->
+<script src="/pwa.js"></script>
 <script src="/__/firebase/10.14.1/firebase-app-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-auth-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-firestore-compat.js"></script>
