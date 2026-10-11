@@ -571,7 +571,10 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .agenda-entry.cancelled .agenda-name { text-decoration: line-through; color: var(--muted); }
 .agenda-entry[open] .agenda-place { display: none; }
 .agenda-details { padding: 0 0 16px; font-size: 13px; }
-.agenda-location { margin: 0 0 10px; overflow-wrap: anywhere; }
+.agenda-lead { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px 12px; margin: 2px 0 14px; }
+.agenda-lead dt { color: var(--muted); font-size: 13px; }
+.agenda-lead dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.agenda-lead .agenda-lead-error { grid-column: 1 / -1; }
 .agenda-notes { margin: 12px 0; }
 .agenda-notes strong { font-size: 13px; font-weight: 600; }
 .agenda-notes p { margin: 4px 0 0; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -583,7 +586,6 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .appt-customer-option:hover { background: var(--hover); }
 .appt-customer-option strong { font-size: 15px; }
 .appt-customer-option span { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.appt-detail-dlg .agenda-location { margin-top: 16px; }
 @media (max-width: 1199px) {
   .cal-workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .cal-day { padding-left: 0; border-left: 0; }

@@ -2,7 +2,9 @@
 
 The month remains the overview. Selecting a date displays its agenda beside the month on desktop (1200px and above), or below it on smaller screens. Today selects today's date; the agenda's day controls and the date buttons' arrow keys navigate across month boundaries. Returning from a customer preserves the selected date.
 
-Calendar appointment chips and “+N more” reveal appointments in the agenda. Desktop details expand inline; phone details open in a full-width sheet. Details include appointment type, location, internal notes, Google sync state and the existing customer, edit, reschedule and cancel actions. List view remains available.
+Calendar appointment chips and “+N more” reveal appointments in the agenda. Desktop details expand inline; phone details open in a full-width sheet. Details include appointment type, the customer's home address and budget, internal notes, Google sync state and the existing customer, edit, reschedule and cancel actions. List view remains available.
+
+Expanded appointment details show the linked lead's saved home address and budget. The budget keeps its original wording (including ranges). Missing fields say “Not provided”; loading and read failures have distinct states. A single staff-authorized contact listener follows the currently open appointment and is removed on navigation or sign-out. The separate appointment-location row is omitted for these home consultations. This does not alter existing booking fields or Google Calendar event data.
 
 On desktop with a mouse, drag an appointment chip or agenda entry onto another calendar day to open the reschedule form with that date selected. Irish start time and duration are preserved. The user must confirm the move; closing the form changes nothing. Past dates, unchanged dates, cancelled appointments and external drag data cannot initiate a move. Updates received during the drag are checked before opening the form; subsequent conflicts use the existing expected-version guard. Mobile and keyboard users retain the Reschedule action. For dates outside the visible calendar, use the form's date picker.
 

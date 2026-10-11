@@ -66,7 +66,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
     await db.doc('conversations/' + id).set({ phone: id, name: contact.name, createdAt: ago(10), updatedAt: ago(1), lastMessage: 'Hi', unreadCount: 0, ...conv });
     await db.doc('contacts/' + id).set({ phone: id, createdAt: ago(10), ...contact });
   };
-  await seed(ph.lead, {}, { name: 'Lena Lead', location: 'Swords' });                                                       // New lead (no status at all)
+  await seed(ph.lead, {}, { name: 'Lena Lead', location: 'Swords', address: '12 Main St, Swords', budget: '€15–20k' });        // New lead (no status at all)
   await seed(ph.quoted, { inboxStatus: 'quoted', stageDates: { quoted: ago(4) } }, { name: 'Quinn Quoted', location: 'Malahide' });
   await seed(ph.closed, { inboxStatus: 'closed', stageDates: { closed: ago(6) } }, { name: 'Cathal Closed' });
   const apptsOf = async (p) => (await db.collection('appointments').where('phone', '==', p).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -184,13 +184,24 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
 
   await d1.locator(`.cal-ev[data-phone="${ph.lead}"]`).click();
   await page.waitForSelector('.agenda-entry[open]');
+  await page.waitForFunction(() => document.querySelector('.agenda-entry[open] .agenda-lead-address')?.textContent === '12 Main St, Swords');
   assert.match(await page.locator('.agenda-entry[open]').innerText(), /10:30–11:30[\s\S]*Lena Lead[\s\S]*Consultation[\s\S]*12 Main St, Swords[\s\S]*Dog in the garden[\s\S]*In Google Calendar/);
   assert.deepEqual(await page.locator('.agenda-entry[open] .agenda-actions button').allInnerTexts(), ['Edit appointment', 'Reschedule', 'Open customer', 'Cancel appointment']);
   await page.screenshot({ path: path.join(SHOTS, 'appointments-calendar-card.png') });
+  assert.equal(await page.locator('.agenda-entry[open] .agenda-lead-budget').textContent(), '€15–20k');
+  await db.doc('contacts/' + ph.lead).update({ address: '17 Oak Avenue, Swords, K67 AB12', budget: '€20–25k' });
+  await page.waitForFunction(() => document.querySelector('.agenda-entry[open] .agenda-lead-budget')?.textContent === '€20–25k');
+  assert.equal(await page.locator('.agenda-entry[open] .agenda-lead-address').textContent(), '17 Oak Avenue, Swords, K67 AB12');
+  assert.equal(await page.locator('.agenda-entry[open] .agenda-location').count(), 0);
+  ok('expanded appointments show the linked lead’s saved home address and budget, update live, and have no separate appointment-location row');
   await page.locator('.agenda-entry[open] summary').click();
   assert.equal(await page.locator('.agenda-entry[open]').count(), 0);
   await showDay(page, D2);
   await page.locator(`.cal-cell[data-day="${D2}"] .cal-ev[data-phone="${ph.closed}"]`).click();
+  await page.waitForFunction(() => document.querySelector('.agenda-entry[open] .agenda-lead-address')?.textContent === 'Not provided');
+  assert.equal(await page.locator('.agenda-entry[open] .agenda-lead-budget').textContent(), 'Not provided');
+  assert.doesNotMatch(await page.locator('.agenda-entry[open]').innerText(), /Oak Avenue|€20–25k/);
+  ok('a different lead with missing address/budget shows Not provided and never inherits the previous customer’s information');
   await page.click('.agenda-entry[open] button:has-text("Reschedule")');
   await page.waitForSelector('#appt-dlg[open]');
   assert.equal(await page.inputValue('#a-time'), '09:00');
@@ -399,6 +410,9 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await mp.locator('.agenda-entry summary').first().tap();
   await mp.waitForSelector('#appt-detail-dlg[open]');
   assert.match(await mp.locator('#appt-detail-content').innerText(), /Lena Lead/);
+  await mp.waitForFunction(() => document.querySelector('#appt-detail-content .agenda-lead-budget')?.textContent === '€20–25k');
+  assert.equal(await mp.locator('#appt-detail-content .agenda-lead-address').textContent(), '17 Oak Avenue, Swords, K67 AB12');
+  ok('mobile appointment details show the same saved customer address and budget');
   assert.equal(await mp.getByRole('button', { name: 'Edit appointment', exact: true }).isVisible(), true);
   const detailId = await mp.locator('.agenda-entry').first().getAttribute('data-id');
   await mp.getByRole('button', { name: 'Edit appointment', exact: true }).focus();
@@ -506,9 +520,9 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.deepEqual(errors, [], 'browser errors: ' + JSON.stringify(errors)); ok('no JavaScript errors in the browser');
   if (process.env.CALENDAR_PREVIEW === '1') {
     // Populate today's agenda for the interactive demo, after assertions are complete.
-    for (const [i, name, type, location] of [[0, 'Anna Murphy', 'consultation', 'Showroom'], [1, 'Brian O’Connell', 'site_visit', '24 Harbour Road, Malahide']]) {
+    for (const [i, name, type, location] of [[0, 'Anna Murphy', 'consultation', '12 Oak Avenue, Swords'], [1, 'Brian O’Connell', 'consultation', '24 Harbour Road, Malahide']]) {
       const phone = '35386000001' + i;
-      await seed(phone, { inboxStatus: 'booked', location }, { name, location });
+      await seed(phone, { inboxStatus: 'booked', location }, { name, location, address: location, budget: i ? '€20–25k' : '€15–20k' });
       await page.evaluate(async data => firebase.app().functions('europe-west1').httpsCallable('createAppointment')(data), {
         phone, type, location, date: TODAY, time: i ? '13:00' : '10:00', durationMin: 60, requestId: 'calendar-preview-' + i,
         notes: i ? 'Bring the oak sample door.' : 'Discuss the island layout and storage.' });

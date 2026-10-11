@@ -15,6 +15,7 @@ window.APPT = (() => {
     month: null,               // { y, m } shown in the calendar (Dublin)
     selDay: null, expanded: null, pickerDate: null, detailId: null,
     calError: '', calLimited: false, drag: null,
+    leadPhone: null, leadInfo: null, unsubLead: null,
     calList: [], calLoaded: false, unsubCal: null, calKey: null,
   };
   const VIEW_KEY = 'ek.apptView';
@@ -155,7 +156,7 @@ window.APPT = (() => {
     document.title = 'Appointments · Elite Kitchens';
     render();
   }
-  function hide() { A.active = false; endDrag(); closeMenu(); closeDialog($('appt-detail-dlg')); A.detailId = null; setNav(false); unlisten(); }
+  function hide() { A.active = false; watchAgendaLead(null); endDrag(); closeMenu(); closeDialog($('appt-detail-dlg')); A.detailId = null; setNav(false); unlisten(); }
   function stop() {                       // sign-out: forget everything
     hide(); A.origin = false; watchCustomer(null);
     A.showCancelled = false; $('appts-show-cancelled').checked = false;
@@ -168,6 +169,7 @@ window.APPT = (() => {
     if (v !== 'calendar' && v !== 'list') return;
     endDrag();
     A.view = v;
+    if (v !== 'calendar') watchAgendaLead(null);
     try { sessionStorage.setItem(VIEW_KEY, v); } catch (e) { /* private mode */ }
     closeMenu(); listen(); render();
   }
@@ -320,6 +322,7 @@ window.APPT = (() => {
     }
     const focusRoot = A.detailId ? $('appt-detail-dlg') : $('cal-day');
     if (focused) [...focusRoot.querySelectorAll('[data-focus]'), ...$('cal-grid').querySelectorAll('[data-focus]')].find(n => n.dataset.focus === focused)?.focus({ preventScroll: true });
+    syncAgendaLead();
   }
   const button = (text, cls, fn) => { const b = el('button', cls, text); b.type = 'button'; b.onclick = fn; return b; };
   function renderDay(items) {
@@ -343,7 +346,8 @@ window.APPT = (() => {
   }
   function appointmentDetails(a) {
     const body = el('div', 'agenda-details');
-    body.append(el('p', 'agenda-location', a.location || 'No location added'));
+    const lead = el('dl', 'agenda-lead'); lead.dataset.phone = a.phone;
+    fillLeadFacts(lead); body.append(lead);
     if (a.notes) { const notes = el('div', 'agenda-notes'); notes.append(el('strong', null, 'Internal notes'), el('p', null, a.notes)); body.append(notes); }
     const sync = el('div', 'arow-meta'); sync.append(syncBadge(a), ...syncActions(a)); body.append(sync);
     const actions = el('div', 'agenda-actions');
@@ -372,12 +376,48 @@ window.APPT = (() => {
         A.expanded = entry.open ? null : a.id;
         for (const other of $('cal-day').querySelectorAll('details')) if (other !== entry) other.open = false;
       }
+      syncAgendaLead();
     };
     entry.append(summary, appointmentDetails(a)); return entry;
   }
   function renderDetail(a) {
     const host = $('appt-detail-content');
     host.replaceChildren(el('h2', null, nameOf(a)), el('p', 'agenda-time', when(a)), el('p', 'agenda-kind', kindOf(a) + (a.status === 'cancelled' ? ' · Cancelled' : '')), appointmentDetails(a));
+  }
+  // Read the lead linked to the open appointment, never the last customer opened in the inbox.
+  // One live listener keeps saved address/budget current without changing appointment or Google data.
+  function fillLeadFacts(host) {
+    const info = host.dataset.phone === A.leadPhone ? A.leadInfo : null;
+    const missing = !info?.loaded ? 'Loading…' : info.error ? 'Unavailable' : 'Not provided';
+    const value = key => typeof info?.data?.[key] === 'string' && info.data[key].trim() ? info.data[key] : missing;
+    host.replaceChildren(el('dt', null, 'Address'), el('dd', 'agenda-lead-address', value('address')), el('dt', null, 'Budget'), el('dd', 'agenda-lead-budget', value('budget')));
+    if (info?.error) {
+      const retry = button('Retry customer details', 'linkbtn', () => { const phone = A.leadPhone; watchAgendaLead(null); watchAgendaLead(phone); });
+      const message = el('dd', 'agenda-lead-error'); message.append(retry); host.append(message);
+    }
+  }
+  function syncAgendaLead() {
+    const id = A.detailId || (window.matchMedia('(min-width: 900px)').matches ? A.expanded : null);
+    const a = A.active && A.view === 'calendar' && A.calList.find(a => a.id === id && (A.showCancelled || a.status !== 'cancelled') && (A.detailId || dublinDate(ts(a.start)) === A.selDay));
+    watchAgendaLead(a ? a.phone : null);
+  }
+  function watchAgendaLead(phone) {
+    if (A.leadPhone === phone) return;
+    if (A.unsubLead) A.unsubLead();
+    A.unsubLead = null; A.leadPhone = phone; A.leadInfo = null;
+    const refresh = () => { for (const host of document.querySelectorAll('.agenda-lead')) fillLeadFacts(host); };
+    refresh();
+    if (!phone) return;
+    // Identity token also rejects a late callback after switching A -> B -> A.
+    const request = {}; A.leadInfo = request;
+    A.unsubLead = db.collection('contacts').doc(phone).onSnapshot(doc => {
+      if (A.leadPhone !== phone || A.leadInfo !== request) return;
+      const data = doc.exists ? doc.data() : {};
+      request.data = { address: data.address, budget: data.budget }; request.loaded = true; request.error = false; refresh();
+    }, () => {
+      if (A.leadPhone !== phone || A.leadInfo !== request) return;
+      request.data = {}; request.loaded = true; request.error = true; refresh();
+    });
   }
   function chipNode(a) {
     const st = stageOf(a), cancelled = a.status === 'cancelled', failed = syncOf(a).state === 'failed';
@@ -670,7 +710,7 @@ window.APPT = (() => {
   $('appt-customer-search').addEventListener('input', renderCustomers);
   $('appt-customer-close').onclick = () => closeDialog($('appt-customer-dlg'));
   $('appt-detail-close').onclick = () => { closeDialog($('appt-detail-dlg')); A.detailId = null; };
-  $('appt-detail-dlg').addEventListener('close', () => { A.detailId = null; });
+  $('appt-detail-dlg').addEventListener('close', () => { A.detailId = null; syncAgendaLead(); });
   $('to-appointments').onclick = () => { location.hash = '#appointments'; };
   $('appts-back').onclick = () => { location.hash = ''; };
   $('nav-appointments').addEventListener('click', (e) => { if (A.active) e.preventDefault(); });   // already here
