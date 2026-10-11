@@ -15,6 +15,8 @@ project, budget, notes), and (Phase 5) their appointments and Google Calendar ev
   message text or full number is kept. Readable by staff only.
 - (Phase 6.1) The same action also erases the quotes' delivery records (they hold the customer's email address and the message that was sent),
   the stored quote PDFs, and the copy of a sent quote shown in the chat. See "Quotes sent by WhatsApp or email" below for what it cannot erase.
+- (Phase 7) The same action also erases the customer's **projects** (checklist, installation date, notes) and their stored **3D renders** (`projects/<phone>/...`);
+  the audit entry counts them (`projects`, `projectFiles`). Removing a single project made by mistake leaves an audit entry with the project id only.
 - A customer who messages again afterwards starts as a brand-new conversation with nothing carried over.
 - Late delivery-status notifications from Meta for a deleted customer are ignored (they can no longer recreate data).
 - Not deleted by this action: copies Meta/WhatsApp themselves hold, the customer's own phone, Cloud Functions logs

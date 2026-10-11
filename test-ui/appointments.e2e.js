@@ -89,7 +89,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await page.locator('#nav-appointments').innerText(), 'Appointments');
   await page.click('.nav-future summary');
   assert.doesNotMatch(await page.locator('.planned-areas').innerText(), /Appointments/);
-  assert.match(await page.locator('.planned-areas').innerText(), /Projects/);     // (Quotes left this list in Phase 6)
+  assert.doesNotMatch(await page.locator('.planned-areas').innerText(), /Projects/);     // (Quotes left this list in Phase 6, Projects in Phase 7)
+  assert.match(await page.locator('.planned-areas').innerText(), /Customers/);
   ok('the rail has Appointments; it is no longer listed under "Coming later"');
 
   // ---- book a New lead from the customer profile ----

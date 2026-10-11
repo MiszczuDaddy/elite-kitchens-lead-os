@@ -186,6 +186,7 @@ function stopListening() {
   if (window.PIPE) PIPE.stop();
   if (window.APPT) APPT.stop();
   if (window.QUOTES) QUOTES.stop();
+  if (window.PROJ) PROJ.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
 }
@@ -314,13 +315,23 @@ function renderConversationStatus() {
 function routeFromHash() {
   // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
   if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
+  if (window.PROJ && !PROJ.mayLeave(location.hash)) return;           // Phase 7: leaving a project with unsaved notes asks first
   if (window.QUOTES && QUOTES.handles(location.hash)) {
     if (S.selected) closeConversation(true);
     if (window.PIPE && PIPE.active) PIPE.hide();
     if (window.APPT && APPT.active) APPT.hide();
+    if (window.PROJ && PROJ.active) PROJ.hide();
     QUOTES.show(location.hash); return;
   }
   if (window.QUOTES && QUOTES.active) QUOTES.hide();
+  // Projects (Phase 7): #projects, #projects/<id>
+  if (window.PROJ && PROJ.handles(location.hash)) {
+    if (S.selected) closeConversation(true);
+    if (window.PIPE && PIPE.active) PIPE.hide();
+    if (window.APPT && APPT.active) APPT.hide();
+    PROJ.show(location.hash); return;
+  }
+  if (window.PROJ && PROJ.active) PROJ.hide();
   if (location.hash === '#appointments' && window.APPT) { if (S.selected) closeConversation(true); if (window.PIPE && PIPE.active) PIPE.hide(); APPT.show(); return; }
   if (window.APPT && APPT.active) APPT.hide();
   if (location.hash === '#pipeline' && window.APPT) APPT.origin = false;
@@ -331,7 +342,7 @@ function routeFromHash() {
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
@@ -346,6 +357,7 @@ function closeConversation(fromHash) {
 }
 $('back').onclick = () => {
   if (window.QUOTES && QUOTES.backTo) { const h = QUOTES.backTo; QUOTES.backTo = null; location.hash = h; return; }   // came from a quote: go back to it
+  if (window.PROJ && PROJ.backTo) { const h = PROJ.backTo; PROJ.backTo = null; location.hash = h; return; }          // came from a project: go back to it
   if (window.APPT && APPT.origin) { APPT.origin = false; location.hash = '#appointments'; return; }   // came from Appointments: go back to it
   if (window.PIPE && PIPE.origin) { PIPE.origin = false; location.hash = '#pipeline'; return; }   // came from the pipeline: go back to it
   closeConversation(false);
@@ -357,6 +369,7 @@ function openConversation(id, fromHash) {
   if (!fromHash && window.PIPE) PIPE.origin = false;      // opened from the Inbox list, not from the pipeline
   if (!fromHash && window.APPT) APPT.origin = false;
   if (!fromHash && window.QUOTES) QUOTES.backTo = null;
+  if (!fromHash && window.PROJ) PROJ.backTo = null;
   rememberDrafts();
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
@@ -962,6 +975,7 @@ function watchContact(id) {
   if (S.unsubContact) { S.unsubContact(); S.unsubContact = null; }
   if (window.APPT) APPT.watchCustomer(id);           // the customer's appointments, shown above the details form
   if (window.QUOTES) QUOTES.watchCustomer(id);       // and their quotes (Phase 6)
+  if (window.PROJ) PROJ.watchCustomer(id);           // and their projects (Phase 7)
   S.contact = null; S.dirty = false;
   setDetailMsg('');
   $('profile-body').scrollTop = 0;
