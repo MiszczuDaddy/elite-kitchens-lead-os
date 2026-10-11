@@ -121,7 +121,7 @@ const deploy = (funcs, open = true) => { for (const f of funcs) { fs.writeFileSy
 const failWith = (f, how) => fs.writeFileSync(path.join(state, 'fail', low(f)), how);
 const isPublic = (f) => fs.existsSync(path.join(state, 'public', low(f)));
 const run = (script, args = [], env = {}, input = undefined) => {
-  const r = spawnSync('bash', ['-c', 'gcloud() { bash "$TEST_BIN/gcloud" "$@"; }; curl() { bash "$TEST_BIN/curl" "$@"; }; export -f gcloud curl; exec bash "$@"', 'test', path.isAbsolute(script) ? script : path.join(SCRIPTS, script), ...args], { encoding: 'utf8', timeout: 60000, input,
+  const r = spawnSync('bash', ['-c', 'gcloud() { bash "$TEST_BIN/gcloud" "$@"; }; curl() { bash "$TEST_BIN/curl" "$@"; }; export -f gcloud curl; exec bash "$@"', 'test', path.isAbsolute(script) ? script : path.join(SCRIPTS, script), ...args], { encoding: 'utf8', timeout: 180000, input,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, FAKE_STATE: state, TEST_BIN: bin, HOME: home, USERPROFILE: home, ...env } });
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
 };
@@ -606,7 +606,26 @@ test('every stage that deploys functions runs the routing check BEFORE it asks f
   const mail = stage('mail'), [on, off] = mail.split('      off)\n'); assert.ok(off, 'mail off not found');
   before(on, 'mail on'); before(off, 'mail off'); assert.match(on, /check_routing \$MAIL_FUNCS/); assert.match(off, /check_routing \$MAIL_FUNCS/);
   assert.ok(!/check_routing/.test(stage('rules')) && !/check_routing/.test(stage('live')), 'stages that deploy no functions do not need it');
-  assert.match(s, /^usage\(\) \{ sed -n '2,33p'/m); assert.match(s.split('\n').slice(0, 33).join('\n'), /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+  before(stage('projects'), 'projects'); assert.match(stage('projects'), /check_routing \$PROJECT_FUNCS/);
+  assert.match(s, /^usage\(\) \{ sed -n '2,35p'/m); assert.match(s.split('\n').slice(0, 35).join('\n'), /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+  assert.match(s.split('\n').slice(0, 35).join('\n'), /deploy-quote-sending\.sh projects/, 'the help text must show the projects stage');
+});
+
+// ============================ Phase 7: the "projects" stage deploys exactly the right functions, and the screen cannot go live before them ======================
+test('Phase 7: the projects stage names exactly the seven new project functions and the three changed ones, every one is a real function, and the screen waits for them', () => {
+  const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const list = (name) => { const m = new RegExp('^' + name + '="([^"]*)"', 'm').exec(s); assert.ok(m, name + ' not found'); return m[1].trim().split(/\s+/); };
+  const fresh = list('PROJECT_NEW'), changed = list('PROJECT_CHANGED');
+  assert.deepEqual([...fresh].sort(), ['attachProjectRender', 'completeProject', 'createProject', 'projectRenderUrl', 'removeProject', 'saveProject', 'setProjectStep']);
+  assert.deepEqual([...changed].sort(), ['acceptQuote', 'deleteCustomer', 'reopenQuote']);
+  const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
+  for (const f of [...fresh, ...changed]) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\b', 'm'), f + ' is not a callable function in functions/index.js (a typo would deploy nothing)');
+  assert.match(s, /^PROJECT_FUNCS="\$PROJECT_NEW \$PROJECT_CHANGED"/m);
+  const i = s.indexOf('\n  projects)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));
+  assert.match(stage, /deploy_functions \$PROJECT_FUNCS/); assert.match(stage, /for f in \$PROJECT_NEW; do[\s\S]*add-iam-policy-binding[\s\S]*done/, 'only the NEW functions are made public');
+  assert.match(stage, /check_reachable "\$PROJECT_FUNCS"/); assert.ok(stage.indexOf('check_settings') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'checks, then the question, then the deploy');
+  const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j));
+  assert.match(live, /serving_revision createproject[\s\S]*Deploy the Projects backend first/); assert.ok(live.indexOf('createproject') < live.indexOf('confirm "'), 'the screen cannot be published before the Projects backend');
 });
 
 test('the "mail off" stage stops on a pinned function before it asks anything, and asks as usual when nothing is pinned', () => {

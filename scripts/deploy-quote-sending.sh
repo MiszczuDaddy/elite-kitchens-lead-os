@@ -25,6 +25,8 @@
 #   ./scripts/deploy-quote-sending.sh routing    read-only: is any function's traffic PINNED to one old version (a failed restore does that)? Every stage that deploys
 #                                                functions runs this check first and refuses while one is pinned (2026-10-11: it made 21 deploys fail).
 #   ./scripts/deploy-quote-sending.sh routing fix   send the traffic of the pinned functions back to their newest version (routing only; no code changes).
+#   ./scripts/deploy-quote-sending.sh projects   Phase 7 (Projects) backend: acceptQuote and reopenQuote (they now keep the quote's project), deleteCustomer (it now also erases
+#                                                projects and renders) and the 7 new project functions. Run it BEFORE "live" (the screen); screens that do not know projects keep working.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
@@ -49,13 +51,16 @@ CHANNEL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"       # the functi
 OLDER_FUNCS="sendReply sendMedia startConversation claimAccess leadIntake"           # older functions that the audit fixes touch (findings 5 and 6, second audit 6); all are public already
 PRE_AUDIT="${PRE_AUDIT:-6baa6ca}"                                                  # the last commit before the audit fixes: the code "back" redeploys (docs/PHASE6_1_PLAN.md, "Rollback")
 BACKEND_FUNCS="$NEW_FUNCS $QUOTE_FUNCS"
+PROJECT_NEW="createProject saveProject setProjectStep completeProject removeProject attachProjectRender projectRenderUrl"   # Phase 7: new, made public like the quote ones
+PROJECT_CHANGED="acceptQuote reopenQuote deleteCustomer"                                                                   # Phase 7: existing functions whose code changed
+PROJECT_FUNCS="$PROJECT_NEW $PROJECT_CHANGED"
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,33p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,35p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -267,6 +272,22 @@ case "${1:-}" in
     git checkout "$PRE_AUDIT" -- functions
     "$0" "$what"                                                                                  # the same stage, with the same checks (and the staff-access check sees the OLD code)
     ;;
+  projects)
+    [ -f functions/lib/projects.js ] || { echo "This checkout has no Phase 7 (Projects) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
+    check_settings; check_access; check_routing $PROJECT_FUNCS
+    echo "Functions: $PROJECT_FUNCS"
+    echo "Changed: acceptQuote and reopenQuote (they also keep the quote's project, in the same transaction), deleteCustomer (it also erases projects and renders)."
+    echo "New: $PROJECT_NEW (only used by the Projects screen)."
+    confirm "Deploy the Phase 7 (Projects) backend to the LIVE project?"
+    install
+    deploy_functions $PROJECT_FUNCS
+    echo "==> making the 7 new functions reachable (each checks the signed-in staff account itself)"
+    for f in $PROJECT_NEW; do
+      gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+    done
+    check_reachable "$PROJECT_FUNCS"
+    echo "Done. The live screen is unchanged and keeps working. Next: $0 live (the Projects screen). To go back: redeploy the previous code (git checkout phase-6-2-pwa-complete -- functions, then firebase deploy --only functions:acceptQuote,functions:reopenQuote,functions:deleteCustomer); the 7 new functions are harmless without the screen."
+    ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }
     no_test_folders
@@ -299,9 +320,11 @@ case "${1:-}" in
     ;;
   live)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }
+    # Phase 7: a screen that has Projects calls functions that must exist first (the screen would show errors otherwise).
+    if [ -f functions/lib/projects.js ] && [ -z "$(serving_revision createproject)" ]; then echo "Deploy the Projects backend first: $0 projects"; exit 1; fi
     no_test_folders
-    echo "This publishes the Phase 6.1 screen (Send quote, Reopen conversation) to everyone who uses Elite OS."
-    confirm "Publish the Phase 6.1 screen to PRODUCTION Hosting? Only with the owner's approval."
+    echo "This publishes the screen files of this checkout (the commit shown at the top) to everyone who uses Elite OS. Hosting only: no function, rule or setting changes."
+    confirm "Publish the screen to PRODUCTION Hosting? Only with the owner's approval."
     firebase deploy --project "$PROJECT" --only hosting
     echo "Done. Reload Elite OS. Undo: Firebase console > Hosting > Release history > Rollback."
     ;;

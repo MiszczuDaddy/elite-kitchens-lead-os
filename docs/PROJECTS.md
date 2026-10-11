@@ -48,4 +48,8 @@ The model (steps, "waiting for", status, filters, counts, order, search) is pure
 * Not run: the full backend and browser regression of the whole branch.
 
 ## Release
-Deploy order (each step needs the owner's approval): the backend first (`acceptQuote`, `reopenQuote`, `deleteCustomer` and the seven new functions, made public like the quote ones), then Hosting. Undo: Hosting rollback for the screen; for the functions, redeploy the previous code from git (revision rollback does not work, see `docs/PHASE6_1_PLAN.md`). A deploy script like the quote one is to be written when the deploy is approved.
+Deploy order (each step needs the owner's approval), from Cloud Shell on `main` after the merge:
+1. `./scripts/deploy-quote-sending.sh projects`: the backend. Checks the settings file against the live functions, the functions' own access and that no function's traffic is pinned; asks for "yes"; deploys `acceptQuote`, `reopenQuote`, `deleteCustomer` and the seven new functions (made public like the quote ones); then checks that each answers and refuses a request without sign-in. The live screen is unchanged and keeps working.
+2. `./scripts/deploy-quote-sending.sh live`: Hosting only (refuses unless step 1 is done). Reload Elite OS.
+
+Undo: Hosting rollback for the screen (Firebase console > Hosting > Release history > Rollback). For the functions, redeploy the previous code from git (`git checkout phase-6-2-pwa-complete -- functions`, then `firebase deploy --only functions:acceptQuote,functions:reopenQuote,functions:deleteCustomer`); revision rollback does not work (`docs/PHASE6_1_PLAN.md`). The seven new functions are harmless without the screen. Projects already created stay in the database.
