@@ -175,3 +175,13 @@ exports.resolveQuoteDelivery = onCall({}, (req) => h.resolveQuoteDelivery(req.au
 exports.cancelQuoteSend = onCall({}, (req) => h.cancelQuoteSend(req.auth, req.data, quoteDeps()));
 exports.markQuoteSent = onCall({}, (req) => h.markQuoteSent(req.auth, req.data, quoteDeps()));
 exports.quoteChannels = onCall({}, (req) => { const m = mailChannel(); return h.quoteChannels(req.auth, req.data, { ...quoteDeps(), mailEnabled: m.enabled, mailSender: m.sender, quoteTemplate: !!quoteTemplate() }); });
+
+// ---- Phase 7: projects (docs/PROJECTS.md). Staff-only callables with no WhatsApp, Google or email secrets (least privilege). A project is made by acceptQuote itself
+// (same transaction); these are for working on it. attachProjectRender reads and moves the uploaded picture, so it gets more time and memory.
+exports.createProject = onCall({}, (req) => h.createProject(req.auth, req.data, quoteDeps()));
+exports.saveProject = onCall({}, (req) => h.saveProject(req.auth, req.data, quoteDeps()));
+exports.setProjectStep = onCall({}, (req) => h.setProjectStep(req.auth, req.data, quoteDeps()));
+exports.completeProject = onCall({}, (req) => h.completeProject(req.auth, req.data, quoteDeps()));
+exports.removeProject = onCall({}, (req) => h.removeProject(req.auth, req.data, quoteDeps()));
+exports.attachProjectRender = onCall({ timeoutSeconds: 120, memory: '512MiB' }, (req) => h.attachProjectRender(req.auth, req.data, quoteDeps()));
+exports.projectRenderUrl = onCall({}, (req) => h.projectRenderUrl(req.auth, req.data, quoteDeps()));

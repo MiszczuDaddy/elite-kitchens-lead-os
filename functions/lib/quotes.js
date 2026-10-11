@@ -13,6 +13,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const QE = require('./quoteEngine');
 const pipeline = require('./quotePipeline');
+const projects = require('./projects');                  // Phase 7: accepting a quote makes its project, inside the same transaction
 const { normalizePhone } = require('./whatsapp');
 
 const TZ = 'Europe/Dublin';
@@ -471,8 +472,8 @@ async function accept({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (q.status === 'accepted') throw refused('This quote is already accepted.');
     if (q.status !== 'sent') throw refused(q.status === 'declined' ? 'This quote was declined. Reopen it first.' : 'Send the quote before marking it accepted.');
     if (q.draftVersion != null) throw refused('Send or discard the draft changes first.');
-    const convRef = db.collection('conversations').doc(q.phone), contactRef = db.collection('contacts').doc(q.phone);
-    const [vSnap, conv, contact] = await Promise.all([tx.get(versionRef(ref, q.sentVersion)), tx.get(convRef), tx.get(contactRef)]);
+    const convRef = db.collection('conversations').doc(q.phone), contactRef = db.collection('contacts').doc(q.phone), pRef = projects.refForQuote(db, ref.id);
+    const [vSnap, conv, contact, pSnap] = await Promise.all([tx.get(versionRef(ref, q.sentVersion)), tx.get(convRef), tx.get(contactRef), tx.get(pRef)]);
     const option = vSnap.data().sheet.options.find((o) => o.key === data.option);
     if (!option) throw bad('Choose one of the options on the quote.');
     if (!conv.exists) throw new HttpsError('not-found', 'Customer not found.');
@@ -488,7 +489,10 @@ async function accept({ db }, actor, data, { nowMs = Date.now() } = {}) {
       rev: q.rev + 1, updatedAt: now, updatedBy: actor,
     };
     tx.update(ref, patch);
-    return { ...view(ref.id, { ...q, ...patch }), expired: isExpired(q, nowMs), stage: stage ? stage.change : null, value: val ? val.change : null };
+    // Phase 7: the quote's project (docs/PROJECTS.md). Same transaction: the quote is accepted and its project exists, or neither happened. Never a second project for a quote.
+    const plan = projects.planAccept(pSnap, pRef, { phone: q.phone, customerName: customerNameOf(contact, conv), quote: { id: ref.id, ref: q.ref }, option: patch.acceptedOption, actor, nowMs });
+    if (plan.create) tx.set(plan.ref, plan.create); else tx.update(plan.ref, plan.update);
+    return { ...view(ref.id, { ...q, ...patch }), expired: isExpired(q, nowMs), stage: stage ? stage.change : null, value: val ? val.change : null, projectId: pRef.id };
   });
 }
 
@@ -525,6 +529,7 @@ async function reopen({ db }, actor, data, { nowMs = Date.now() } = {}) {
     checkRev(q, data.expectedRev);
     if (q.status !== 'accepted' && q.status !== 'declined') throw refused('Only an accepted or declined quote can be reopened.');
     if (q.status === 'declined' && (moveBack || restoreValue)) throw bad('Declining did not change the pipeline, so there is nothing to undo.');
+    const pRef = projects.refForQuote(db, ref.id), pSnap = await tx.get(pRef);          // Phase 7: read before any write below
     const now = at(nowMs);
     let stage = null, val = null;
     if (moveBack || restoreValue) {
@@ -551,6 +556,8 @@ async function reopen({ db }, actor, data, { nowMs = Date.now() } = {}) {
     };
     if (stage || val) patch.pipelineChanges = capped(q.pipelineChanges, { action: 'reopened', version: q.sentVersion, at: now, by: actor.id, stage: stage ? stage.change : null, value: val ? val.change : null }, PIPELINE_MAX);
     tx.update(ref, patch);
+    const projectPlan = was === 'accepted' ? projects.planReopen(pSnap, pRef, { actor, nowMs }) : null;            // the project stays and says the quote is open again
+    if (projectPlan) tx.update(projectPlan.ref, projectPlan.update);
     return { ...view(ref.id, { ...q, ...patch }), stage: stage ? stage.change : null, value: val ? val.change : null };
   });
 }

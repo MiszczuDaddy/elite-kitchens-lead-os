@@ -7,6 +7,7 @@ const mediaLib = require('./media');
 const appointments = require('./appointments');
 const calendarSync = require('./calendarSync');
 const quotes = require('./quotes');
+const projects = require('./projects');
 const reopenLib = require('./reopen');
 const delivery = require('./quoteDelivery');
 const { WINDOW_MS } = require('./windowState');          // 24 hours; the same rule the screen uses (Phase 6.1)
@@ -224,7 +225,7 @@ async function deleteCustomer(auth, data, deps) {
   if (!r) throw new HttpsError('not-found', 'Customer not found (already deleted?).');
   // Audit entry with NO personal content: a one-way hash (not reversible to the number), last 3 digits, counts, who, when.
   await db.collection('auditLog').add({ action: 'deleteCustomer', phoneHash: require('crypto').createHash('sha256').update(phone).digest('hex'),
-    phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, quotes: r.quotes, quoteFiles: r.quoteFiles,
+    phoneLast3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, quotes: r.quotes, quoteFiles: r.quoteFiles, projects: r.projects, projectFiles: r.projectFiles,
     by: (auth.token && auth.token.email) || auth.uid, at: require('firebase-admin/firestore').Timestamp.now() });
   log('info', 'customer deleted', { last3: phone.slice(-3), messages: r.messages, files: r.files, appointments: r.appointments, quotes: r.quotes });
   await calendarSync.removeEvents(deps, events);                  // never throws: anything Google refuses now is finished by the sweeper
@@ -364,6 +365,16 @@ const deleteQuoteDraft = quoteAction(quotes.deleteDraft);
 const setQuoteNotes = quoteAction(quotes.setNotes);
 async function quotePdfUrl(auth, data, deps) { assertStaff(auth, deps.cfg); return quotes.pdfLink(deps, actorOf(auth), data, { signedUrl: mediaLib.signedUrl }); }
 
+// ---- Phase 7: projects (docs/PROJECTS.md). The rules live in ./projects; these wrappers only check who is asking. ----
+const projectAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps.cfg); return fn(deps, actorOf(auth), data, { uid: auth.uid }); };
+const createProject = projectAction(projects.create);
+const saveProject = projectAction(projects.save);
+const setProjectStep = projectAction(projects.setStep);
+const completeProject = projectAction(projects.complete);
+const removeProject = projectAction(projects.remove);
+const attachProjectRender = projectAction(projects.attachRender);
+async function projectRenderUrl(auth, data, deps) { assertStaff(auth, deps.cfg); return projects.renderLink(deps, actorOf(auth), data, { signedUrl: mediaLib.signedUrl }); }
+
 // ---- Phase 6.1: Reopen conversation (a general WhatsApp capability, not tied to quotes). The rules live in ./reopen and
 // ./windowState; this wrapper only checks who is asking. ----
 async function reopenConversation(auth, data, deps) { assertStaff(auth, deps.cfg); return reopenLib.reopen(deps, actorOf(auth), data); }
@@ -386,4 +397,5 @@ async function quoteChannels(auth, data, deps) {
 
 module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
+  createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };
