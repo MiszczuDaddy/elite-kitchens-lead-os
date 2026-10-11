@@ -481,14 +481,14 @@ window.QUOTES = (() => {
       nodes.push(row, el('p', 'qb-note qv-hint', SEND_HINT));
     } else if (q.status === 'sent') {
       row.append(button('Mark accepted…', 'btn-primary', openAccept, 'qv-accept'), button('Mark declined…', 'btn-ghost', openDecline, 'qv-decline'),
-        button('Revise', 'btn-ghost', revise, 'qv-revise'), button('Send again…', 'btn-ghost', () => openSend('renew'), 'qv-renew'),
-        button('Send this version…', 'btn-ghost', () => openSend('resend'), 'qv-resend'));
-      nodes.push(row, el('p', 'qb-note', 'Revise starts a new version with the same prices to change. Send again sends the same quote with a new date and validity. Send this version sends the PDF the customer already has, by WhatsApp or email.'));
+        button('Create revision', 'btn-ghost', revise, 'qv-revise'), button('Renew dates and send…', 'btn-ghost', () => openSend('renew'), 'qv-renew'),
+        button('Resend saved PDF…', 'btn-ghost', () => openSend('resend'), 'qv-resend'));
+      nodes.push(row, el('p', 'qb-note', 'Create revision starts an editable version with the same prices. Renew dates and send uses a new issue date and validity. Resend saved PDF sends the exact saved file by WhatsApp or email.'));
     } else if (q.status === 'accepted') {
       row.append(button('Reopen…', 'btn-ghost', openReopen, 'qv-reopen'));
       nodes.push(row);
     } else if (q.status === 'declined') {
-      row.append(button('Reopen…', 'btn-ghost', openReopen, 'qv-reopen'), button('Revise', 'btn-ghost', revise, 'qv-revise'));
+      row.append(button('Reopen…', 'btn-ghost', openReopen, 'qv-reopen'), button('Create revision', 'btn-ghost', revise, 'qv-revise'));
       nodes.push(row);
     }
     host.replaceChildren(...nodes);
@@ -763,7 +763,7 @@ window.QUOTES = (() => {
   // "Send quote" makes the customer PDF here and uploads it; the server then prepares it, delivers it through each ticked channel
   // and marks the quote Sent ONLY once a channel confirms delivery (functions/lib/quoteDelivery.js). Every channel's result is shown
   // on its own, with Retry for a failed one and "It arrived / It did not arrive" for one we could not confirm: nothing is ever
-  // sent twice by itself. "Send this version" delivers an already-sent version's stored PDF through more channels. "Prefer to send
+  // sent twice by itself. "Resend saved PDF" delivers an already-sent version's stored PDF through more channels. "Prefer to send
   // it yourself" is Phase 6's way: the PDF is made and kept, the quote marked sent at once, then Download PDF and an email draft.
   // The PDF is made here from the frozen draft, the customer's details and the business details read fresh; the server refuses the
   // send if any of them changed meanwhile, so the stored copy is always what the customer gets.

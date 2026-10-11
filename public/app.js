@@ -216,6 +216,9 @@ function matchesQuery(c, q) {
 
 function renderList() {
   const q = S.query.trim().toLowerCase();
+  const stage = INBOX_STATUSES[S.statusFilter];
+  $('search').placeholder = 'Search ' + stage + '…';
+  $('search').setAttribute('aria-label', 'Search ' + stage + ' conversations');
   const list = $('list');
   const keep = list.scrollTop;
   const shown = S.convs.filter((c) => inboxStatus(c) === S.statusFilter && matchesQuery(c, q));
@@ -225,7 +228,7 @@ function renderList() {
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
   else if (!S.convs.length) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search in ' + INBOX_STATUSES[S.statusFilter] + '.' : 'No conversations marked ' + INBOX_STATUSES[S.statusFilter] + '.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search in ' + stage + '. Try another stage or change your search.' : 'No conversations marked ' + stage + '. Choose another stage to find a customer.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;

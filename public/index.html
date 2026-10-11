@@ -74,7 +74,7 @@
       <button type="button" data-status="closed" aria-pressed="false">Closed<span class="status-unread" hidden></span></button>
     </div>
     <div class="search"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
-      <input id="search" type="search" placeholder="Search conversations…" autocomplete="off" aria-label="Search conversations">
+      <input id="search" type="search" placeholder="Search New lead…" autocomplete="off" aria-label="Search New lead conversations">
     </div>
     <div id="toast" class="toast" role="status" hidden></div>
     <div id="list" class="list" role="list"></div>
@@ -216,15 +216,7 @@
     </header>
     <div class="customer-summary"><div class="avatar" id="profile-avatar"></div><strong id="profile-name"></strong><span>WhatsApp customer</span></div>
     <div class="profile-tabs" role="tablist" aria-label="Customer sections"><button id="tab-details" role="tab" aria-selected="true" aria-controls="panel-details">Details</button><button id="tab-media" role="tab" aria-selected="false" aria-controls="panel-media">Media</button><button id="tab-documents" role="tab" aria-selected="false" aria-controls="panel-documents">Documents</button></div>
-    <div class="profile-body" id="profile-body"><section id="panel-details" role="tabpanel" tabindex="0" aria-labelledby="tab-details"><section id="d-appts" class="d-appts" aria-labelledby="d-appts-title">
-      <div class="d-appts-head"><h3 id="d-appts-title">Appointments</h3><button id="d-appt-new" type="button" class="btn btn-ghost btn-sm">Book appointment</button></div>
-      <div id="d-appts-list"></div>
-      <div id="d-appts-msg" class="d-msg" role="status"></div>
-    </section><section id="d-quotes" class="d-appts d-quotes" aria-labelledby="d-quotes-title">
-      <div class="d-appts-head"><h3 id="d-quotes-title">Quotes</h3><button id="d-quote-new" type="button" class="btn btn-ghost btn-sm">Create quote</button></div>
-      <div id="d-quotes-list"></div>
-      <div id="d-quotes-msg" class="d-msg" role="status"></div>
-    </section><form id="details-form" class="details-form" autocomplete="off" novalidate>
+    <div class="profile-body" id="profile-body"><section id="panel-details" role="tabpanel" tabindex="0" aria-labelledby="tab-details"><div class="profile-shortcuts" role="group" aria-label="Customer actions"><button id="d-appt-new" type="button" class="btn btn-ghost btn-sm">Book appointment</button><button id="d-quote-new" type="button" class="btn btn-ghost btn-sm">Create quote</button></div><form id="details-form" class="details-form" autocomplete="off" novalidate>
       <fieldset><legend>Contact</legend>
       <div class="d-phone"><span class="d-label">Phone</span><span id="d-phone" class="d-phone-val"></span></div>
       <label>Name<input id="d-name" name="name" maxlength="100"></label>
@@ -251,6 +243,15 @@
       </fieldset>
       <div class="d-meta" id="d-meta"></div>
     </form>
+    <section id="d-appts" class="d-appts" aria-labelledby="d-appts-title">
+      <div class="d-appts-head"><h3 id="d-appts-title">Appointments</h3></div>
+      <div id="d-appts-list"></div>
+      <div id="d-appts-msg" class="d-msg" role="status"></div>
+    </section><section id="d-quotes" class="d-appts d-quotes" aria-labelledby="d-quotes-title">
+      <div class="d-appts-head"><h3 id="d-quotes-title">Quotes</h3></div>
+      <div id="d-quotes-list"></div>
+      <div id="d-quotes-msg" class="d-msg" role="status"></div>
+    </section>
     <div class="danger">
       <div class="d-label">Data controls</div>
       <p class="hint">Permanently remove this customer, their messages and every file they sent or received.</p>
