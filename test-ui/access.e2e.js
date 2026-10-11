@@ -95,7 +95,8 @@ const web = http.createServer((req, res) => {
   // third check, finding 7: the REAL claimAccess function (over HTTP, as scripts/access-compat.sh asks it) answers the capability question without a sign-in
   const ask = async (data) => { const r = await fetch('http://127.0.0.1:5001/demo-leados/europe-west1/claimAccess', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }) }); return { status: r.status, body: await r.json() }; };
   const yes = await ask({ probe: 'staff-claim-expiry' });
-  assert.equal(yes.status, 200); assert.deepEqual(yes.body.result, { ok: true, expiring: true, claimMs: 12 * 3600 * 1000, revision: process.env.K_REVISION || null });
+  assert.equal(yes.status, 200); const { revision, ...capability } = yes.body.result;                       // the revision is the SERVING function's K_REVISION (the emulator sets it to "1"), not this test's own environment
+  assert.deepEqual(capability, { ok: true, expiring: true, claimMs: 12 * 3600 * 1000 }); assert.ok(typeof revision === 'string' && revision.length > 0, 'the probe must name the revision that answered: ' + JSON.stringify(revision));
   for (const bad of [{}, { probe: true }, { probe: 'nope' }]) { const no = await ask(bad); assert.equal(no.status, 401, JSON.stringify(bad)); assert.equal(no.body.error.status, 'UNAUTHENTICATED'); }
   ok('the real claimAccess answers the capability question over HTTP without a sign-in ({expiring: true}) and still refuses every other call that has no sign-in');
 
