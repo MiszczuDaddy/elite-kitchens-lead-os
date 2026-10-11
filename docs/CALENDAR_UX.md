@@ -4,6 +4,8 @@ The month remains the overview. Selecting a date displays its agenda beside the 
 
 Calendar appointment chips and “+N more” reveal appointments in the agenda. Desktop details expand inline; phone details open in a full-width sheet. Details include appointment type, location, internal notes, Google sync state and the existing customer, edit, reschedule and cancel actions. List view remains available.
 
+On desktop with a mouse, drag an appointment chip or agenda entry onto another calendar day to open the reschedule form with that date selected. Irish start time and duration are preserved. The user must confirm the move; closing the form changes nothing. Past dates, unchanged dates, cancelled appointments and external drag data cannot initiate a move. Updates received during the drag are checked before opening the form; subsequent conflicts use the existing expected-version guard. Mobile and keyboard users retain the Reschedule action. For dates outside the visible calendar, use the form's date picker.
+
 “Book appointment” opens a customer chooser using the existing loaded inbox across all stages, then the existing booking dialog with the selected date. Results are capped at 20 until narrowed by name, phone or location. This does not introduce a new customer search backend. Booking from a customer profile still works as before.
 
 All saves use the existing callables, request IDs and expected-version checks. A pending save blocks repeated submission and dismissal. Details-only edits say “Appointment updated”; time changes say “Rescheduled for”. Google remains a one-way copy of Elite OS. Internal notes remain private to Elite OS.

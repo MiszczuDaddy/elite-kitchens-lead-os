@@ -488,6 +488,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await page.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D7);
   ok('opening a customer and returning retains the selected calendar date');
 
+  await require('./calendar-drag-checks')({ page, db, cal, showDay, dublin, D7, created, ok, SHOTS });
+
   // Capture the actual frontend at desktop, laptop and phone widths, using synthetic demo data.
   await page.evaluate(() => { document.getElementById('appts-toast').hidden = true; });
   await showDay(page, D1);

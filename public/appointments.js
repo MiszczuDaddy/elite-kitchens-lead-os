@@ -14,7 +14,7 @@ window.APPT = (() => {
     view: null,                // 'calendar' | 'list' (remembered for the browser session)
     month: null,               // { y, m } shown in the calendar (Dublin)
     selDay: null, expanded: null, pickerDate: null, detailId: null,
-    calError: '', calLimited: false,
+    calError: '', calLimited: false, drag: null,
     calList: [], calLoaded: false, unsubCal: null, calKey: null,
   };
   const VIEW_KEY = 'ek.apptView';
@@ -155,7 +155,7 @@ window.APPT = (() => {
     document.title = 'Appointments · Elite Kitchens';
     render();
   }
-  function hide() { A.active = false; closeMenu(); closeDialog($('appt-detail-dlg')); A.detailId = null; setNav(false); unlisten(); }
+  function hide() { A.active = false; endDrag(); closeMenu(); closeDialog($('appt-detail-dlg')); A.detailId = null; setNav(false); unlisten(); }
   function stop() {                       // sign-out: forget everything
     hide(); A.origin = false; watchCustomer(null);
     A.showCancelled = false; $('appts-show-cancelled').checked = false;
@@ -166,6 +166,7 @@ window.APPT = (() => {
   }
   function setMode(v) {
     if (v !== 'calendar' && v !== 'list') return;
+    endDrag();
     A.view = v;
     try { sessionStorage.setItem(VIEW_KEY, v); } catch (e) { /* private mode */ }
     closeMenu(); listen(); render();
@@ -197,7 +198,7 @@ window.APPT = (() => {
   function note(text) { const t = $('appts-toast'); t.textContent = text; t.hidden = !text; clearTimeout(note.h); if (text) note.h = setTimeout(() => { t.hidden = true; }, 8000); }
   function render() {
     if (!A.active) return;
-    if (A.menu) { A.stale = true; return; }                        // never redraw under an open menu
+    if (A.menu || A.drag) { A.stale = true; return; }               // preserve an open menu or the native drag source
     const f = $('appts-failed'), nFailed = A.failed.length;
     f.hidden = !nFailed;
     if (nFailed) {
@@ -361,6 +362,7 @@ window.APPT = (() => {
     const entry = el('details', 'agenda-entry' + (a.status === 'cancelled' ? ' cancelled' : '')); entry.dataset.id = a.id;
     entry.open = A.expanded === a.id;
     const summary = el('summary'); summary.dataset.focus = 'appt-' + a.id;
+    dragSource(summary, a);
     const time = el('span', 'agenda-time', clock(ts(a.start)) + '–' + clock(ts(a.end)));
     summary.append(time, el('strong', 'agenda-name', nameOf(a)), el('span', 'agenda-kind', kindOf(a) + (a.status === 'cancelled' ? ' · Cancelled' : '')), el('span', 'agenda-place', a.location || 'No location added'));
     summary.onclick = e => {
@@ -384,9 +386,59 @@ window.APPT = (() => {
     b.append(el('span', 'cal-ev-time', clock(ts(a.start))), el('span', 'cal-ev-name', nameOf(a)));
     b.setAttribute('aria-label', `${clock(ts(a.start))} ${nameOf(a)}, ${kindOf(a)}${cancelled ? ', cancelled' : ''}${failed ? ', not in Google Calendar' : ''}. Show details`);
     b.setAttribute('aria-controls', 'cal-day');
+    dragSource(b, a);
     b.onclick = (e) => { e.stopPropagation(); selectDay(dublinDate(ts(a.start)), a.id); };
     return b;
   }
+  // Desktop drag is a shortcut into the existing, version-checked reschedule form.
+  // There is no optimistic move or write until the user confirms the proposed date.
+  function dragSource(node, a) {
+    if (a.status === 'cancelled') return;
+    node.draggable = true; node.dataset.dragId = a.id;
+    node.title = 'Drag to another day to reschedule, or click for details';
+  }
+  function endDrag() {
+    A.drag = null;
+    for (const n of $('appts-cal').querySelectorAll('.cal-dragging, .cal-drop-target, .cal-drop-blocked')) n.classList.remove('cal-dragging', 'cal-drop-target', 'cal-drop-blocked');
+    if (A.stale && !A.menu) { A.stale = false; render(); }
+  }
+  function validDrop(k) { return k >= dublinDate(Date.now()) && k <= dublinDate(Date.now() + 730 * DAY); }
+  $('appts-cal').addEventListener('dragstart', e => {
+    const source = e.target.closest('[data-drag-id]');
+    if (!source) return;
+    const a = A.calList.find(a => a.id === source.dataset.dragId);
+    if (!window.matchMedia('(min-width: 900px) and (any-pointer: fine)').matches || !a || a.status === 'cancelled' || A.dlg || !e.dataTransfer) { e.preventDefault(); return; }
+    A.drag = a;
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', a.id);
+    source.classList.add('cal-dragging');
+  });
+  $('cal-grid').addEventListener('dragover', e => {
+    if (!A.drag) return;
+    const cell = e.target.closest('.cal-cell'); if (!cell) return;
+    for (const n of $('cal-grid').querySelectorAll('.cal-drop-target, .cal-drop-blocked')) n.classList.remove('cal-drop-target', 'cal-drop-blocked');
+    const allowed = validDrop(cell.dataset.day) && cell.dataset.day !== dublinDate(ts(A.drag.start));
+    cell.classList.add(allowed ? 'cal-drop-target' : 'cal-drop-blocked');
+    if (allowed) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+  });
+  $('cal-grid').addEventListener('dragleave', e => {
+    const cell = e.target.closest('.cal-cell');
+    if (cell && !cell.contains(e.relatedTarget)) cell.classList.remove('cal-drop-target', 'cal-drop-blocked');
+  });
+  $('cal-grid').addEventListener('drop', e => {
+    const a = A.drag, k = e.target.closest('.cal-cell')?.dataset.day;
+    if (!a) return; // external files/text cannot reschedule an appointment
+    e.preventDefault(); e.stopPropagation(); endDrag();
+    if (!k || !validDrop(k) || k === dublinDate(ts(a.start))) return;
+    const latest = A.calList.find(item => item.id === a.id);
+    if (!latest || latest.status === 'cancelled' || latest.version !== a.version) {
+      note('This appointment changed while you were dragging it. Check its details and try again.'); return;
+    }
+    openReschedule(a);
+    $('a-date').value = k;
+    $('appt-title').textContent = 'Reschedule appointment'; $('a-go').textContent = 'Confirm move';
+    $('a-move-from').hidden = false; $('a-move-from').textContent = 'Currently ' + longDay(dublinDate(ts(a.start))) + ' at ' + clock(ts(a.start)) + '. Review the new date below.';
+  });
+  document.addEventListener('dragend', endDrag);
   // ---------- row menu ----------
   function closeMenu(focusBack) {
     const m = A.menu; if (!m) return;
@@ -501,6 +553,7 @@ window.APPT = (() => {
   function setDateBounds() { $('a-date').min = dublinDate(Date.now()); $('a-date').max = dublinDate(Date.now() + 730 * DAY); }
   function openForm(title, who, go) {
     $('appt-title').textContent = title; $('appt-who').textContent = who;
+    $('a-move-from').hidden = true; $('a-move-from').textContent = '';
     $('a-go').textContent = go; $('a-go').disabled = false; $('a-cancel').disabled = false; $('a-err').textContent = '';
     setDateBounds(); showDialog($('appt-dlg')); $('a-date').focus();
   }
@@ -607,7 +660,7 @@ window.APPT = (() => {
       items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
     }
   });
-  window.addEventListener('resize', () => closeMenu());
+  window.addEventListener('resize', () => { endDrag(); closeMenu(); });
   $('appts-show-cancelled').addEventListener('change', (e) => { A.showCancelled = e.target.checked; render(); });
   $('appts-view').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b && b.dataset.view !== A.view) setMode(b.dataset.view); });
   $('cal-prev').onclick = () => goMonth(addMonths(A.month, -1));

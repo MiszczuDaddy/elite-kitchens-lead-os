@@ -541,6 +541,13 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .cal-grid { min-width: 0; }
 .cal-cell { cursor: pointer; min-height: 106px; }
 .cal-cell.sel { background: var(--selected); }
+.cal-cell.cal-drop-target { background: var(--selected); box-shadow: inset 0 0 0 2px var(--accent); }
+.cal-cell.cal-drop-blocked { cursor: not-allowed; }
+.cal-dragging { opacity: .5; }
+@media (min-width: 900px) and (any-pointer: fine) {
+  [data-drag-id] { cursor: grab; }
+  [data-drag-id]:active { cursor: grabbing; }
+}
 .cal-select { align-self: flex-start; display: grid; place-items: center; min-width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 13px; cursor: pointer; }
 .cal-cell.out .cal-select { color: var(--muted); }
 .cal-cell.today .cal-select { background: var(--accent); color: #fff; font-weight: 650; }
