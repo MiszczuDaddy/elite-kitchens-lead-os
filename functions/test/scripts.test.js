@@ -42,9 +42,37 @@ case "$sub" in
     exit 0 ;;
   "auth print-access-token "*) echo fake-token; exit 0 ;;
   "functions describe claimAccess") if [ -f "$FAKE_STATE/claim-updated" ]; then cat "$FAKE_STATE/claim-updated"; exit 0; fi; echo "ERROR: (gcloud.functions.describe) not found" >&2; exit 1 ;;
-  "run services describe") cat "$FAKE_STATE/claim-traffic.json" || exit 1; if [ -f "$FAKE_STATE/claim-traffic-after.json" ]; then cp "$FAKE_STATE/claim-traffic-after.json" "$FAKE_STATE/claim-traffic.json"; fi; exit 0 ;;
+  "run services describe")
+    # routing tests: $FAKE_STATE/svc-<svc>.json is that service's description; any other DEPLOYED service (but claimAccess) follows its newest revision and is ready
+    [ "$(mode)" = describefail ] && { echo "ERROR: (gcloud.run.services.describe) UNAVAILABLE: try again" >&2; exit 1; }
+    if [ -f "$FAKE_STATE/svc-$svc.json" ]; then cat "$FAKE_STATE/svc-$svc.json"; exit 0; fi
+    if [ "$svc" != claimaccess ]; then
+      [ -f "$FAKE_STATE/deployed/$svc" ] || { echo "ERROR: (gcloud.run.services.describe) Cannot find service [$svc]" >&2; exit 1; }
+      echo '{"spec":{"traffic":[{"latestRevision":true,"percent":100}]},"status":{"conditions":[{"type":"Ready","status":"True"}]}}'; exit 0
+    fi
+    cat "$FAKE_STATE/claim-traffic.json" || exit 1; if [ -f "$FAKE_STATE/claim-traffic-after.json" ]; then cp "$FAKE_STATE/claim-traffic-after.json" "$FAKE_STATE/claim-traffic.json"; fi; exit 0 ;;
+  "run revisions describe")
+    # the service behind a revision name is the name without "-NNNNN-xxx"; fail/<svc> = notready: that version cannot start; gone: its files are deleted
+    rev="$4"; owner="\${rev%-[0-9][0-9][0-9][0-9][0-9]-*}"; om=""; [ -f "$FAKE_STATE/fail/$owner" ] && om=$(cat "$FAKE_STATE/fail/$owner")
+    [ "$om" = gone ] && { echo "ERROR: (gcloud.run.revisions.describe) Cannot find revision [$rev]" >&2; exit 1; }
+    if [ "$om" = notready ]; then echo '{"status":{"conditions":[{"type":"Ready","status":"False","message":"Container import failed."}]}}'; else echo '{"status":{"conditions":[{"type":"Ready","status":"True"}]}}'; fi
+    exit 0 ;;
   "run services update-traffic")
-    [ "$(mode)" = notready ] && { echo "ERROR: (gcloud.run.services.update-traffic) Revision '$svc-00001-old' is not ready and cannot serve traffic. Container import failed." >&2; exit 1; }
+    # modes: notready = the saved version cannot start (the switch fails and leaves the routing pinned to it, like the real thing on 2026-10-11); pinfail = the same
+    # although the version looked ready; stuck = pinfail and the reset to the newest version fails too; failclean = the switch fails and changes nothing
+    m=$(mode); to=""; for a in "$@"; do case "$a" in --to-revisions=*) to="\${a#--to-revisions=}"; to="\${to%=100}" ;; esac; done
+    case " $* " in
+      *" --to-latest "*)
+        [ "$m" = stuck ] && { echo "ERROR: (gcloud.run.services.update-traffic) could not update the service" >&2; exit 1; }
+        echo '{"spec":{"traffic":[{"latestRevision":true,"percent":100}]},"status":{"conditions":[{"type":"Ready","status":"True"}]}}' > "$FAKE_STATE/svc-$svc.json"
+        echo "updated traffic $svc"; exit 0 ;;
+    esac
+    case "$m" in
+      notready|pinfail|stuck)
+        echo '{"spec":{"traffic":[{"revisionName":"REV","percent":100}]},"status":{"conditions":[{"type":"Ready","status":"False","message":"Revision REV is not ready and cannot serve traffic."}]}}' | sed "s/REV/\${to:-$svc-00001-old}/g" > "$FAKE_STATE/svc-$svc.json"
+        echo "ERROR: (gcloud.run.services.update-traffic) Revision '\${to:-$svc-00001-old}' is not ready and cannot serve traffic. Container import failed." >&2; exit 1 ;;
+      failclean) echo "ERROR: (gcloud.run.services.update-traffic) UNAVAILABLE: try again" >&2; exit 1 ;;
+    esac
     echo "updated traffic $svc"; exit 0 ;;
 esac
 echo "fake gcloud: unexpected command: $*" >&2; exit 2
@@ -92,8 +120,8 @@ beforeEach(() => {
 const deploy = (funcs, open = true) => { for (const f of funcs) { fs.writeFileSync(path.join(state, 'deployed', low(f)), ''); if (open) fs.writeFileSync(path.join(state, 'public', low(f)), ''); } };
 const failWith = (f, how) => fs.writeFileSync(path.join(state, 'fail', low(f)), how);
 const isPublic = (f) => fs.existsSync(path.join(state, 'public', low(f)));
-const run = (script, args = [], env = {}) => {
-  const r = spawnSync('bash', ['-c', 'gcloud() { bash "$TEST_BIN/gcloud" "$@"; }; curl() { bash "$TEST_BIN/curl" "$@"; }; export -f gcloud curl; exec bash "$@"', 'test', path.join(SCRIPTS, script), ...args], { encoding: 'utf8', timeout: 60000,
+const run = (script, args = [], env = {}, input = undefined) => {
+  const r = spawnSync('bash', ['-c', 'gcloud() { bash "$TEST_BIN/gcloud" "$@"; }; curl() { bash "$TEST_BIN/curl" "$@"; }; export -f gcloud curl; exec bash "$@"', 'test', path.isAbsolute(script) ? script : path.join(SCRIPTS, script), ...args], { encoding: 'utf8', timeout: 60000, input,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, FAKE_STATE: state, TEST_BIN: bin, HOME: home, USERPROFILE: home, ...env } });
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
 };
@@ -394,7 +422,7 @@ test('the deploy stages that change staff access run the check first, "older" in
 
 test('rules-back publishes the PREVIOUS rules, and leaves your checkout on the audit-fix rules both when it works and when the deploy fails', () => {
   const repo = path.join(tmp, 'repo'); fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
-  for (const f of ['deploy-quote-sending.sh', 'access-compat.sh', 'access-traffic.js', 'lib-run-iam.sh']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(repo, 'scripts', f));
+  for (const f of ['deploy-quote-sending.sh', 'access-compat.sh', 'access-traffic.js', 'lib-run-iam.sh', 'lib-routing.sh', 'routing-check.js']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(repo, 'scripts', f));
   const git = (...a) => spawnSync('git', ['-C', repo, '-c', 'core.autocrlf=false', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { encoding: 'utf8' });
   const put = (rules, code) => { fs.writeFileSync(path.join(repo, 'firestore.rules'), rules + '\n'); fs.writeFileSync(path.join(repo, 'storage.rules'), rules + ' // storage\n');
     fs.mkdirSync(path.join(repo, 'functions', 'lib'), { recursive: true }); fs.writeFileSync(path.join(repo, 'functions', 'lib', 'handlers.js'), code); };
@@ -455,4 +483,147 @@ test('final verification 7: traffic changing during verification is refused', ()
   obj.status.traffic[0].percent = 99; obj.status.traffic[1].percent = 1;
   fs.writeFileSync(path.join(state, 'claim-traffic-after.json'), JSON.stringify(obj));
   const r = compat('allow-rules'); assert.equal(r.code, 1, r.out); assert.match(r.out, /could not be checked/);
+});
+
+// ============================ 2026-10-11: a failed restore must never leave a function pinned to a version that cannot start ======================
+// The real rollout: every restore by revision failed ("Container import failed") and each failure left the service's traffic PINNED to that revision, so the next deploy of
+// all 21 functions failed with "Revision ... is not ready and cannot serve traffic". The rollback script now checks the version first and undoes a pin that fails;
+// the deploy stages refuse while anything is pinned; "routing fix" repairs it. The fake gcloud pins the routing the way the real one did (fail/<svc> = notready | pinfail | stuck).
+const routingLib = require(path.join(SCRIPTS, 'routing-check.js'));
+const svcJson = (name) => JSON.parse(fs.readFileSync(path.join(state, `svc-${name}.json`), 'utf8'));
+const pinnedTo = (name, revisionName, ready = false) => fs.writeFileSync(path.join(state, `svc-${low(name)}.json`), JSON.stringify({ spec: { traffic: [{ revisionName, percent: 100 }] },
+  status: { conditions: [{ type: 'Ready', status: ready ? 'True' : 'False', message: ready ? '' : `Revision '${revisionName}' is not ready and cannot serve traffic.` }] } }));
+const rollbackList = (...lines) => fs.writeFileSync(path.join(home, '.previous-revisions-phase61'), lines.join('\n') + '\n');
+const rollback = (args = []) => run('rollback-quote-sending.sh', args, { PREPARED_SENDS_CMD: 'echo none; exit 0' });
+const deployScript = (args, input) => run('deploy-quote-sending.sh', args, {}, input);
+
+test('the routing reader: pinned traffic is a PINNED finding (healthy or not), following the newest version is fine, a not-ready service alone is only a note', () => {
+  const f = routingLib.findings;
+  assert.deepEqual(f({ spec: { traffic: [{ latestRevision: true, percent: 100 }] }, status: { conditions: [{ type: 'Ready', status: 'True' }] } }), []);
+  assert.deepEqual(f({}), [], 'nothing known about the service is not a pin');
+  assert.deepEqual(f({ spec: { traffic: [{ revisionName: 'a-00004-gik', percent: 100 }] }, status: { conditions: [{ type: 'Ready', status: 'False' }] } }).filter((l) => l.startsWith('PINNED')), ['PINNED a-00004-gik 100%']);
+  assert.deepEqual(f({ spec: { traffic: [{ revisionName: 'a-00002-ok', percent: 100 }] }, status: { conditions: [{ type: 'Ready', status: 'True' }] } }), ['PINNED a-00002-ok 100%'], 'a pin on a HEALTHY old version blocks too: a deploy would never be served');
+  assert.deepEqual(f({ spec: { traffic: [{ latestRevision: true, percent: 100 }, { revisionName: 'a-00001-x', percent: 0, tag: 'canary' }] } }), [], 'a tagged revision with no traffic is not a pin');
+  assert.deepEqual(f({ spec: { traffic: [{ latestRevision: true, percent: 90 }, { revisionName: 'a-00001-x', percent: 10 }] } }), ['PINNED a-00001-x 10%'], 'a traffic split that sends any share to a named version is a pin');
+  const note = f({ spec: { traffic: [{ latestRevision: true, percent: 100 }] }, status: { conditions: [{ type: 'Ready', status: 'False', message: 'the last deploy failed' }] } });
+  assert.equal(note.length, 1); assert.match(note[0], /^NOTE .*not ready.*the last deploy failed/); assert.equal(routingLib.blocks(note), false, 'a failed latest deploy is fixed by deploying again: it must not block');
+  assert.equal(routingLib.blocks(['PINNED a-00001-x 100%']), true);
+  assert.equal(routingLib.revisionReady({ status: { conditions: [{ type: 'Ready', status: 'True' }] } }), true);
+  for (const bad of [{}, null, { status: {} }, { status: { conditions: [{ type: 'Ready', status: 'False' }] } }, { status: { conditions: [{ type: 'Ready', status: 'Unknown' }] } }, { status: { conditions: [{ type: 'Active', status: 'True' }] } }]) assert.equal(routingLib.revisionReady(bad), false, JSON.stringify(bad));
+  const cli = (input, ...args) => spawnSync('node', [path.join(SCRIPTS, 'routing-check.js'), ...args], { input, encoding: 'utf8' });
+  assert.equal(cli('not json').status, 2); assert.equal(cli('[]').status, 2); assert.equal(cli('{"spec":{"traffic":[{"revisionName":"x-00001-a","percent":100}]}}').status, 1);
+  assert.equal(cli('{"status":{"conditions":[{"type":"Ready","status":"True"}]}}', '--revision-ready').status, 0); assert.equal(cli('{}', '--revision-ready').status, 1); assert.equal(cli('nope', '--revision-ready').status, 2);
+});
+
+test('rollback: a saved version that is not Ready is never switched to, so nothing is pinned (the routing is left alone)', () => {
+  deploy(['sendQuote', 'createQuote'], false);
+  rollbackList('sendquote=sendquote-00001-abc', 'createquote=createquote-00001-def');
+  failWith('sendQuote', 'notready');                                    // its files are gone: the version cannot start
+  const r = rollback();
+  assert.notEqual(r.code, 0, r.out); assert.match(r.out, /NOT RESTORED: sendquote/); assert.match(r.out, /skipped sendquote.*left alone/);
+  assert.ok(!/update-traffic sendquote/.test(callsLog()), 'a version that cannot start must not even be asked for:\n' + callsLog());
+  assert.match(callsLog(), /update-traffic createquote/); assert.match(r.out, /restored createquote/);
+  assert.equal(fs.existsSync(path.join(state, 'svc-sendquote.json')), false, 'its routing must be untouched');
+  failWith('sendQuote', 'gone');                                        // Google no longer knows the version at all
+  const gone = rollback(); assert.notEqual(gone.code, 0, gone.out); assert.match(gone.out, /NOT RESTORED: sendquote/); assert.ok(!/update-traffic sendquote/.test(callsLog()));
+});
+
+test('rollback: when the switch fails although the version looked ready, the pin it left is undone at once and the user is told', () => {
+  deploy(['sendQuote', 'createQuote'], false);
+  rollbackList('sendquote=sendquote-00001-abc', 'createquote=createquote-00001-def');
+  failWith('sendQuote', 'pinfail');
+  const r = rollback();
+  assert.notEqual(r.code, 0, 'a failed restore is still a failure:\n' + r.out); assert.match(r.out, /NOT RESTORED: sendquote/); assert.ok(!/NOT RESTORED:.*createquote/.test(r.out), r.out);
+  assert.match(callsLog(), /update-traffic sendquote .*--to-revisions=sendquote-00001-abc=100/, 'it did try the switch');
+  assert.match(callsLog(), /update-traffic sendquote .*--to-latest/, 'and undid the pin it left behind');
+  assert.match(r.out, /sendquote: the failed switch had pinned the routing to sendquote-00001-abc; it is back on the newest version/);
+  assert.deepEqual(routingLib.findings(svcJson('sendquote')), [], 'the service must follow its newest version again');
+  assert.ok(!/STUCK/.test(r.out), r.out);
+  assert.ok(!/update-traffic createquote .*--to-latest/.test(callsLog()), 'a service that was restored is not touched again');
+  assert.match(r.out, /restored createquote/); assert.match(r.out, /pinned to it:.*createquote/, 'the restored one is pinned on purpose and the note says so');
+});
+
+test('rollback: when even the reset fails the user is warned loudly, told the exact stage that fixes it, and the exit is a failure', () => {
+  deploy(['sendQuote'], false);
+  rollbackList('sendquote=sendquote-00001-abc');
+  failWith('sendQuote', 'stuck');
+  const r = rollback();
+  assert.notEqual(r.code, 0, r.out); assert.match(r.out, /WARNING - STUCK ROUTING: sendquote/); assert.match(r.out, /next deploy of them FAILS/); assert.match(r.out, /deploy-quote-sending\.sh routing fix/);
+  assert.match(r.out, /could NOT be put back/);
+});
+
+test('rollback: a switch that fails WITHOUT pinning anything does not trigger a reset (only a pin on the version it tried is undone)', () => {
+  deploy(['sendQuote'], false);
+  rollbackList('sendquote=sendquote-00001-abc');
+  failWith('sendQuote', 'failclean');
+  const r = rollback(); assert.notEqual(r.code, 0, r.out); assert.match(r.out, /NOT RESTORED: sendquote/);
+  assert.ok(!/--to-latest/.test(callsLog()), 'nothing was pinned, so nothing may be changed:\n' + callsLog());
+  deploy(['createQuote'], false); rollbackList('createquote=createquote-00001-def'); pinnedTo('createQuote', 'createquote-00007-keep', true); failWith('createQuote', 'failclean');
+  const other = rollback(); assert.notEqual(other.code, 0, other.out);
+  assert.ok(!/--to-latest/.test(callsLog()), 'a pin on some OTHER version is somebody\'s choice and must be left alone');
+});
+
+test('deploy stages refuse while a function is pinned: they name it, change nothing, and point to "routing fix"; the read-only "routing" stage reports the same', () => {
+  const funcs = [...NEW_FUNCS, ...QUOTE_FUNCS, 'sendReply', 'sendMedia', 'startConversation', 'claimAccess', 'leadIntake']; deploy(funcs, false); claimCode('new');
+  pinnedTo('createCustomer', 'createcustomer-00004-gik');
+  const report = deployScript(['routing']);
+  assert.notEqual(report.code, 0, report.out); assert.match(report.out, /createCustomer: PINNED - PINNED createcustomer-00004-gik 100%/); assert.match(report.out, /routing fix/);
+  assert.match(report.out, /Nothing was changed/); assert.ok(!/createCustomer: ok/.test(report.out));
+  for (const f of funcs.filter((x) => x !== 'createCustomer')) assert.ok(!new RegExp(f + ': PINNED').test(report.out), f + ' wrongly reported');
+  assert.ok(!/update-traffic/.test(callsLog()), 'the report must not change anything');
+  fs.rmSync(path.join(state, 'svc-createcustomer.json'));
+  const fine = deployScript(['routing']); assert.equal(fine.code, 0, fine.out); assert.match(fine.out, /routing: ok/);
+  // a function that is not deployed yet is fine; one that cannot be read stops the check (it is not guessed)
+  fs.rmSync(path.join(state, 'deployed', 'deliverquote')); const fresh = deployScript(['routing']); assert.equal(fresh.code, 0, fresh.out); assert.match(fresh.out, /deliverQuote: not deployed yet/);
+  failWith('sendQuote', 'describefail'); const unread = deployScript(['routing']);
+  assert.notEqual(unread.code, 0, unread.out); assert.match(unread.out, /sendQuote: could not be checked/); assert.match(unread.out, /could not check the routing of: sendQuote/);
+});
+
+test('"routing fix": asks first, then sends only the pinned functions back to their newest version, and checks it worked', () => {
+  const funcs = [...NEW_FUNCS, ...QUOTE_FUNCS, 'sendReply', 'sendMedia', 'startConversation', 'claimAccess', 'leadIntake']; deploy(funcs, false); claimCode('new');
+  pinnedTo('createCustomer', 'createcustomer-00004-gik'); pinnedTo('sendQuote', 'sendquote-00003-ok', true);
+  const no = deployScript(['routing', 'fix'], 'no\n');
+  assert.notEqual(no.code, 0, no.out); assert.match(no.out, /createCustomer: PINNED/); assert.match(no.out, /sendQuote: PINNED/); assert.ok(!/update-traffic/.test(callsLog()), 'nothing may change unless the answer is yes');
+  const yes = deployScript(['routing', 'fix'], 'yes\n');
+  assert.equal(yes.code, 0, yes.out); assert.match(yes.out, /createCustomer: following the newest version/); assert.match(yes.out, /sendQuote: following the newest version/);
+  const calls = callsLog().split('\n').filter((l) => /update-traffic/.test(l));
+  assert.deepEqual(calls.map((l) => l.match(/update-traffic (\w+)/)[1]).sort(), ['createcustomer', 'sendquote'], 'only the pinned ones are touched:\n' + calls.join('\n'));
+  for (const l of calls) { assert.match(l, /--to-latest/); assert.ok(!/--to-revisions/.test(l), l); }
+  assert.deepEqual(routingLib.findings(svcJson('createcustomer')), []); assert.equal(deployScript(['routing']).code, 0);
+  const nothing = deployScript(['routing', 'fix'], 'yes\n'); assert.equal(nothing.code, 0, nothing.out); assert.match(nothing.out, /Nothing is pinned/);
+  pinnedTo('leadIntake', 'leadintake-00002-abc'); failWith('leadIntake', 'stuck');                                   // the reset itself fails: a failure, named
+  const stuck = deployScript(['routing', 'fix'], 'yes\n'); assert.notEqual(stuck.code, 0, stuck.out); assert.match(stuck.out, /leadIntake: NOT fixed/); assert.match(stuck.out, /NOT FIXED: leadIntake/);
+  const bad = deployScript(['routing', 'nonsense']); assert.notEqual(bad.code, 0); assert.match(bad.out, /routing /);
+});
+
+test('every stage that deploys functions runs the routing check BEFORE it asks for confirmation (backend, channels, older, mail on, mail off); the read-only stages and rules do not need it', () => {
+  const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const stage = (name) => { const i = s.indexOf(`\n  ${name})\n`); assert.ok(i >= 0, name + ' stage not found'); return s.slice(i, s.indexOf('\n    ;;', i)); };
+  const before = (text, label) => { const a = text.indexOf('check_routing'), b = text.indexOf('confirm "'); assert.ok(a >= 0, label + ': no routing check'); assert.ok(b >= 0 && a < b, label + ': the routing check must come before the question'); };
+  before(stage('backend'), 'backend'); assert.match(stage('backend'), /check_routing \$BACKEND_FUNCS/);
+  before(stage('channels'), 'channels'); assert.match(stage('channels'), /check_routing \$CHANNEL_FUNCS/);
+  before(stage('older'), 'older'); assert.match(stage('older'), /check_routing \$OLDER_FUNCS/);
+  const mail = stage('mail'), [on, off] = mail.split('      off)\n'); assert.ok(off, 'mail off not found');
+  before(on, 'mail on'); before(off, 'mail off'); assert.match(on, /check_routing \$MAIL_FUNCS/); assert.match(off, /check_routing \$MAIL_FUNCS/);
+  assert.ok(!/check_routing/.test(stage('rules')) && !/check_routing/.test(stage('live')), 'stages that deploy no functions do not need it');
+  assert.match(s, /^usage\(\) \{ sed -n '2,33p'/m); assert.match(s.split('\n').slice(0, 33).join('\n'), /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+});
+
+test('the "mail off" stage stops on a pinned function before it asks anything, and asks as usual when nothing is pinned', () => {
+  const funcs = [...NEW_FUNCS, ...QUOTE_FUNCS, 'sendReply', 'sendMedia', 'startConversation', 'claimAccess', 'leadIntake']; deploy(funcs, false); claimCode('new');
+  const repo = path.join(tmp, 'repo-mail'); fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true }); fs.mkdirSync(path.join(repo, 'functions'));
+  for (const f of ['deploy-quote-sending.sh', 'access-compat.sh', 'access-traffic.js', 'lib-run-iam.sh', 'lib-routing.sh', 'routing-check.js']) fs.copyFileSync(path.join(SCRIPTS, f), path.join(repo, 'scripts', f));
+  const envFile = path.join(repo, 'functions', '.env.elite-kitchens-lead-os'); fs.writeFileSync(envFile, 'MAIL_SEND=on\n');
+  const git = (...a) => spawnSync('git', ['-C', repo, '-c', 'core.autocrlf=false', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { encoding: 'utf8' });
+  git('init', '-q'); git('add', '-A'); git('commit', '-q', '-m', 'x');
+  const mailOff = (input) => run(path.join(repo, 'scripts', 'deploy-quote-sending.sh'), ['mail', 'off'], {}, input);
+  pinnedTo('quoteChannels', 'quotechannels-00002-bad');
+  const pinned = mailOff('yes\n');
+  assert.notEqual(pinned.code, 0, pinned.out); assert.match(pinned.out, /Refusing to deploy: the traffic of these functions is pinned.*: quoteChannels/);
+  assert.ok(!/Type yes/.test(pinned.out) && !/Cancelled/.test(pinned.out), 'it must stop BEFORE asking:\n' + pinned.out);
+  assert.equal(fs.readFileSync(envFile, 'utf8'), 'MAIL_SEND=on\n', 'the settings file must not be changed');
+  fs.rmSync(path.join(state, 'svc-quotechannels.json'));
+  const fine = mailOff('no\n');
+  assert.notEqual(fine.code, 0, fine.out); assert.match(fine.out, /routing: ok/); assert.match(fine.out, /Cancelled\. Nothing was deployed/);
+  assert.equal(fs.readFileSync(envFile, 'utf8'), 'MAIL_SEND=on\n');
 });

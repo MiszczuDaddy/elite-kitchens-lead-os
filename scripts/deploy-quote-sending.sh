@@ -22,6 +22,9 @@
 #                                                and the Workspace approval first.
 #   ./scripts/deploy-quote-sending.sh mail off   the kill switch: email sending off again.
 #   ./scripts/deploy-quote-sending.sh live       the new screen on production Hosting. ONLY after the owner approved the preview.
+#   ./scripts/deploy-quote-sending.sh routing    read-only: is any function's traffic PINNED to one old version (a failed restore does that)? Every stage that deploys
+#                                                functions runs this check first and refuses while one is pinned (2026-10-11: it made 21 deploys fail).
+#   ./scripts/deploy-quote-sending.sh routing fix   send the traffic of the pinned functions back to their newest version (routing only; no code changes).
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
@@ -50,8 +53,9 @@ BACKEND_FUNCS="$NEW_FUNCS $QUOTE_FUNCS"
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
 cd "$(dirname "$0")/.."
+. ./scripts/lib-routing.sh
 
-usage() { sed -n '2,30p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,33p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -149,6 +153,28 @@ check_reachable() {
   echo "   Stop here and report it. The live screen is unaffected. To go back see docs/PHASE6_1_PLAN.md, \"Rollback\"."
   exit 1
 }
+# check_routing FUNCTION...: refuse to deploy while a function's traffic is pinned to one old version (a deploy then fails, or succeeds without ever being served).
+# Read-only. A function that is not deployed yet is fine; one that cannot be read stops the stage (the check is not guessed).
+check_routing() {
+  echo "==> checking that each function's traffic follows its newest version (a failed restore can leave it pinned)"
+  local f out rc pinned="" unread=""
+  for f in "$@"; do
+    rc=0; out=$(routing_check "$(svc "$f")") || rc=$?
+    case "$rc" in
+      0) [ -z "$out" ] || echo "   $f: ok ($(echo "$out" | head -n 1))" ;;
+      2) echo "   $f: not deployed yet" ;;
+      1) echo "   $f: PINNED - $(echo "$out" | grep '^PINNED' | head -n 1)"; pinned="$pinned $f" ;;
+      *) echo "   $f: could not be checked - $out"; unread="$unread $f" ;;
+    esac
+  done
+  [ -z "$pinned$unread" ] || {
+    [ -z "$pinned" ] || { echo "Refusing to deploy: the traffic of these functions is pinned to one old version, so a new version would not be served (or the deploy would fail with \"is not ready\"):$pinned"
+      echo "Nothing was changed. Fix it first: $0 routing fix   (it only sends the traffic back to the newest version), then run this stage again."; }
+    [ -z "$unread" ] || echo "Refusing to deploy: could not check the routing of:$unread. Nothing was changed. Run this stage again; if it repeats, report the message above."
+    exit 1
+  }
+  echo "   routing: ok"
+}
 show_deployed() {
   echo "==> what is deployed now"
   local f rev
@@ -166,7 +192,7 @@ case "${1:-}" in
     echo "Nothing was changed."
     ;;
   backend)
-    check_settings; check_access
+    check_settings; check_access; check_routing $BACKEND_FUNCS
     echo "Functions: $BACKEND_FUNCS"
     confirm "Deploy the Phase 6.1 backend to the LIVE project? Email stays as it is (see the MAIL_SEND line above)."
     install
@@ -182,7 +208,7 @@ case "${1:-}" in
     echo "Done. The live screen is unchanged (it does not call the new functions). To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;
   channels)
-    check_settings; check_access
+    check_settings; check_access; check_routing $CHANNEL_FUNCS
     echo "Functions: $CHANNEL_FUNCS"
     confirm "Redeploy the 3 sending functions to the LIVE project (M7: closed-window quotes go in the approved quotation template)? Email stays as it is."
     install
@@ -193,7 +219,7 @@ case "${1:-}" in
     echo "Done. The live screen is unchanged. To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;
   older)
-    check_settings; check_access
+    check_settings; check_access; check_routing $OLDER_FUNCS
     echo "Functions: $OLDER_FUNCS"
     echo "These are LIVE functions from earlier phases: staff replies and files, starting a conversation, the staff sign-in check, and the Meta lead form intake."
     bash ./scripts/access-compat.sh allow-code || exit 1                                  # never deploy a claimAccess that the live security rules would refuse (second audit, finding 7)
@@ -253,6 +279,7 @@ case "${1:-}" in
       on)
         [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
         ./scripts/setup-mailer.sh --check >/dev/null || { echo "The one-time email setup is not finished: run ./scripts/setup-mailer.sh and do the Workspace approval first."; exit 1; }
+        check_routing $MAIL_FUNCS
         echo "Email will be sent as $MAIL_SENDER_DEFAULT through $MAIL_SA (send-only)."
         confirm "Switch email sending ON for the live functions?"
         setting "$ENVF" MAIL_SEND on; setting "$ENVF" MAIL_SENDER "$MAIL_SENDER_DEFAULT"; setting "$ENVF" MAIL_SERVICE_ACCOUNT "$MAIL_SA"
@@ -261,6 +288,7 @@ case "${1:-}" in
         ;;
       off)
         [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
+        check_routing $MAIL_FUNCS
         confirm "Switch email sending OFF for the live functions?"
         setting "$ENVF" MAIL_SEND off
         install; save_revisions $MAIL_FUNCS; deploy_functions $MAIL_FUNCS
@@ -276,6 +304,38 @@ case "${1:-}" in
     confirm "Publish the Phase 6.1 screen to PRODUCTION Hosting? Only with the owner's approval."
     firebase deploy --project "$PROJECT" --only hosting
     echo "Done. Reload Elite OS. Undo: Firebase console > Hosting > Release history > Rollback."
+    ;;
+  routing)
+    case "${2:-}" in
+      "")
+        check_routing $BACKEND_FUNCS $OLDER_FUNCS
+        echo "Nothing was changed."
+        ;;
+      fix)
+        pinned=""; unread=""
+        echo "==> looking for functions whose traffic is pinned to one old version"
+        for f in $BACKEND_FUNCS $OLDER_FUNCS; do
+          rc=0; out=$(routing_check "$(svc "$f")") || rc=$?
+          case "$rc" in
+            1) echo "   $f: PINNED - $(echo "$out" | grep '^PINNED' | head -n 1)"; pinned="$pinned $f" ;;
+            0|2) ;;
+            *) echo "   $f: could not be checked - $out"; unread="$unread $f" ;;
+          esac
+        done
+        [ -z "$unread" ] || { echo "Could not check:$unread. Nothing was changed. Run this again."; exit 1; }
+        [ -n "$pinned" ] || { echo "Nothing is pinned. Nothing was changed."; exit 0; }
+        echo "This sends the traffic of these functions back to their NEWEST version. It changes only where requests go (no code, no settings, no data):$pinned"
+        echo "If you put one of them back to an old version ON PURPOSE (a restore by revision), this ends that: it runs the newest version again."
+        confirm "Send the traffic of these functions back to their newest version?"
+        failed=""
+        for f in $pinned; do
+          if routing_reset "$(svc "$f")"; then echo "   $f: following the newest version"; else echo "   $f: NOT fixed"; failed="$failed $f"; fi
+        done
+        [ -z "$failed" ] || { echo "NOT FIXED:$failed. Report the messages above; nothing else was changed."; exit 1; }
+        echo "Done. The traffic of these functions follows their newest version again."
+        ;;
+      *) usage ;;
+    esac
     ;;
   *) usage ;;
 esac

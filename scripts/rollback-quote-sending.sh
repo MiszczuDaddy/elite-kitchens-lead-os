@@ -15,6 +15,8 @@
 # Restoring older versions is REFUSED while a quote send is in progress (a quote whose PDF was prepared and whose draft is locked, with
 # nothing delivered yet): the older quote functions do not know about that lock, so the draft would stay locked. Finish or cancel such
 # sends first (the quote page shows a "send in progress" box), or use --ignore-prepared if you accept that.
+# A saved version is used only if Cloud Run says it is still Ready; if it is not, or the switch fails anyway, the service's routing is left on (or put back to)
+# its newest version, so a failed restore can never block the next deploy (the 2026-10-11 lesson, docs/PHASE6_1_PLAN.md).
 # Not done here (docs/PHASE6_1_PLAN.md, Rollback):
 #   - the screen: Firebase console > Hosting > Release history > Rollback (or redeploy tag phase-6-quotes-complete)
 #   - the 7 new functions did not exist before Phase 6.1, so their first revision has nothing older to go back to; --close shuts them.
@@ -75,15 +77,43 @@ F="$HOME/.previous-revisions-phase61"; [ "$ORIG" = 1 ] && F="$HOME/.previous-rev
 [ -s "$F" ] || { echo "No saved revisions ($F). Nothing to roll back to."; exit 1; }
 # Putting an OLDER claimAccess back gives staff access without an expiry: with the new security rules live that locks everyone out of the screen (second audit, finding 7).
 if grep -q '^claimaccess=' "$F"; then bash "$HERE/access-compat.sh" allow-legacy-code || exit 1; fi
-bad=""
+. "$HERE/lib-routing.sh"
+# A restore that FAILS must not leave the service pinned to the version it could not start (2026-10-11: that blocked every later deploy of 21 functions with
+# "Revision ... is not ready and cannot serve traffic"). So: (1) a saved version is only used if Cloud Run says it is Ready, otherwise the routing is not touched at all;
+# (2) if the switch fails anyway, the routing is checked and, when it is stuck on that version, sent back to the newest one.
+bad=""; stuck=""; put_back=""
 while IFS='=' read -r s rev; do
   [ -n "$s" ] && [ -n "$rev" ] || continue
-  if gcloud run services update-traffic "$s" --region "$REGION" --project "$PROJECT" --to-revisions="$rev=100" --quiet </dev/null >/dev/null; then echo "restored $s -> $rev"; else bad="$bad $s"; fi
+  if ! revision_ready "$rev"; then
+    echo "skipped $s: the saved version $rev is gone or cannot start (Google deleted its files), so its routing was left alone"
+    bad="$bad $s"; continue
+  fi
+  if gcloud run services update-traffic "$s" --region "$REGION" --project "$PROJECT" --to-revisions="$rev=100" --quiet </dev/null >/dev/null; then echo "restored $s -> $rev"; put_back="$put_back $s"; continue; fi
+  bad="$bad $s"
+  seen=$(routing_check "$s" || true)                                         # the failed switch may have pinned the traffic to $rev
+  case "$seen" in
+    *"PINNED $rev "*)
+      if routing_reset "$s"; then echo "   $s: the failed switch had pinned the routing to $rev; it is back on the newest version"
+      else echo "   $s: the failed switch pinned the routing to $rev and it could NOT be put back"; stuck="$stuck $s"; fi ;;
+  esac
 done < "$F"
+if [ -n "$put_back" ]; then
+  echo
+  echo "Note: these functions now run an OLD version and are pinned to it:$put_back"
+  echo "Before the next deploy of any of them, send the traffic back to the newest version: ./scripts/deploy-quote-sending.sh routing fix (the deploy stages check this and refuse until it is done)."
+fi
 if [ -n "$bad" ]; then
   echo
   echo "NOT RESTORED:$bad"
-  echo "Those functions still run what they ran before: nothing was changed for them. Google keeps an old version's files only for a short time (about a day), so going back by revision often fails with \"Container import failed\"."
+  if [ -n "$stuck" ]; then
+    echo "WARNING - STUCK ROUTING:$stuck"
+    echo "These functions are pinned to a version that cannot start. They keep serving their last working version, but the next deploy of them FAILS until this is fixed."
+    echo "Fix it with: ./scripts/deploy-quote-sending.sh routing fix   (it only sends the traffic back to the newest version)"
+    echo "The functions not named above still run what they ran before."
+  else
+    echo "Those functions still run what they ran before; their routing is as it was."
+  fi
+  echo "Google keeps an old version's files only for a short time (about a day), so going back by revision often fails with \"Container import failed\"."
   echo "The dependable way back is to redeploy the previous code from git: docs/PHASE6_1_PLAN.md, \"Rollback\"."
   exit 1
 fi
