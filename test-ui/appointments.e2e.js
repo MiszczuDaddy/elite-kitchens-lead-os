@@ -8,6 +8,8 @@ const { initializeApp } = fnRequire('firebase-admin/app');
 const { getAuth } = fnRequire('firebase-admin/auth');
 const { getFirestore, Timestamp } = fnRequire('firebase-admin/firestore');
 const ROOT = path.join(__dirname, '..');
+assert.ok(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST, 'Demo emulators required');
+let previewToken = null;
 const SHOTS = process.env.SHOTS_DIR || path.join(__dirname, 'shots'); fs.mkdirSync(SHOTS, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let n = 0; const ok = (m) => console.log(`  PASS ${++n}. ${m}`);
@@ -18,12 +20,15 @@ firebase.app().functions('europe-west1').useEmulator('127.0.0.1',5001);
 firebase.storage().useEmulator('127.0.0.1',9199);`;
 const web = http.createServer((req, res) => {
   const u = req.url.split('?')[0]; let f;
-  if (u === '/__/firebase/init.js') { res.setHeader('content-type', 'text/javascript'); return res.end(cfgJs); }
+  if (previewToken && u === '/__stop-preview' && req.method === 'POST' && req.headers['x-elite-preview'] === 'stop') {
+    res.end('Preview stopped'); setTimeout(() => process.exit(0), 100); return;
+  }
+  if (u === '/__/firebase/init.js') { res.setHeader('content-type', 'text/javascript'); return res.end(cfgJs + (previewToken ? `\nfirebase.auth().signInWithCustomToken(${JSON.stringify(previewToken)});` : '')); }
   const m = /^\/__\/firebase\/[\d.]+\/(.+)$/.exec(u);
   f = m ? path.join(ROOT, 'node_modules/firebase', m[1]) : path.join(ROOT, 'public', u === '/' ? 'index.html' : u);
   fs.readFile(f, (e, d) => { if (e) { res.statusCode = 404; return res.end('nf'); }
     res.setHeader('content-type', { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html' }[path.extname(f)] || 'application/octet-stream'); res.end(d); });
-}).listen(5055);
+}).listen(5055, '127.0.0.1');
 
 // A fake Google Calendar (the functions emulator is pointed at it by GCAL_API_BASE in test-ui/run.sh).
 const cal = { events: new Map(), down: false };
@@ -164,7 +169,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await page.locator('.cal-cell.today').count(), 1);
   assert.equal(await page.locator('.cal-cell.today').getAttribute('data-day'), TODAY);
   assert.equal(await page.locator('.cal-cell.today').getAttribute('aria-current'), 'date');
-  assert.equal(await page.isDisabled('#cal-today'), true);
+  assert.equal(await page.isDisabled('#cal-today'), false);
   await showDay(page, D1);
   const d1 = page.locator(`.cal-cell[data-day="${D1}"]`);
   await d1.locator('.cal-ev').nth(1).waitFor();
@@ -178,22 +183,22 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   ok('Calendar is the default on desktop: a Monday-first month with today highlighted; each appointment sits in its day with time, name and a subtle stage colour');
 
   await d1.locator(`.cal-ev[data-phone="${ph.lead}"]`).click();
-  await page.waitForSelector('.appt-pop');
-  assert.match(await page.locator('.appt-pop').innerText(), /Lena Lead[\s\S]*Booked[\s\S]*Tomorrow, 10:30–11:30[\s\S]*Consultation · 12 Main St, Swords[\s\S]*In Google Calendar/);
-  assert.deepEqual(await page.locator('.appt-pop .pop-actions button').allInnerTexts(), ['Open customer', 'Reschedule', 'Cancel']);
+  await page.waitForSelector('.agenda-entry[open]');
+  assert.match(await page.locator('.agenda-entry[open]').innerText(), /10:30–11:30[\s\S]*Lena Lead[\s\S]*Consultation[\s\S]*12 Main St, Swords[\s\S]*Dog in the garden[\s\S]*In Google Calendar/);
+  assert.deepEqual(await page.locator('.agenda-entry[open] .agenda-actions button').allInnerTexts(), ['Edit appointment', 'Reschedule', 'Open customer', 'Cancel appointment']);
   await page.screenshot({ path: path.join(SHOTS, 'appointments-calendar-card.png') });
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.appt-pop').count(), 0);
+  await page.locator('.agenda-entry[open] summary').click();
+  assert.equal(await page.locator('.agenda-entry[open]').count(), 0);
   await showDay(page, D2);
   await page.locator(`.cal-cell[data-day="${D2}"] .cal-ev[data-phone="${ph.closed}"]`).click();
-  await page.click('.appt-pop button:has-text("Reschedule")');
+  await page.click('.agenda-entry[open] button:has-text("Reschedule")');
   await page.waitForSelector('#appt-dlg[open]');
   assert.equal(await page.inputValue('#a-time'), '09:00');
   await page.selectOption('#a-time', '09:30'); await page.click('#a-go');
   await page.waitForFunction((k) => /09:30\s+Cathal Closed/.test((document.querySelector(`.cal-cell[data-day="${k}"] .cal-ev`) || {}).innerText || ''), D2);
-  await toastSays(/Moved to/);
-  assert.match(await page.textContent('#appts-toast'), /Moved to .* at 09:30\. Google Calendar updated\./);
-  ok('clicking an appointment opens a card with its details and Open customer / Reschedule / Cancel; Reschedule from the card moves it in the calendar');
+  await toastSays(/Rescheduled for/);
+  assert.match(await page.textContent('#appts-toast'), /Rescheduled for .* at 09:30\. Google Calendar updated\./);
+  ok('clicking an appointment opens agenda details and actions; Reschedule from the agenda moves it in the calendar');
 
   const D5 = dublin(Date.now() + 5 * DAY), [y5, m5, dd5] = D5.split('-').map(Number);
   for (let i = 0; i < 4; i++) {                       // a busy day, written straight to the database for this check and removed after it
@@ -205,11 +210,9 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await d5.locator('.cal-more').waitFor();
   assert.equal(await d5.locator('.cal-ev').count(), 3); assert.equal(await d5.locator('.cal-more').innerText(), '+1 more');
   await d5.locator('.cal-more').click();
-  await page.waitForSelector('.day-pop');
-  assert.equal(await page.locator('.day-pop .cal-ev').count(), 4);
-  await page.locator('.day-pop .cal-ev').nth(3).click();
-  await page.waitForSelector('.appt-pop:not(.day-pop)');
-  assert.match(await page.locator('.appt-pop').innerText(), /Busy 4/);
+  assert.equal(await page.locator('.agenda-entry').count(), 4);
+  await page.locator('.agenda-entry summary').nth(3).click();
+  assert.match(await page.locator('.agenda-entry[open]').innerText(), /Busy 4/);
   await page.keyboard.press('Escape');
   for (let i = 0; i < 4; i++) await db.doc('appointments/e2e-busy-' + i).delete();
   await page.waitForFunction((k) => !document.querySelector(`.cal-cell[data-day="${k}"] .cal-more`), D5);
@@ -256,13 +259,13 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await row(ph.lead).hover(); await row(ph.lead).locator('.arow-menu').click();
   await page.click('.appt-menu button:has-text("Reschedule")');
   await page.waitForSelector('#appt-dlg[open]');
-  assert.equal(await page.textContent('#appt-title'), 'Reschedule appointment');
+  assert.equal(await page.textContent('#appt-title'), 'Edit appointment');
   assert.equal(await page.inputValue('#a-time'), '10:30'); assert.equal(await page.inputValue('#a-notes'), 'Dog in the garden');
   await page.selectOption('#a-time', '14:00');
   await page.click('#a-go');
   await page.waitForFunction((p) => /^14:00/.test((document.querySelector(`.arow[data-phone="${p}"] .arow-time`) || {}).textContent || ''), ph.lead);
-  await toastSays(/Moved to/);                         // the row moves as soon as the save lands; the message follows once Google is updated
-  assert.match(await page.textContent('#appts-toast'), /Moved to tomorrow at 14:00\. Google Calendar updated\./);
+  await toastSays(/Rescheduled for/);                         // the row moves as soon as the save lands; the message follows once Google is updated
+  assert.match(await page.textContent('#appts-toast'), /Rescheduled for tomorrow at 14:00\. Google Calendar updated\./);
   const [moved] = await apptsOf(ph.lead);
   assert.equal(moved.version, 2); assert.equal(moved.rescheduleCount, 1);
   assert.equal(evFor(ph.lead).length, 1); assert.equal(Date.parse(evFor(ph.lead)[0].start.dateTime), moved.start.toMillis());
@@ -298,9 +301,9 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await gone2.waitFor();
   assert.match(await gone2.getAttribute('class'), /\bcancelled\b/);
   await gone2.click();
-  await page.waitForSelector('.appt-pop');
-  assert.match(await page.locator('.appt-pop').innerText(), /Cancelled[\s\S]*Removed from Google Calendar/);
-  assert.deepEqual(await page.locator('.appt-pop .pop-actions button').allInnerTexts(), ['Open customer']);
+  await page.waitForSelector('.agenda-entry[open]');
+  assert.match(await page.locator('.agenda-entry[open]').innerText(), /Cancelled[\s\S]*Removed from Google Calendar/);
+  assert.deepEqual(await page.locator('.agenda-entry[open] .agenda-actions button').allInnerTexts(), ['Open customer']);
   await page.keyboard.press('Escape');
   await page.uncheck('#appts-show-cancelled');
   await page.click('#appts-view button[data-view="list"]');
@@ -388,14 +391,131 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await md1.locator('.cal-dot').count(), 2);
   await md1.tap();
   await mp.waitForFunction((k) => document.querySelector(`.cal-cell[data-day="${k}"]`).classList.contains('sel'), D1);
-  await mp.locator('#cal-day .arow').nth(1).waitFor();
-  assert.equal(await mp.locator('#cal-day .arow').count(), 2);
-  assert.match(await mp.locator('#cal-day .appts-day').innerText(), /^Tomorrow/);
+  await mp.locator('#cal-day .agenda-entry').nth(1).waitFor();
+  assert.equal(await mp.locator('#cal-day .agenda-entry').count(), 2);
+  assert.equal(await mp.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D1);
   await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-calendar.png') });
   ok('phone: List by default; Calendar shows a compact month with dots, and tapping a day lists its appointments underneath, with no sideways scroll');
+  await mp.locator('.agenda-entry summary').first().tap();
+  await mp.waitForSelector('#appt-detail-dlg[open]');
+  assert.match(await mp.locator('#appt-detail-content').innerText(), /Lena Lead/);
+  assert.equal(await mp.getByRole('button', { name: 'Edit appointment', exact: true }).isVisible(), true);
+  const detailId = await mp.locator('.agenda-entry').first().getAttribute('data-id');
+  await mp.getByRole('button', { name: 'Edit appointment', exact: true }).focus();
+  await db.doc('appointments/' + detailId).update({ notes: 'Dog in the garden. Use the side gate.' });
+  await mp.waitForFunction(() => document.getElementById('appt-detail-content').textContent.includes('side gate'));
+  assert.equal(await mp.evaluate(() => document.activeElement.textContent), 'Edit appointment');
+  ok('an incoming appointment update refreshes mobile details without losing keyboard focus');
+  await mp.waitForTimeout(250); // allow Chromium's native touch feedback to settle before capture
+  await mp.screenshot({ path: path.join(SHOTS, 'calendar-mobile-details.png') });
+  await mp.click('#appt-detail-close');
+  assert.equal(await mp.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D1);
+  ok('phone: appointment details open in a full-width sheet and closing it preserves the selected date');
   await mctx.close();
 
+  // Focused calendar workflow: date navigation, booking, details-only editing and concurrent edits.
+  await page.evaluate(() => { location.hash = '#appointments'; });
+  await page.click('#appts-view button[data-view="calendar"]');
+  const D7 = dublin(Date.now() + 7 * DAY);
+  await showDay(page, D7);
+  await page.locator(`.cal-cell[data-day="${D7}"] .cal-select`).click();
+  await page.waitForFunction(() => document.querySelector('.agenda-message')?.textContent.includes('No appointments booked'));
+  assert.equal(await page.isVisible('#cal-day'), true);
+  await page.keyboard.press('ArrowLeft');
+  const D6 = dublin(Date.now() + 6 * DAY);
+  assert.equal(await page.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D6);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.focus), 'day-' + D6);
+  await page.getByRole('button', { name: 'Next day', exact: true }).click();
+  assert.equal(await page.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D7);
+  await page.click('#cal-today');
+  assert.equal(await page.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + TODAY);
+  const [ny, nm] = TODAY.split('-').map(Number), lastDay = dublin(Date.UTC(ny, nm, 0, 12));
+  await showDay(page, lastDay);
+  await page.locator(`.cal-cell[data-day="${lastDay}"] .cal-select`).click();
+  await page.keyboard.press('ArrowRight');
+  const firstNext = dublin(Date.UTC(ny, nm, 1, 12));
+  assert.equal(await page.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + firstNext);
+  ok('desktop: empty days show a useful agenda; keyboard and day navigation work across months; Today selects today');
+
+  await showDay(page, D7);
+  await page.locator(`.cal-cell[data-day="${D7}"] .cal-select`).click();
+  await page.locator('#cal-day > .btn').click();
+  await page.fill('#appt-customer-search', 'Cathal');
+  assert.equal(await page.locator('.appt-customer-option').count(), 1);
+  await page.locator('.appt-customer-option').click();
+  assert.equal(await page.inputValue('#a-date'), D7);
+  assert.match(await page.textContent('#appt-who'), /Cathal Closed/);
+  await page.selectOption('#a-type', 'site_visit');
+  await page.fill('#a-location', '24 Harbour Road, Malahide');
+  await page.fill('#a-notes', 'Side entrance. Bring the sample door.');
+  await page.screenshot({ path: path.join(SHOTS, 'calendar-booking.png') });
+  const beforeCount = (await apptsOf(ph.closed)).length;
+  await page.evaluate(() => { const f = document.getElementById('appt-form'); f.requestSubmit(); f.requestSubmit(); });
+  await page.waitForSelector('#appt-dlg:not([open])', { state: 'attached' });
+  await toastSays(/Booked for/);
+  const created = (await apptsOf(ph.closed)).find(a => a.location === '24 Harbour Road, Malahide');
+  assert.ok(created); assert.equal((await apptsOf(ph.closed)).length, beforeCount + 1);
+  assert.equal(dublin(created.start.toMillis()), D7);
+  assert.equal((await db.doc('conversations/' + ph.closed).get()).data().inboxStatus, 'closed');
+  assert.equal(evFor(ph.closed).filter(e => e.location === created.location).length, 1);
+  assert.equal(JSON.stringify(evFor(ph.closed)).includes('sample door'), false);
+  ok('calendar booking prefills the selected date and correct customer, preserves their stage, and double-submit creates one Google event without internal notes');
+
+  const selected = page.locator(`.agenda-entry[data-id="${created.id}"]`);
+  await selected.waitFor();
+  if ((await selected.getAttribute('open')) === null) await selected.locator('summary').click();
+  await selected.getByRole('button', { name: 'Edit appointment', exact: true }).click();
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'a-type');
+  await page.fill('#a-notes', 'Side entrance. Bring the oak sample door.');
+  await page.click('#a-go');
+  await toastSays(/Appointment updated\./);
+  const edited = (await db.doc('appointments/' + created.id).get()).data();
+  assert.equal(edited.start.toMillis(), created.start.toMillis());
+  assert.equal(edited.rescheduleCount, 0);
+  assert.match(await selected.innerText(), /oak sample door/);
+  await selected.getByRole('button', { name: 'Edit appointment', exact: true }).click();
+  await db.doc('appointments/' + created.id).update({ version: edited.version + 1, notes: 'Changed by another member of staff' });
+  await page.fill('#a-notes', 'Stale edit'); await page.click('#a-go');
+  await page.waitForFunction(() => document.getElementById('a-err').textContent.includes('changed by someone else'));
+  assert.equal((await db.doc('appointments/' + created.id).get()).data().notes, 'Changed by another member of staff');
+  await page.click('#a-cancel');
+  ok('details-only edits use accurate wording and preserve time; an edit based on an old version cannot overwrite another staff member');
+
+  // Customer round trip retains the calendar date.
+  await selected.getByRole('button', { name: 'Open customer', exact: true }).click();
+  await page.waitForSelector('#thread:not([hidden])');
+  await page.click('#nav-appointments');
+  assert.equal(await page.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D7);
+  ok('opening a customer and returning retains the selected calendar date');
+
+  // Capture the actual frontend at desktop, laptop and phone widths, using synthetic demo data.
+  await page.evaluate(() => { document.getElementById('appts-toast').hidden = true; });
+  await showDay(page, D1);
+  await page.locator(`.cal-cell[data-day="${D1}"] .cal-select`).click();
+  for (const width of [1440, 1280, 1024, 390, 320]) {
+    await page.setViewportSize({ width, height: 950 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `page overflow at ${width}`);
+    assert.equal(await page.locator('.cal-workspace').evaluate(e => e.scrollWidth <= e.clientWidth + 1), true, `calendar overflow at ${width}`);
+    const dayBox = await page.locator('#cal-day').boundingBox(), gridBox = await page.locator('#cal-grid').boundingBox();
+    assert.ok(width >= 1200 ? dayBox.x > gridBox.x + gridBox.width : dayBox.y > gridBox.y + gridBox.height, `agenda placement at ${width}`);
+    await page.screenshot({ path: path.join(SHOTS, `calendar-preview-${width}.png`), fullPage: true });
+  }
+  ok('calendar and agenda fit at 1440, 1280, 1024, 390 and 320px, with side-by-side or stacked layout as appropriate');
   assert.deepEqual(errors, [], 'browser errors: ' + JSON.stringify(errors)); ok('no JavaScript errors in the browser');
+  if (process.env.CALENDAR_PREVIEW === '1') {
+    // Populate today's agenda for the interactive demo, after assertions are complete.
+    for (const [i, name, type, location] of [[0, 'Anna Murphy', 'consultation', 'Showroom'], [1, 'Brian O’Connell', 'site_visit', '24 Harbour Road, Malahide']]) {
+      const phone = '35386000001' + i;
+      await seed(phone, { inboxStatus: 'booked', location }, { name, location });
+      await page.evaluate(async data => firebase.app().functions('europe-west1').httpsCallable('createAppointment')(data), {
+        phone, type, location, date: TODAY, time: i ? '13:00' : '10:00', durationMin: 60, requestId: 'calendar-preview-' + i,
+        notes: i ? 'Bring the oak sample door.' : 'Discuss the island layout and storage.' });
+    }
+    previewToken = await getAuth().createCustomToken(u.uid);
+    await browser.close();
+    console.log(`\nALL ${n} CHECKS PASSED\nPREVIEW READY: http://127.0.0.1:5055/#appointments (synthetic data, local emulators only; Ctrl+C to stop)`);
+    await new Promise(() => {});
+  }
   await browser.close(); web.close(); calendar.close();
   console.log(`\nALL ${n} CHECKS PASSED`); process.exit(0);
 })().catch((e) => { console.error('\nFAILED:', e.stack || e.message || e); process.exit(1); });

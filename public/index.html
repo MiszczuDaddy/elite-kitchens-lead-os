@@ -123,6 +123,7 @@
       <h1>Appointments</h1>
       <div id="appts-view" class="seg appts-view" role="group" aria-label="Appointments view"><button type="button" data-view="calendar" aria-pressed="false">Calendar</button><button type="button" data-view="list" aria-pressed="false">List</button></div>
       <label class="appts-toggle"><input type="checkbox" id="appts-show-cancelled"> Show cancelled</label>
+      <button id="appts-new" type="button" class="btn btn-primary btn-sm">Book appointment</button>
     </header>
     <div class="appts-scroll">
       <div id="appts-toast" class="toast appts-toast" role="status" hidden></div>
@@ -135,8 +136,10 @@
           <h2 id="cal-title" class="cal-title" aria-live="polite"></h2>
           <span id="cal-status" class="cal-status" role="status"></span>
         </div>
-        <div id="cal-grid" class="cal-grid"></div>
-        <div id="cal-day" class="cal-day"></div>
+        <div class="cal-workspace">
+          <div id="cal-grid" class="cal-grid" aria-label="Choose a day"></div>
+          <section id="cal-day" class="cal-day" aria-label="Selected day appointments"></section>
+        </div>
       </section>
       <div id="appts-list" class="appts-list"></div>
     </div>
@@ -317,7 +320,20 @@
   </form>
 </dialog>
 
-<dialog id="appt-dlg" class="dlg">
+<dialog id="appt-customer-dlg" class="dlg" aria-labelledby="appt-customer-title">
+  <h2 id="appt-customer-title">Book appointment</h2>
+  <p id="appt-customer-date" class="hint"></p>
+  <label for="appt-customer-search">Choose a customer</label>
+  <input id="appt-customer-search" type="search" placeholder="Search name, phone or location…" autocomplete="off">
+  <p class="hint">Customers from the loaded inbox, across all stages.</p>
+  <div id="appt-customer-results" class="appt-customer-results"></div>
+  <div class="dlg-actions"><button id="appt-customer-close" type="button" class="btn btn-ghost">Close</button></div>
+</dialog>
+<dialog id="appt-detail-dlg" class="dlg appt-detail-dlg" aria-label="Appointment details">
+  <div id="appt-detail-content"></div>
+  <div class="dlg-actions"><button id="appt-detail-close" type="button" class="btn btn-ghost">Close</button></div>
+</dialog>
+<dialog id="appt-dlg" class="dlg" aria-labelledby="appt-title">
   <form id="appt-form" autocomplete="off">
     <h2 id="appt-title">Book appointment</h2>
     <p id="appt-who" class="hint"></p>
