@@ -67,6 +67,12 @@ test('the worker still stores nothing and still leaves everything else alone (pu
   const w = load(); assert.deepEqual(Object.keys(w.handlers).sort(), ['activate', 'fetch', 'install', 'notificationclick', 'push']);
 });
 
+test('push.js falls back to the Firebase web app id when the automatic config lacks it, and never overrides one that is there', () => {
+  const src = read('push.js');
+  assert.match(src, /const WEB_APP_ID = '1:812360112616:web:[0-9a-f]{20,}';/); assert.match(src, /if \(options && !options\.appId\) options\.appId = WEB_APP_ID;/);
+  assert.ok(src.indexOf('options.appId = WEB_APP_ID') < src.indexOf('firebase.messaging().getToken'), 'the id is set before messaging is used');
+});
+
 // ---------------------------------------------------------------- the model behind the speed table
 const ev = { id: 'm_x', kind: 'message', status: 'sent', eventAt: 1000, backendReceivedAt: 1800, sendStartedAt: 1850, createdAt: { toMillis: () => 1800 },
   devices: { w: { platform: 'windows', ok: true, acceptedAt: 2100 }, a: { platform: 'android', ok: true, acceptedAt: 2150 }, x: { platform: 'android', ok: false, acceptedAt: 2100, error: 'messaging/internal-error' } },
