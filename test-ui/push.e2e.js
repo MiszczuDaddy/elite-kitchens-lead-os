@@ -14,7 +14,8 @@ const SHOTS = process.env.SHOTS_DIR || path.join(__dirname, 'shots'); fs.mkdirSy
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let n = 0; const ok = (m) => console.log(`  PASS ${++n}. ${m}`);
 const ORIGIN = 'http://127.0.0.1:5057';
-const cfgJs = `firebase.initializeApp({apiKey:'fake',projectId:'demo-leados',authDomain:'localhost',storageBucket:'demo-leados.firebasestorage.app'});
+// like production's automatic config, which has the sender id and the web app id (without them the messaging library stops before it ever looks for its service worker file)
+const cfgJs = `firebase.initializeApp({apiKey:'fake',projectId:'demo-leados',authDomain:'localhost',storageBucket:'demo-leados.firebasestorage.app',messagingSenderId:'812360112616',appId:'1:812360112616:web:2d739fad9219ebb92eec5d'});
 firebase.auth().useEmulator('http://127.0.0.1:9099',{disableWarnings:true});
 firebase.firestore().useEmulator('127.0.0.1',8085);
 firebase.app().functions('europe-west1').useEmulator('127.0.0.1',5001);
@@ -119,6 +120,17 @@ const A = '353860000031';
   await page.evaluate(() => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'ek-open', n: 'not-an-id' } })));
   await page.goto(ORIGIN + '/?n=' + 't_' + 'f'.repeat(24)); await page.waitForSelector('#app:not([hidden])'); assert.doesNotMatch(page.url(), /[?&]n=/);
   ok('a clicked notification opens the right chat (a closed app finds it from the opaque id after sign-in; an open one is told by the worker); an unknown or bad id changes nothing');
+
+  // ------------------------------------------------------------------ 6b. the lockout of 2026-10-12: with notifications ALREADY allowed, a fresh page load must still sign in
+  const fresh = await ctx.newPage(); global.__page = fresh; const freshErrors = []; fresh.on('pageerror', (e) => freshErrors.push(e.message));
+  await fresh.goto(ORIGIN + '/');                                                                  // permission is granted; the real messaging library is loaded, the call to claimAccess asks it for a token
+  await fresh.waitForSelector('#app:not([hidden])', { timeout: 20000 });
+  assert.equal(await fresh.isVisible('#login'), false); assert.doesNotMatch(await fresh.textContent('#loginmsg'), /Messaging|not authorised/);
+  // the exact step that failed for the owner: with nothing set up in the page, the messaging library looks for its default service worker file. It must be found (what happens after that needs the internet).
+  const lookup = await fresh.evaluate(() => Promise.race([firebase.messaging().getToken().then(() => 'ok', (e) => String((e && (e.code || e.message)) || e)), new Promise((r) => setTimeout(() => r('still working'), 12000))]));
+  assert.doesNotMatch(lookup, /failed-service-worker-registration|unable to register the default service worker|404/, 'the default look-up file must exist: ' + lookup);
+  await fresh.close(); page = await ctx.newPage(); await page.goto(ORIGIN + '/'); await page.waitForSelector('#app:not([hidden])'); global.__page = page;
+  ok('with notifications already allowed, a fresh page load still signs in (the real messaging library does not break the first function call)');
 
   // ------------------------------------------------------------------ 7. turning it off
   await fakeFcm(page); await page.click('#notif-open'); await page.waitForSelector('#notif-dlg[open]');

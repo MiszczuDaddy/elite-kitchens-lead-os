@@ -36,6 +36,17 @@ window.PUSH = (() => {
     const r = (await call('registerPushDevice')({ token: t, platform: platform() })).data;
     keep({ id: r.deviceId, token: t, at: Date.now() }); return r.deviceId;
   }
+  // Once notifications are allowed, Firebase's function-calling code asks the messaging library for a token on EVERY call. If that ever fails (no connection to Firebase messaging, a hiccup, a missing
+  // file) the call itself fails: the sign-in lockout of 2026-10-12. Elite OS never needs that token, so it is switched off for function calls. Our own use of messaging (enable, refresh) is not touched.
+  // Best effort: if Firebase changes its internals this does nothing, and Elite OS behaves as it did before.
+  function silenceCallToken() {
+    try {
+      const inst = firebase.app()._delegate.container.getProvider('messaging-internal').getImmediate({ optional: true });
+      if (inst && typeof inst.getToken === 'function') inst.getToken = async () => undefined;
+    } catch (e) { /* nothing to switch off */ }
+  }
+  silenceCallToken();
+  async function ready() { silenceCallToken(); }                                // also called before the first function call at sign-in (app.js)
   async function enable() {
     if (P.busy) return; P.busy = true; setError(''); render();
     try {
@@ -136,5 +147,5 @@ window.PUSH = (() => {
   $('notif-test').onclick = test;
   render();
 
-  return Object.assign(P, { start, stop, supported, openFrom, render });
+  return Object.assign(P, { start, stop, ready, supported, openFrom, render });
 })();

@@ -162,6 +162,7 @@ auth.onAuthStateChanged(async (user) => {
     return;
   }
   try {
+    if (window.PUSH && PUSH.ready) await PUSH.ready();      // Phase 8: sets up notifications first (they make every function call ask for a token); never fails, never waits long
     await call('claimAccess')();          // server checks the allowlist and sets the staff claim
     await user.getIdToken(true);          // pick up the new claim
   } catch (e) {

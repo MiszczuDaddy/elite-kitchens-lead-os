@@ -74,6 +74,19 @@ test('push.js falls back to the Firebase web app id when the automatic config la
   assert.match(src, /const VAPID_KEY = 'B[\w-]{80,100}';/, 'this project\'s own public Web Push key'); assert.match(src, /getToken\(\{ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg \}\)/, 'and it is passed to getToken');
 });
 
+test('sign-in lockout of 2026-10-12: notifications are set up BEFORE the first function call, the call can never be failed by them, and the look-up file Firebase wants exists', () => {
+  const app = read('app.js'), push = read('push.js');
+  const i = app.indexOf("await PUSH.ready();"), j = app.indexOf("await call('claimAccess')();          // server checks the allowlist");
+  assert.ok(i > 0 && j > i, 'PUSH.ready() runs before claimAccess');
+  const silence = push.slice(push.indexOf('function silenceCallToken()'), push.indexOf('async function enable()'));
+  assert.match(silence, /getProvider\('messaging-internal'\)\.getImmediate\(\{ optional: true \}\)/); assert.match(silence, /inst\.getToken = async \(\) => undefined/, 'function calls never ask for a messaging token');
+  assert.match(silence, /catch \(e\)/, 'it never throws'); assert.match(silence, /silenceCallToken\(\);\s*\n\s*async function ready\(\) \{ silenceCallToken\(\); \}/, 'done at load and again before the first call');
+  assert.match(push, /return Object\.assign\(P, \{ start, stop, ready,/);
+  const sw = read('firebase-messaging-sw.js'); assert.match(sw, /importScripts\('\/sw\.js'\);/);
+  const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'firebase.json'), 'utf8')); const rule = cfg.hosting.headers.find((b) => /sw\.js/.test(b.source));
+  assert.ok(rule.source.split(/[(|)]/).includes('firebase-messaging-sw.js'), 'never cached, like sw.js');
+});
+
 // ---------------------------------------------------------------- the model behind the speed table
 const ev = { id: 'm_x', kind: 'message', status: 'sent', eventAt: 1000, backendReceivedAt: 1800, sendStartedAt: 1850, createdAt: { toMillis: () => 1800 },
   devices: { w: { platform: 'windows', ok: true, acceptedAt: 2100 }, a: { platform: 'android', ok: true, acceptedAt: 2150 }, x: { platform: 'android', ok: false, acceptedAt: 2100, error: 'messaging/internal-error' } },
