@@ -24,7 +24,7 @@
     ],
     "headers": [
       {
-        "source": "/@(index.html|app.js|app.css|crm.js|lead-address.js|window-state.js|quote-send-model.js|pipeline.js|appointments.js|quote-engine.js|quote-document.js|quote-builder.js|quote-settings.js|quotes.js|project-model.js|projects.js|push-model.js|push.js|firebase-messaging-sw.js|pwa.js|sw.js|offline.html|manifest.webmanifest)",
+        "source": "/@(index.html|app.js|app.css|crm.js|calendar-layout.js|lead-address.js|window-state.js|quote-send-model.js|pipeline.js|appointments.js|quote-engine.js|quote-document.js|quote-builder.js|quote-settings.js|quotes.js|project-model.js|projects.js|push-model.js|push.js|firebase-messaging-sw.js|pwa.js|sw.js|offline.html|manifest.webmanifest)",
         "headers": [
           {
             "key": "Cache-Control",

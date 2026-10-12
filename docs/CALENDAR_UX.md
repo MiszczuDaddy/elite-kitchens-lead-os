@@ -1,8 +1,12 @@
-# Calendar day agenda
+# Calendar views and scheduling
 
-The month remains the overview. Selecting a date displays its agenda beside the month on desktop (1200px and above), or below it on smaller screens. Today selects today's date; the agenda's day controls and the date buttons' arrow keys navigate across month boundaries. Returning from a customer preserves the selected date.
+Month, Week, Day and the existing List share one navigation toolbar. A new browser session defaults to Week on desktop (900px and above) and Day on mobile; an explicit view choice is remembered for the session. Today and previous/next move within the current view. Selecting a Month date or Week heading opens Day. Returning from a customer preserves the selected date and view.
 
-Calendar appointment chips and “+N more” reveal appointments in the agenda. Desktop details expand inline; phone details open in a full-width sheet. Details include appointment type, the customer's home address and budget, internal notes, Google sync state and the existing customer, edit, reschedule and cancel actions. List view remains available.
+Week and Day show hourly rulers with half-hour booking targets. Appointment height represents actual elapsed duration; overlapping appointments occupy separate columns, and cross-midnight visits appear in both days. Clicking an empty slot opens the existing customer chooser and booking form with its date and time prefilled. Arrow keys move between slots; Enter opens booking. Clicking a block opens the existing details dialog, including edit and reschedule actions. Hourly blocks are not draggable. Mobile Day has 48px half-hour targets; Week can scroll horizontally inside the calendar without widening the page.
+
+All dates use Europe/Dublin. Clock-change days contain 23 or 25 elapsed hours and are labelled; in Week, that day's slots carry their own local-time labels. Nonexistent spring times are absent. The first occurrence of repeated autumn times cannot start a booking, matching the existing backend's choice of the later occurrence. Queries include the prior eight hours (the existing maximum appointment duration) to include visits crossing midnight, using the existing start-time index. Loading, errors and the 500-result cap disable slot booking rather than suggest availability.
+
+Month appointment chips and “+N more” still reveal appointments in the agenda beside the month on desktop (1200px and above), or below it on smaller screens. Desktop Month details expand inline; phone and timeline details open in a dialog. Details include appointment type, the customer's home address and budget, internal notes, Google sync state and the existing customer, edit, reschedule and cancel actions.
 
 Expanded appointment details show the linked lead's saved home address and budget. The budget keeps its original wording (including ranges). Missing fields say “Not provided”; loading and read failures have distinct states. A single staff-authorized contact listener follows the currently open appointment and is removed on navigation or sign-out. The separate appointment-location row is omitted for these home consultations. This does not alter existing booking fields or Google Calendar event data.
 
@@ -21,6 +25,8 @@ No availability guarantees, free-slot suggestions, business hours, staff assignm
 ## Focused checks and local preview
 
 Run `bash test-ui/run.sh appointments.e2e.js` with Node, Java and Playwright/Chrome available. This runs only appointment UI checks using the demo Firebase emulators and a fake Google Calendar.
+
+Run `node --test test-ui/calendar-layout.test.js` for pure date, clock-change, duration, overlap and midnight-boundary checks. The appointment browser checks also cover timeline geometry, slot-prefilled booking, duplicate submission, updating the same Google event, mobile defaults and layouts down to 320px. No new dependencies, backend changes, indexes or migrations are required.
 
 Set `CALENDAR_PREVIEW=1` to keep the local test server and emulators running after the checks pass. Open `http://127.0.0.1:5055/#appointments`; the preview signs into a synthetic demo staff account automatically. It is local to this computer and uses no production customer data. To stop it gracefully in PowerShell, run `Invoke-WebRequest -Method Post -Headers @{'X-Elite-Preview'='stop'} http://127.0.0.1:5055/__stop-preview`. The harness then stops its emulators and removes their temporary configuration files. If the process is force-terminated instead, remove the harness-generated `functions/.env.local` and `functions/.secret.local` before further work.
 

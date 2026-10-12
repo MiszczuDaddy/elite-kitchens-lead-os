@@ -618,7 +618,52 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
   .cal-day { display: block; margin-top: 4px; }
 }
 
-/* Calendar workspace: month overview and a working agenda for the selected day. */
+/* Shared calendar navigation and hourly scheduling. */
+.cal-nav { flex-wrap: wrap; gap: 6px; }
+.cal-nav .appts-view { order: 3; margin-left: auto; }
+.cal-nav .cal-status { order: 4; margin-left: 8px; }
+.cal-title { flex: 1; min-width: 180px; font-size: 17px; }
+.time-status { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.time-scroll { overflow: auto; max-height: calc(100dvh - 230px); min-height: 280px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overscroll-behavior: contain; }
+.time-grid { display: grid; grid-template-columns: 58px repeat(var(--days), minmax(0, 1fr)); position: relative; }
+.time-grid.time-week { grid-template-columns: 58px repeat(var(--days), minmax(112px, 1fr)); }
+.time-corner, .time-day-head { position: sticky; top: 0; z-index: 4; background: var(--panel); border: 0; border-bottom: 1px solid var(--line); min-height: 48px; padding: 10px 4px; font-size: 13px; text-align: center; }
+.time-corner { left: 0; z-index: 5; color: var(--muted); }
+.time-day-head { font-weight: 600; cursor: pointer; }
+.time-day-head:hover { background: var(--hover); }
+.time-day-head[aria-current=date] { color: var(--accent); background: var(--selected); }
+.time-day-head small { display: block; font-size: 11px; font-weight: 400; }
+.time-ruler { position: sticky; left: 0; z-index: 3; background: var(--panel); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.time-ruler span { position: absolute; right: 7px; transform: translateY(2px); }
+.time-column { position: relative; min-width: 0; border-left: 1px solid var(--line); }
+.time-slot { position: absolute; left: 0; width: 100%; padding: 0; border: 0; border-top: 1px solid var(--hover); background: transparent; cursor: pointer; }
+.time-slot.hour-start { border-top-color: var(--line); }
+.time-slot:hover:not(:disabled), .time-slot:focus-visible { background: var(--selected); }
+.time-slot:disabled { cursor: default; background: var(--nav); opacity: .5; }
+.time-dst-label { position: absolute; right: 4px; top: 2px; color: var(--muted); font-size: 11px; }
+.time-event { position: absolute; z-index: 2; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; overflow: hidden; border: 1px solid #bdc8ba; border-radius: 4px; padding: 5px 6px; background: #e9ede3; color: var(--ink); text-align: left; cursor: pointer; font-size: 13px; line-height: 1.35; }
+.time-event:hover { background: #dce4d5; }
+.time-event strong, .time-event span { display: block; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.time-event strong { font-size: 14px; font-weight: 600; }
+.time-event-short { padding: 0 5px; }
+.time-event-short strong { font-size: 12px; }
+.time-event-short span { display: none; }
+.time-event.cancelled { background: var(--nav); color: var(--muted); text-decoration: line-through; border-color: var(--line); }
+.time-event.sync-failed { border-color: var(--err); }
+.time-now { position: absolute; left: 0; right: 0; z-index: 2; height: 1px; background: var(--err); pointer-events: none; }
+@media (min-width: 900px) {
+  .appt-detail-dlg { width: 390px; max-height: calc(100dvh - 40px); margin: auto 20px auto auto; }
+}
+@media (max-width: 899px) {
+  .cal-nav .appts-view { order: -1; width: 100%; margin: 0 0 6px; }
+  .cal-nav .appts-view button { flex: 1; min-height: 44px; }
+  .cal-title { min-width: 0; font-size: 15px; margin-left: 4px; }
+  .time-scroll { max-height: calc(100dvh - 260px); min-height: 260px; }
+  .time-grid { grid-template-columns: 48px minmax(0, 1fr); }
+  .time-grid.time-week { grid-template-columns: 48px repeat(7, minmax(120px, 1fr)); }
+  .time-event { font-size: 13px; }
+}
+/* Month overview retains its working day agenda and confirmed drag-to-reschedule. */
 .appts-cal { max-width: none; }
 .cal-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 24px; align-items: start; }
 .cal-grid { min-width: 0; }

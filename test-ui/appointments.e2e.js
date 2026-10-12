@@ -153,6 +153,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   const TODAY = dublin(Date.now()), [TY, TM] = TODAY.split('-').map(Number);
   const toThisMonth = (pg) => pg.evaluate(() => { const b = document.getElementById('cal-today'); if (!b.disabled) b.click(); });
   async function showDay(pg, k) {                    // the month containing day k (tomorrow may already be next month)
+    await pg.click('#appts-view button[data-view="calendar"]');
     await toThisMonth(pg);
     for (let i = 0; i < 2 && !(await pg.locator(`.cal-cell[data-day="${k}"]`).count()); i++) {
       const was = await pg.textContent('#cal-title'); await pg.click('#cal-next');
@@ -161,6 +162,10 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
     await pg.locator(`.cal-cell[data-day="${k}"]`).waitFor();
   }
   await page.click('#nav-appointments');
+  await page.waitForSelector('.time-column');
+  assert.equal(await page.getAttribute('#appts-view button[data-view="week"]', 'aria-pressed'), 'true');
+  await require('./calendar-timeline-checks')({ page, db, cal, ok, SHOTS, token, browser });
+  await page.click('#appts-view button[data-view="calendar"]');
   await page.waitForSelector('#appts-cal:not([hidden]) .cal-cell');
   assert.equal(await page.getAttribute('#app', 'data-view'), 'appointments');
   assert.equal(await page.getAttribute('#appts-view button[data-view="calendar"]', 'aria-pressed'), 'true');
@@ -181,7 +186,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.match(await page.locator(`.cal-cell[data-day="${D2}"] .cal-ev`).innerText(), /09:00\s+Cathal Closed/);
   await showDay(page, D1);
   await page.screenshot({ path: path.join(SHOTS, 'appointments-calendar.png') });
-  ok('Calendar is the default on desktop: a Monday-first month with today highlighted; each appointment sits in its day with time, name and a subtle stage colour');
+  ok('Week is the desktop default; Month is a Monday-first overview with today highlighted; each appointment sits in its day with time, name and a subtle stage colour');
 
   await d1.locator(`.cal-ev[data-phone="${ph.lead}"]`).click();
   await page.waitForSelector('.agenda-entry[open]');
@@ -209,7 +214,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await page.inputValue('#a-time'), '09:00');
   await page.selectOption('#a-time', '09:30'); await page.click('#a-go');
   await page.waitForFunction((k) => /09:30\s+Cathal Closed/.test((document.querySelector(`.cal-cell[data-day="${k}"] .cal-ev`) || {}).innerText || ''), D2);
-  await toastSays(/Rescheduled for/);
+  await toastSays(/Rescheduled for .* at 09:30\. Google Calendar updated\./);
   assert.match(await page.textContent('#appts-toast'), /Rescheduled for .* at 09:30\. Google Calendar updated\./);
   ok('clicking an appointment opens agenda details and actions; Reschedule from the agenda moves it in the calendar');
 
@@ -247,7 +252,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   // ---- the Appointments list (the existing view), remembered for the session ----
   await page.click('#appts-view button[data-view="list"]');
   await page.waitForSelector('.arow');
-  assert.equal(await page.isVisible('#appts-cal'), false);
+  assert.equal(await page.isVisible('#cal-grid'), false);
   await page.reload();
   await page.waitForSelector('#app:not([hidden])');
   await page.waitForSelector('.arow');
@@ -366,6 +371,9 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
   await mp.waitForSelector('#app:not([hidden])');
   await mp.tap('#to-appointments');
+  await mp.waitForSelector('.time-column');
+  assert.equal(await mp.getAttribute('#appts-view button[data-view="day"]', 'aria-pressed'), 'true');
+  await mp.tap('#appts-view button[data-view="list"]');
   await mp.waitForSelector('.arow');
   assert.equal(await mp.getAttribute('#app', 'data-view'), 'appointments');
   assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
@@ -403,12 +411,14 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await md1.locator('.cal-ev').first().isVisible(), false);               // names do not fit: dots instead
   assert.equal(await md1.locator('.cal-dot').count(), 2);
   await md1.tap();
+  assert.equal(await mp.getAttribute('#appts-view button[data-view="day"]', 'aria-pressed'), 'true');
+  await mp.tap('#appts-view button[data-view="calendar"]');
   await mp.waitForFunction((k) => document.querySelector(`.cal-cell[data-day="${k}"]`).classList.contains('sel'), D1);
   await mp.locator('#cal-day .agenda-entry').nth(1).waitFor();
   assert.equal(await mp.locator('#cal-day .agenda-entry').count(), 2);
   assert.equal(await mp.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D1);
   await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-calendar.png') });
-  ok('phone: List by default; Calendar shows a compact month with dots, and tapping a day lists its appointments underneath, with no sideways scroll');
+  ok('phone: Day is the default; Month shows compact dots, and tapping a date opens Day; the month agenda remains available');
   await mp.locator('.agenda-entry summary').first().tap();
   await mp.waitForSelector('#appt-detail-dlg[open]');
   assert.match(await mp.locator('#appt-detail-content').innerText(), /Lena Lead/);
@@ -442,6 +452,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   const D7 = dublin(Date.now() + 7 * DAY);
   await showDay(page, D7);
   await page.locator(`.cal-cell[data-day="${D7}"] .cal-select`).click();
+  await page.click('#appts-view button[data-view="calendar"]');
+  await page.locator('.cal-select[aria-pressed="true"]').focus();
   await page.waitForFunction(() => document.querySelector('.agenda-message')?.textContent.includes('No appointments booked'));
   assert.equal(await page.isVisible('#cal-day'), true);
   await page.keyboard.press('ArrowLeft');
@@ -455,6 +467,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   const [ny, nm] = TODAY.split('-').map(Number), lastDay = dublin(Date.UTC(ny, nm, 0, 12));
   await showDay(page, lastDay);
   await page.locator(`.cal-cell[data-day="${lastDay}"] .cal-select`).click();
+  await page.click('#appts-view button[data-view="calendar"]');
+  await page.locator('.cal-select[aria-pressed="true"]').focus();
   await page.keyboard.press('ArrowRight');
   const firstNext = dublin(Date.UTC(ny, nm, 1, 12));
   assert.equal(await page.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + firstNext);
@@ -462,6 +476,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
 
   await showDay(page, D7);
   await page.locator(`.cal-cell[data-day="${D7}"] .cal-select`).click();
+  await page.click('#appts-view button[data-view="calendar"]');
+  await page.locator('.cal-select[aria-pressed="true"]').focus();
   await page.locator('#cal-day > .btn').click();
   await page.fill('#appt-customer-search', 'Cathal');
   assert.equal(await page.locator('.appt-customer-option').count(), 1);
@@ -517,6 +533,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await page.evaluate(() => { document.getElementById('appts-toast').hidden = true; });
   await showDay(page, D1);
   await page.locator(`.cal-cell[data-day="${D1}"] .cal-select`).click();
+  await page.click('#appts-view button[data-view="calendar"]');
+  await page.locator('.cal-select[aria-pressed="true"]').focus();
   for (const width of [1440, 1280, 1024, 390, 320]) {
     await page.setViewportSize({ width, height: 950 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `page overflow at ${width}`);

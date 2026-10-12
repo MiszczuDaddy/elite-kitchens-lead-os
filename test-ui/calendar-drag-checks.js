@@ -83,6 +83,7 @@ module.exports = async ({ page, db, cal, showDay, dublin, D7, created, ok, SHOTS
 
   // Agenda entries are also draggable; on phones the Reschedule action remains the route.
   await cell(target).locator('.cal-select').click();
+  await page.click('#appts-view button[data-view="calendar"]');
   const agenda = page.locator(`.agenda-entry[data-id="${created.id}"] summary`);
   await agenda.dragTo(cell(D7));
   await page.waitForSelector('#appt-dlg[open]'); await page.click('#a-cancel');
