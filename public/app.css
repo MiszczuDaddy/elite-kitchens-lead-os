@@ -135,6 +135,21 @@ h1, h2, p { overflow-wrap: anywhere; }
 .pjv-confirm { margin: 0; font-size: 13px; }
 .pjv-remove { font-size: 13px; color: var(--muted); }
 .np-quotes { display: grid; gap: 8px; margin: 12px 0; }
+
+/* ---- Notifications (Phase 8, docs/PUSH.md) ---- */
+.dlg.dlg-wide { max-width: 860px; }
+.notif-state { margin: 4px 0 8px; font-size: 15px; font-weight: 600; }
+.notif-state[data-on="true"] { color: #3f6a3a; }
+.notif-actions { flex-wrap: wrap; }
+.notif-speed { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+.notif-speed summary { cursor: pointer; font-size: 14px; font-weight: 650; }
+.notif-summary { margin: 10px 0 6px; }
+.notif-sum { margin: 0 0 6px; font-size: 13px; }
+.notif-wrap { max-height: 280px; overflow: auto; margin-top: 8px; border: 1px solid var(--line); border-radius: 6px; }
+.notif-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.notif-table th, .notif-table td { padding: 6px 8px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+.notif-table th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+.rail-item.is-on svg { color: #3f6a3a; }
 @media (max-width: 899px) {
   .pjv { grid-template-columns: minmax(0,1fr); }
   .pj-tile { flex: 1 1 140px; min-width: 0; }

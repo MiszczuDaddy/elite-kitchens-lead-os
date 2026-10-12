@@ -58,7 +58,8 @@ test('the service worker, the manifest, the offline page and pwa.js are never ca
   assert.equal(noCache.headers.find((h) => h.key === 'Cache-Control').value, 'no-cache');
   const mf = blocks.find((b) => b.source === '/manifest.webmanifest'); assert.ok(mf, 'the manifest needs its own content type');
   assert.equal(mf.headers.find((h) => h.key === 'Content-Type').value, 'application/manifest+json');
-  assert.deepEqual(cfg.hosting.rewrites.map((r) => r.source), ['/webhook'], 'the webhook rewrite must be exactly as it was');
+  assert.deepEqual(cfg.hosting.rewrites.map((r) => r.source), ['/webhook', '/pushReceipt'], 'the webhook rewrite must be exactly as it was (Phase 8 added /pushReceipt after it)');
+  assert.deepEqual(cfg.hosting.rewrites[0], { source: '/webhook', function: { functionId: 'webhook', region: 'europe-west1' } });
 });
 
 // ---------------------------------------------------------------- the service worker, run for real in a pretend browser
@@ -94,7 +95,7 @@ test('service worker: installing stores only the offline page (fetched fresh), a
 test('service worker: it can never store app code or data (the source has no way to write to a cache except the offline page)', () => {
   const src = read('sw.js').replace(/\/\/.*$/gm, '');
   assert.ok(!/\.put\s*\(/.test(src) && !/addAll/.test(src), 'only cache.add of the offline page is allowed');
-  assert.equal((src.match(/\.add\s*\(/g) || []).length, 1); assert.ok(!/localStorage|indexedDB|IndexedDB|postMessage|sync|push/i.test(src), 'no storage, sync or push of any kind');
+  assert.equal((src.match(/\.add\s*\(/g) || []).length, 1); assert.ok(!/localStorage|indexedDB|IndexedDB|sessionStorage|sync|SyncManager|periodicSync/i.test(src), 'no storage and no background sync (push notifications, added in Phase 8, store nothing either: functions/test/push-sw.test.js)');
 });
 
 test('service worker: a page load goes to the network and gets the network answer; only a failed connection gets the offline page', async () => {

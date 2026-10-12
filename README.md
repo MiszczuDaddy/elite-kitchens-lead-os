@@ -48,6 +48,7 @@ See `docs/PHASE2_PROGRESS.md`, `docs/SECURITY.md`, `docs/DATA_CONTROLS.md`, `doc
 Phase 3 (Meta lead intake): `docs/LEAD_INTAKE.md`. Phase 4 (pipeline / CRM): `docs/CRM_PIPELINE.md`.
 Phase 5 (appointments + Google Calendar, setup, rollout, rollback): `docs/APPOINTMENTS.md`.
 Phase 6 (quotes: builder, customer PDF, sending, rollout, rollback): `docs/QUOTES.md`.
+Phase 8 (push notifications for new WhatsApp messages and leads, with delivery-time measurement; built on branch `phase-8-push-notifications`, not merged or deployed): `docs/PUSH.md`.
 Phase 7 (Projects: what is ordered and where each job stands; built on branch `phase-7-projects`, not merged or deployed): `docs/PROJECTS.md`.
 Phase 6.2 (install Elite OS as an app on Windows and Android, PWA; built, not deployed): `docs/PWA.md`.
 Phase 6.1 (direct quote sending by WhatsApp and email, "Reopen conversation"; live, tag `phase-6-1-quote-sending-complete`): `docs/PHASE6_1_PLAN.md`.

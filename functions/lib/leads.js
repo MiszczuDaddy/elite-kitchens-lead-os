@@ -91,7 +91,7 @@ function classify(e) {
   return 'unknown';
 }
 
-async function handleLeadRequest(req, { db, wa, cfg, now: clock }) {
+async function handleLeadRequest(req, { db, wa, cfg, now: clock, push }) {
   const now = clock ? clock() : Date.now();
   if (req.method !== 'POST') return respond(405, { ok: false, error: 'POST only' });
   if (!authorized(req.headers || {}, cfg.apiKeys)) { log('warn', 'lead rejected: bad or missing key'); return respond(401, { ok: false, error: 'unauthorized' }); }
@@ -134,6 +134,8 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock }) {
   if (claim.r === 'in_progress') return respond(503, { ok: false, status: 'in_progress', leadId: id }, { 'Retry-After': '5' });
 
   const info = await upsertLeadCustomer(db, phone, lead, now);
+  // Phase 8: a push for a NEW lead, right after the customer is saved and before the welcome message is sent. It can never throw and gives up after a few seconds.
+  if (push && claim.r === 'claimed') { try { await push.notify({ kind: 'lead', sourceId: id, phone, eventAt: Date.parse(lead.createdTime) || null, backendReceivedAt: now }); } catch (e) { log('error', 'push hook failed'); } }
   const finish = async (welcome, extra) => {
     await ref.update({ state: 'done', completedAt: Timestamp.fromMillis(clock ? clock() : Date.now()), welcome, contactCreated: info.contactCreated, ...extra });
     log('info', 'lead processed', { leadId: id, formId: lead.formId, welcome: welcome.state, newCustomer: info.contactCreated });

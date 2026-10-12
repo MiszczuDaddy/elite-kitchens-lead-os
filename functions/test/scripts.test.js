@@ -607,8 +607,29 @@ test('every stage that deploys functions runs the routing check BEFORE it asks f
   before(on, 'mail on'); before(off, 'mail off'); assert.match(on, /check_routing \$MAIL_FUNCS/); assert.match(off, /check_routing \$MAIL_FUNCS/);
   assert.ok(!/check_routing/.test(stage('rules')) && !/check_routing/.test(stage('live')), 'stages that deploy no functions do not need it');
   before(stage('projects'), 'projects'); assert.match(stage('projects'), /check_routing \$PROJECT_FUNCS/);
-  assert.match(s, /^usage\(\) \{ sed -n '2,35p'/m); assert.match(s.split('\n').slice(0, 35).join('\n'), /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
-  assert.match(s.split('\n').slice(0, 35).join('\n'), /deploy-quote-sending\.sh projects/, 'the help text must show the projects stage');
+  before(stage('push'), 'push'); assert.match(stage('push'), /check_routing \$PUSH_FUNCS/);
+  assert.match(s, /^usage\(\) \{ sed -n '2,37p'/m); assert.match(s.split('\n').slice(0, 37).join('\n'), /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+  assert.match(s.split('\n').slice(0, 37).join('\n'), /deploy-quote-sending\.sh projects/, 'the help text must show the projects stage');
+  assert.match(s.split('\n').slice(0, 37).join('\n'), /deploy-quote-sending\.sh push /, 'the help text must show the push stage');
+});
+
+// ============================ Phase 8: the "push" stage deploys exactly the right functions (the live webhook among them), and the screen waits for them ======================
+test('Phase 8: the push stage names exactly the four new functions and the two changed ones, every one is a real function, the webhook change needs an explicit "yes", and the screen waits', () => {
+  const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const list = (name) => { const m = new RegExp('^' + name + '="([^"]*)"', 'm').exec(s); assert.ok(m, name + ' not found'); return m[1].trim().split(/\s+/); };
+  const fresh = list('PUSH_NEW'), changed = list('PUSH_CHANGED');
+  assert.deepEqual([...fresh].sort(), ['pushReceipt', 'registerPushDevice', 'sendTestPush', 'unregisterPushDevice']); assert.deepEqual([...changed].sort(), ['leadIntake', 'webhook']);
+  const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
+  for (const f of fresh.filter((x) => x !== 'pushReceipt')) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\b', 'm'), f + ' is not a callable function in functions/index.js');
+  for (const f of ['pushReceipt', 'webhook', 'leadIntake']) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onRequest\\b', 'm'), f + ' is not an HTTP function in functions/index.js');
+  assert.match(s, /^PUSH_FUNCS="\$PUSH_NEW \$PUSH_CHANGED"/m);
+  const i = s.indexOf('\n  push)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));
+  assert.match(stage, /deploy_functions \$PUSH_FUNCS/); assert.match(stage, /for f in \$PUSH_NEW; do[\s\S]*add-iam-policy-binding[\s\S]*done/, 'only the NEW functions are made public');
+  assert.match(stage, /confirm "[^"]*WhatsApp webhook[^"]*"/, 'the question names the live webhook'); assert.ok(stage.indexOf('check_settings') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'));
+  assert.match(stage, /check_reachable "[^"]*webhook[^"]*leadIntake[^"]*"|check_reachable "[^"]*leadIntake[^"]*webhook[^"]*"/); assert.match(stage, /pushReceipt answered \$code instead of 400/);
+  const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j));
+  assert.match(live, /serving_revision pushreceipt[\s\S]*Deploy the push notifications backend first/); assert.ok(live.indexOf('pushreceipt') < live.indexOf('confirm "'));
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8')); assert.deepEqual(cfg.hosting.rewrites.find((r) => r.source === '/pushReceipt').function, { functionId: 'pushReceipt', region: 'europe-west1' });
 });
 
 // ============================ Phase 7: the "projects" stage deploys exactly the right functions, and the screen cannot go live before them ======================

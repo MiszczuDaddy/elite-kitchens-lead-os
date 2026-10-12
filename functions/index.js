@@ -6,6 +6,8 @@ const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const { getStorage } = require('firebase-admin/storage');
+const { getMessaging } = require('firebase-admin/messaging');
+const push = require('./lib/push');
 const { createClient } = require('./lib/whatsapp');
 const h = require('./lib/handlers');
 
@@ -28,7 +30,9 @@ const cfg = () => ({
   version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), appSecret: APP_SECRET.value().trim(), verifyToken: VERIFY_TOKEN.value().trim(),
 });
 const bucketName = () => process.env.STORAGE_BUCKET || `${process.env.GCLOUD_PROJECT}.firebasestorage.app`;
-const deps = () => { const c = cfg(); return { db: getFirestore(), adminAuth: getAuth(), cfg: c, wa: createClient(c), bucket: getStorage().bucket(bucketName()) }; };
+// Phase 8: push.notify never throws and gives up after a few seconds (lib/push.js), so the webhook and the lead intake can call it freely.
+const pushHook = () => ({ notify: (ev) => push.safeNotify({ db: getFirestore(), messaging: getMessaging(), allowed: ALLOWED_EMAILS.value() }, ev) });
+const deps = () => { const c = cfg(); return { db: getFirestore(), adminAuth: getAuth(), cfg: c, wa: createClient(c), bucket: getStorage().bucket(bucketName()), push: pushHook() }; };
 
 // Public: Meta calls this. Reachable at https://<project>.web.app/webhook via a Hosting rewrite.
 exports.webhook = onRequest({ secrets: SECRETS, timeoutSeconds: 90, memory: '512MiB' }, async (req, res) => {
@@ -61,7 +65,7 @@ exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeout
     const c = { phoneId: PHONE_ID.value(), template: TEMPLATE.value(), lang: LANG.value(), version: API_VERSION.value(),
       apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), apiKeys: LEADS_API_KEY.value() };
     const r = await leads.handleLeadRequest({ method: req.method, headers: req.headers, rawBody: req.rawBody, body: req.body },
-      { db: getFirestore(), wa: createClient(c), cfg: c });
+      { db: getFirestore(), wa: createClient(c), cfg: c, push: pushHook() });
     Object.entries(r.headers || {}).forEach(([k, v]) => res.set(k, v));
     res.status(r.status).json(r.body);
   } catch (e) {   // unexpected: 500 makes Make retry, which is safe because processing is idempotent. No lead data in the log.
@@ -185,3 +189,11 @@ exports.completeProject = onCall({}, (req) => h.completeProject(req.auth, req.da
 exports.removeProject = onCall({}, (req) => h.removeProject(req.auth, req.data, quoteDeps()));
 exports.attachProjectRender = onCall({ timeoutSeconds: 120, memory: '512MiB' }, (req) => h.attachProjectRender(req.auth, req.data, quoteDeps()));
 exports.projectRenderUrl = onCall({}, (req) => h.projectRenderUrl(req.auth, req.data, quoteDeps()));
+
+// ---- Phase 8: push notifications (docs/PUSH.md). Staff-only callables, no WhatsApp or Google secrets. pushReceipt is public on purpose: the service worker on a device reports the moment a
+// notification arrived (it has no sign-in); it is reached through the Hosting rewrite /pushReceipt, validates everything, and returns nothing.
+const pushDeps = () => ({ ...quoteDeps(), messaging: getMessaging() });
+exports.registerPushDevice = onCall({}, (req) => h.registerPushDevice(req.auth, req.data, pushDeps()));
+exports.unregisterPushDevice = onCall({}, (req) => h.unregisterPushDevice(req.auth, req.data, pushDeps()));
+exports.sendTestPush = onCall({ timeoutSeconds: 30 }, (req) => h.sendTestPush(req.auth, req.data, pushDeps()));
+exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { res.sendStatus(await h.pushReceipt(req, { db: getFirestore() })); });

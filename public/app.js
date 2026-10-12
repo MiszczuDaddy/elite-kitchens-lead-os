@@ -173,6 +173,7 @@ auth.onAuthStateChanged(async (user) => {
   startAccessRenewal();
   watchList();
   routeFromHash();
+  if (window.PUSH) PUSH.start();                    // Phase 8: keeps this device's notification address fresh; opens the chat a clicked notification was about
 });
 
 function stopListening() {
@@ -187,6 +188,7 @@ function stopListening() {
   if (window.APPT) APPT.stop();
   if (window.QUOTES) QUOTES.stop();
   if (window.PROJ) PROJ.stop();
+  if (window.PUSH) PUSH.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
 }

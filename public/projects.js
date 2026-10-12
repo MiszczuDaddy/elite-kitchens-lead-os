@@ -145,7 +145,7 @@ window.PROJ = (() => {
   function buildProject() {
     const v = $('pj-project-view'), steps = el('ul', 'pj-steps');
     for (const s of M.STEPS) {
-      const li = el('li', 'pj-step'), lab = el('label', 'pj-step-label'), box = el('input'); box.type = 'checkbox'; box.id = 'pj-step-' + s.key; box.dataset.step = s.key;
+      const li = el('li', 'pj-step'), lab = el('label', 'pj-step-label'), box = el('input'); box.type = 'checkbox'; box.id = 'pj-step-' + s.key; box.dataset.step = s.key; box.disabled = true;      // until the project has loaded (a click before that would be ignored)
       box.onchange = () => setStep(s.key, box.checked);
       lab.append(box, el('span', 'pj-step-text', s.label)); li.append(lab, el('span', 'pj-by')); li.dataset.step = s.key; steps.append(li);
     }

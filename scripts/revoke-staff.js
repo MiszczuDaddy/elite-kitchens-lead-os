@@ -37,6 +37,12 @@ if (require.main === module) {
       initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'elite-kitchens-lead-os' });
       const r = await revokeStaff(getAuth(), arg);
       console.log(`Done: ${r.email} can no longer get a new sign-in; any sign-in they already hold stops working within about an hour.`);
+      try {                                                                      // Phase 8: their notification devices go too (a person who is not on the list never gets a push anyway)
+        const { getFirestore } = fnRequire('firebase-admin/firestore');
+        const devices = await getFirestore().collection('pushDevices').where('email', '==', r.email.toLowerCase()).get();
+        await Promise.all(devices.docs.map((d) => d.ref.delete()));
+        if (devices.size) console.log(`Also removed ${devices.size} notification device(s) of theirs.`);
+      } catch (e) { console.log('Note: their notification devices could not be removed here; they are ignored anyway once the address is off ALLOWED_EMAILS.'); }
       try {                                                                      // remind, if they are still on the list
         const env = fs.readFileSync(path.join(__dirname, '..', 'functions', '.env.elite-kitchens-lead-os'), 'utf8');
         const line = env.split(/\r?\n/).find((l) => l.startsWith('ALLOWED_EMAILS='));

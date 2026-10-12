@@ -25,13 +25,15 @@
 #   ./scripts/deploy-quote-sending.sh routing    read-only: is any function's traffic PINNED to one old version (a failed restore does that)? Every stage that deploys
 #                                                functions runs this check first and refuses while one is pinned (2026-10-11: it made 21 deploys fail).
 #   ./scripts/deploy-quote-sending.sh routing fix   send the traffic of the pinned functions back to their newest version (routing only; no code changes).
+#   ./scripts/deploy-quote-sending.sh push       Phase 8 (push notifications) backend: the 4 new functions, and the WEBHOOK and leadIntake (they now notify staff). Run it BEFORE "live".
+#                                                Needs the one-time Firebase web app first (docs/PUSH.md). This one DOES redeploy the live WhatsApp webhook: ask the owner first.
 #   ./scripts/deploy-quote-sending.sh projects   Phase 7 (Projects) backend: acceptQuote and reopenQuote (they now keep the quote's project), deleteCustomer (it now also erases
 #                                                projects and renders) and the 7 new project functions. Run it BEFORE "live" (the screen); screens that do not know projects keep working.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
 # them. A deploy that Google throttles is retried by itself (up to 3 times).
-# Never deploys the webhook, calendarSweep or any function not named above; changes security rules ONLY in the explicit "rules" stage; never
+# Never deploys the webhook (except in the explicit "push" stage), calendarSweep or any function not named above; changes security rules ONLY in the explicit "rules" stage; never
 # changes indexes, secrets, DNS, the Google Calendar settings, Make or Meta. Do NOT use scripts/deploy-preview.sh: it deploys every function and makes them public.
 set -euo pipefail
 PROJECT=elite-kitchens-lead-os
@@ -54,13 +56,16 @@ BACKEND_FUNCS="$NEW_FUNCS $QUOTE_FUNCS"
 PROJECT_NEW="createProject saveProject setProjectStep completeProject removeProject attachProjectRender projectRenderUrl"   # Phase 7: new, made public like the quote ones
 PROJECT_CHANGED="acceptQuote reopenQuote deleteCustomer"                                                                   # Phase 7: existing functions whose code changed
 PROJECT_FUNCS="$PROJECT_NEW $PROJECT_CHANGED"
+PUSH_NEW="registerPushDevice unregisterPushDevice sendTestPush pushReceipt"                                                  # Phase 8: new; pushReceipt is reached through a Hosting rewrite
+PUSH_CHANGED="webhook leadIntake"                                                                                           # Phase 8: they now send a push (never allowed to break or hold up the message / lead)
+PUSH_FUNCS="$PUSH_NEW $PUSH_CHANGED"
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,35p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -288,6 +293,24 @@ case "${1:-}" in
     check_reachable "$PROJECT_FUNCS"
     echo "Done. The live screen is unchanged and keeps working. Next: $0 live (the Projects screen). To go back: redeploy the previous code (git checkout phase-6-2-pwa-complete -- functions, then firebase deploy --only functions:acceptQuote,functions:reopenQuote,functions:deleteCustomer); the 7 new functions are harmless without the screen."
     ;;
+  push)
+    [ -f functions/lib/push.js ] || { echo "This checkout has no Phase 8 (push notifications) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
+    check_settings; check_access; check_routing $PUSH_FUNCS
+    echo "Functions: $PUSH_FUNCS"
+    echo "New: $PUSH_NEW (the staff-only ones register a device and send a test; pushReceipt is public and only records when a notification arrived)."
+    echo "Changed: webhook (the live WhatsApp webhook) and leadIntake: after a NEW message or lead is stored they ask for a push. A push problem can never change their answer or lose a message (tested)."
+    confirm "Deploy the Phase 8 backend, INCLUDING the live WhatsApp webhook, to the LIVE project?"
+    install
+    deploy_functions $PUSH_FUNCS
+    echo "==> making the 4 new functions reachable (the staff-only ones check the signed-in account themselves)"
+    for f in $PUSH_NEW; do
+      gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+    done
+    check_reachable "registerPushDevice unregisterPushDevice sendTestPush webhook leadIntake"           # every one of these refuses a request without sign-in / signature / key (401)
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "https://$REGION-$PROJECT.cloudfunctions.net/pushReceipt" || echo 000)
+    [ "$code" = 400 ] && echo "   pushReceipt: ok (it answers and refuses a report without the right ids)" || { echo "   WARNING: pushReceipt answered $code instead of 400. Stop here and report it."; exit 1; }
+    echo "Done. Next: $0 live (the Notifications button and the service worker). To go back: git checkout phase-7-projects-complete -- functions, then firebase deploy --only functions:webhook,functions:leadIntake; the 4 new functions are harmless without the screen."
+    ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }
     no_test_folders
@@ -322,6 +345,7 @@ case "${1:-}" in
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }
     # Phase 7: a screen that has Projects calls functions that must exist first (the screen would show errors otherwise).
     if [ -f functions/lib/projects.js ] && [ -z "$(serving_revision createproject)" ]; then echo "Deploy the Projects backend first: $0 projects"; exit 1; fi
+    if [ -f functions/lib/push.js ] && [ -z "$(serving_revision pushreceipt)" ]; then echo "Deploy the push notifications backend first: $0 push"; exit 1; fi        # Phase 8: the screen and the /pushReceipt rewrite need these functions
     no_test_folders
     echo "This publishes the screen files of this checkout (the commit shown at the top) to everyone who uses Elite OS. Hosting only: no function, rule or setting changes."
     confirm "Publish the screen to PRODUCTION Hosting? Only with the owner's approval."

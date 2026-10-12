@@ -8,6 +8,7 @@ const appointments = require('./appointments');
 const calendarSync = require('./calendarSync');
 const quotes = require('./quotes');
 const projects = require('./projects');
+const push = require('./push');
 const reopenLib = require('./reopen');
 const delivery = require('./quoteDelivery');
 const { WINDOW_MS } = require('./windowState');          // 24 hours; the same rule the screen uses (Phase 6.1)
@@ -38,6 +39,7 @@ function webhookVerify(query, cfg) {
 
 async function webhookReceive({ rawBody, body, signature }, deps) {
   const { db, cfg } = deps;
+  const receivedAt = Date.now();                                     // Phase 8: when this request reached us (the push timing starts here)
   if (!verifySignature(rawBody, signature, cfg.appSecret)) {
     log('warn', 'webhook signature invalid or app secret missing'); return 401;
   }
@@ -47,6 +49,8 @@ async function webhookReceive({ rawBody, body, signature }, deps) {
       const phone = normalizePhone(m.from);
       const stored = await store.storeInbound(db, { ...m, from: phone });
       log('info', stored ? 'inbound stored' : 'inbound duplicate ignored', { wamid: m.wamid, type: m.type });
+      // Phase 8: a push for a NEW message only (a Meta retry is a duplicate), before the media download. It can never throw and gives up after a few seconds: WhatsApp processing is never held up or broken by it.
+      if (stored && deps.push) { try { await deps.push.notify({ kind: 'message', sourceId: m.wamid, phone, eventAt: m.createdAt ? m.createdAt.getTime() : null, backendReceivedAt: receivedAt }); } catch (e) { log('error', 'push hook failed'); } }
       // Media: download now (a Meta retry of a still-missing file tries again). A media failure is recorded on the
       // message for staff to retry; it must never turn the webhook into a 500 (that would make Meta retry and risk disabling it).
       if (m.media && deps.bucket) {
@@ -373,6 +377,18 @@ const setProjectStep = projectAction(projects.setStep);
 const completeProject = projectAction(projects.complete);
 const removeProject = projectAction(projects.remove);
 const attachProjectRender = projectAction(projects.attachRender);
+// ---- Phase 8: push notifications (docs/PUSH.md). The rules live in ./push; these wrappers only check who is asking. ----
+const pushAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps.cfg); return fn(deps, actorOf(auth), data, { uid: auth.uid }); };
+const registerPushDevice = pushAction(push.registerDevice);
+const unregisterPushDevice = pushAction(push.unregisterDevice);
+const sendTestPush = pushAction((deps, actor, data) => push.sendTest({ db: deps.db, messaging: deps.messaging }, actor, data));
+// Public (the service worker on a device has no sign-in): POST only, a small JSON body, and push.receipt validates everything.
+async function pushReceipt(req, { db }) {
+  if (req.method !== 'POST') return 405;
+  if ((req.rawBody ? req.rawBody.length : 0) > 1024) return 413;
+  try { return await push.receipt({ db }, req.body); } catch (e) { log('error', 'push receipt failed'); return 500; }
+}
+
 async function projectRenderUrl(auth, data, deps) { assertStaff(auth, deps.cfg); return projects.renderLink(deps, actorOf(auth), data, { signedUrl: mediaLib.signedUrl }); }
 
 // ---- Phase 6.1: Reopen conversation (a general WhatsApp capability, not tied to quotes). The rules live in ./reopen and
@@ -397,5 +413,6 @@ async function quoteChannels(auth, data, deps) {
 
 module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
+  registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

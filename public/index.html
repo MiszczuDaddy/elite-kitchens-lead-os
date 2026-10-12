@@ -56,6 +56,9 @@
       <div class="planned-areas"><span>Leads</span><span>Customers</span><span>AI / Automation</span><span>Settings</span></div>
     </details>
     <div class="rail-spacer"></div>
+    <button id="notif-open" type="button" class="rail-item" hidden title="Notifications" aria-label="Notifications">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 17h12l-1.5-2V11a4.5 4.5 0 0 0-9 0v4L6 17Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="nav-label">Notifications</span>
+    </button>
     <button id="install-app" type="button" class="rail-item" data-install-app hidden title="Install Elite OS as an app" aria-label="Install Elite OS">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg><span class="nav-label">Install Elite OS</span>
     </button>
@@ -76,6 +79,7 @@
       </div>
     </header>
     <p class="pane-caption">WhatsApp conversations</p>
+    <button id="notif-open-m" type="button" class="btn btn-link btn-sm only-mobile install-m" hidden aria-label="Notifications">Notifications</button>
     <a id="to-projects" class="btn btn-link btn-sm only-mobile install-m" href="#projects" aria-label="Open projects">Projects</a>
     <button id="install-app-m" type="button" class="btn btn-link btn-sm only-mobile install-m" data-install-app hidden aria-label="Install Elite OS">Install Elite OS</button>
     <div id="status-filters" class="status-filters" role="group" aria-label="Filter conversations by status">
@@ -427,6 +431,20 @@
   </form>
 </dialog>
 
+<dialog id="notif-dlg" class="dlg dlg-wide">
+  <h2>Notifications</h2>
+  <p id="notif-state" class="notif-state"></p>
+  <p class="hint">An alert for every new WhatsApp message and every new lead, even when Elite OS is closed. It says only that something arrived, never who or what: open it to see.</p>
+  <div id="notif-info" class="hint" role="status"></div>
+  <div id="notif-err" class="dlg-err" role="alert"></div>
+  <div class="dlg-actions notif-actions"><button type="button" id="notif-close" class="btn btn-ghost">Close</button><button type="button" id="notif-test" class="btn btn-ghost">Send a test notification</button><button type="button" id="notif-toggle" class="btn btn-primary">Enable notifications</button></div>
+  <details id="notif-speed" class="notif-speed">
+    <summary>Notification speed</summary>
+    <div id="notif-summary" class="notif-summary"></div>
+    <div class="notif-wrap"><table class="notif-table"><thead><tr><th>When</th><th>What</th><th>Device</th><th title="Meta's own time of the message, to our server receiving it">Meta → us</th><th title="Our server received it, to the push being handed to Firebase">Us → send</th><th title="Handed to Firebase, to Firebase answering 'accepted'. This is NOT delivery.">Firebase accepted</th><th title="Firebase accepted, to the device waking up and reporting it">Accepted → device</th><th title="Our server received it, to the device's report arriving: the honest total">Total to device</th><th>Clicked</th></tr></thead><tbody id="notif-rows"></tbody></table></div>
+    <p class="hint">"Firebase accepted" is when Firebase received the push, <strong>not</strong> when the device got it. "Accepted → device" and "Total" run until the device's own report reached us (the report includes its own trip, a fraction of a second). A device with no connection sends no report ("no report"). A device whose clock is wrong is flagged.</p>
+  </details>
+</dialog>
 <dialog id="np-dlg" class="dlg">
   <form id="np-form" autocomplete="off">
     <h2>New project</h2>
@@ -587,6 +605,7 @@
 <script src="/__/firebase/10.14.1/firebase-firestore-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-functions-compat.js"></script>
 <script src="/__/firebase/10.14.1/firebase-storage-compat.js"></script>
+<script src="/__/firebase/10.14.1/firebase-messaging-compat.js"></script>
 <script src="/__/firebase/init.js"></script>
 <script src="/crm.js"></script>
 <script src="/lead-address.js"></script>
@@ -602,5 +621,7 @@
 <script src="/quotes.js"></script>
 <script src="/project-model.js"></script>
 <script src="/projects.js"></script>
+<script src="/push-model.js"></script>
+<script src="/push.js"></script>
 </body>
 </html>
