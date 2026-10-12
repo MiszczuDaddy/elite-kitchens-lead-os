@@ -1,6 +1,6 @@
 # Phase 8: push notifications
 
-An alert on Windows and Android for every **new WhatsApp message** and every **new Meta lead**, even when Elite OS is closed; clicking it opens the right chat. **Built and tested on branch `phase-8-push-notifications`; not merged, not deployed** (each needs the owner's approval).
+An alert on Windows and Android for every **new WhatsApp message** and every **new Meta lead**, even when Elite OS is closed; clicking it opens the right chat. **Live since 2026-10-12** (see "What the real rollout taught" at the end).
 
 ## How it works
 1. **Enable:** the Notifications dialog (left bar; a small link on phones) asks the browser for permission, gets this device's push address from Firebase Cloud Messaging (FCM) through the app's own service worker (`sw.js`), and a staff-only function stores it (`pushDevices/{id}`).
@@ -43,7 +43,7 @@ Reports go to `/pushReceipt` (a Hosting rewrite to a public function: strict, on
 
 ## One-time setup (the owner's approval needed; nothing is changed until then)
 1. **Register a Firebase web app** (the live config has no `appId`, which FCM needs): in Cloud Shell `firebase apps:create WEB "Elite OS web" --project elite-kitchens-lead-os`. Hosting then serves the new `appId` in `/__/firebase/init.json` (check it). Free; changes nothing else.
-2. **Only if the first test says "permission denied":** let the functions' account send push: `gcloud projects add-iam-policy-binding elite-kitchens-lead-os --member=serviceAccount:812360112616-compute@developer.gserviceaccount.com --role=roles/firebasecloudmessaging.admin`.
+2. **Needed (it was not optional):** let the functions' account send push: `gcloud projects add-iam-policy-binding elite-kitchens-lead-os --member=serviceAccount:812360112616-compute@developer.gserviceaccount.com --role=roles/firebasecloudmessaging.admin`.
 
 ## Release (each step needs the owner's approval)
 1. Merge, then the web app (setup 1).
@@ -53,3 +53,14 @@ Undo: Hosting rollback for the screen; for the functions `git checkout phase-7-p
 
 ## Tests
 `functions/test/push.test.js` (10, emulator), `push-sw.test.js` (7, no emulator: the real `sw.js` push and click handling, and the speed model), `test-ui/push.e2e.js` (9: dialog, enable and registration, test, the table, the real service worker receiving a push with Elite OS closed and reporting to the real receipt function, click-through, turning off, blocked permission, phone layout; needs full Chrome: `CHROMIUM="C:/Program Files/Google/Chrome/Application/chrome.exe"`), a static deploy-script test, and the updated PWA test (the service worker may now push, but still stores nothing). **12 planted errors, all caught.** Real delivery over the internet can only be tested on real devices.
+
+## What the real rollout taught (2026-10-12) and the first measurements
+**Deployed and working** on Windows (installed app) and Android (Samsung, added to the home screen), with Elite OS closed. Order done: merge, web app, backend (incl. `webhook` and `leadIntake`), Hosting; then four fixes found only on the real project:
+1. **The Firebase web app's `appId`** is not in Hosting's automatic config until the next Hosting release; `public/push.js` carries it as a fallback (public).
+2. **A Web Push key of our own.** The shared default key was not usable; the PUBLIC key made in the Firebase console (Project settings > Cloud Messaging > Web Push certificates) is in `public/push.js`.
+3. **The functions' account needed `roles/firebasecloudmessaging.admin`** (it was not optional). The Firebase library reports a *permission denied* as `messaging/mismatched-credential`, which looks like a token problem and is not; the role takes a few minutes to apply. To read the real error of a failed push: Firestore `pushEvents/<id>.devices.<id>.error`, and send the same message with your own account through `https://fcm.googleapis.com/v1/projects/elite-kitchens-lead-os/messages:send`.
+4. **Sign-in lockout (fixed, tested).** Once notifications are allowed in a browser, Firebase's function-calling code asks the messaging library for a token on **every** function call; when that failed (first a missing `/firebase-messaging-sw.js`, in general any failure to reach Firebase messaging) the first call at sign-in failed and the app said "not authorised". Elite OS never needs that token, so `silenceCallToken` in `public/push.js` switches it off for function calls (best effort: it uses a private part of the SDK; `test-ui/push.e2e.js` signs in with notifications allowed and production-like config, and fails without the fix). `public/firebase-messaging-sw.js` is a safety-net file that only loads `/sw.js`. **Emergency workaround if it ever happens again:** sign in from a private window, or reset the site's Notifications permission to "Ask".
+5. **Android battery saving** (Samsung "sleeping apps"): after a while the phone stopped reporting. Settings > Apps > Chrome (and Elite OS) > Battery > Unrestricted, and take them out of "Sleeping / Deep sleeping apps"; then it worked.
+6. A device registered with an older token stays in the list until a send finds it unregistered, then it is removed.
+
+**First measurements** (the owner's real WhatsApp messages, app closed, one device each): Meta to our backend 1.6 to 7.3 s (Meta's side; the 7.3 s message was also the first after idle, a cold start); backend to push handed to Firebase 114 to 188 ms warm (546 ms cold); Firebase accepted 52 to 86 ms; Firebase accepted to the device waking up 68 ms (Windows) and 314 ms (Android, awake); total backend to device 237 to 329 ms (Windows), 946 ms (Android). Windows button tests: 158 to 233 ms. The table only measures when our code on the device woke up, not when the alert appeared on screen. Ideas not done: send the push in parallel with saving the message (about 400 ms less when cold), a minimum instance for the webhook (no cold start, costs money), a "send a test in 15 seconds" button, a clean-up of old `pushEvents`.
