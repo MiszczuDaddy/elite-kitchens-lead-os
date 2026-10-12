@@ -217,7 +217,7 @@ window.APPT = (() => {
     for (const b of $('appts-view').querySelectorAll('button[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === A.view));
     $('appts-cal').hidden = false;
     $('appts-cal').dataset.view = A.view;
-    $('cal-grid').parentElement.hidden = A.view !== 'calendar';
+    $('cal-grid').closest('.cal-workspace').hidden = A.view !== 'calendar';
     $('cal-timeline').hidden = !['week', 'day'].includes(A.view);
     for (const id of ['cal-prev', 'cal-next', 'cal-today']) $(id).hidden = A.view === 'list';
     $('appts-list').hidden = A.view !== 'list';

@@ -408,9 +408,9 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   const md1 = mp.locator(`.cal-cell[data-day="${D1}"]`);
   await md1.locator('.cal-dot').first().waitFor();
-  assert.equal(await md1.locator('.cal-ev').first().isVisible(), false);               // names do not fit: dots instead
+  assert.equal(await md1.locator('.cal-ev').first().isVisible(), true);               // readable chips remain visible on phones
   assert.equal(await md1.locator('.cal-dot').count(), 2);
-  await md1.tap();
+  await md1.locator('.cal-select').tap();
   assert.equal(await mp.getAttribute('#appts-view button[data-view="day"]', 'aria-pressed'), 'true');
   await mp.tap('#appts-view button[data-view="calendar"]');
   await mp.waitForFunction((k) => document.querySelector(`.cal-cell[data-day="${k}"]`).classList.contains('sel'), D1);
@@ -418,7 +418,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await mp.locator('#cal-day .agenda-entry').count(), 2);
   assert.equal(await mp.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D1);
   await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-calendar.png') });
-  ok('phone: Day is the default; Month shows compact dots, and tapping a date opens Day; the month agenda remains available');
+  ok('phone: Day is the default; Month shows appointment times and names, and tapping a date opens Day; the month agenda remains available');
   await mp.locator('.agenda-entry summary').first().tap();
   await mp.waitForSelector('#appt-detail-dlg[open]');
   assert.match(await mp.locator('#appt-detail-content').innerText(), /Lena Lead/);
@@ -540,10 +540,10 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `page overflow at ${width}`);
     assert.equal(await page.locator('.cal-workspace').evaluate(e => e.scrollWidth <= e.clientWidth + 1), true, `calendar overflow at ${width}`);
     const dayBox = await page.locator('#cal-day').boundingBox(), gridBox = await page.locator('#cal-grid').boundingBox();
-    assert.ok(width >= 1200 ? dayBox.x > gridBox.x + gridBox.width : dayBox.y > gridBox.y + gridBox.height, `agenda placement at ${width}`);
+    assert.ok(dayBox.y > gridBox.y + gridBox.height, `agenda placement at ${width}`);
     await page.screenshot({ path: path.join(SHOTS, `calendar-preview-${width}.png`), fullPage: true });
   }
-  ok('calendar and agenda fit at 1440, 1280, 1024, 390 and 320px, with side-by-side or stacked layout as appropriate');
+  ok('calendar and agenda fit at 1440, 1280, 1024, 390 and 320px, with a full-width month and agenda below');
   assert.deepEqual(errors, [], 'browser errors: ' + JSON.stringify(errors)); ok('no JavaScript errors in the browser');
   if (process.env.CALENDAR_PREVIEW === '1') {
     // Populate today's agenda for the interactive demo, after assertions are complete.

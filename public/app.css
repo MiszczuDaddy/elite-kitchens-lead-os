@@ -671,7 +671,12 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 }
 /* Month overview retains its working day agenda and confirmed drag-to-reschedule. */
 .appts-cal { max-width: none; }
-.cal-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 24px; align-items: start; }
+.cal-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.cal-month-scroll { overflow-x: auto; min-width: 0; }
+.cal-month-scroll .cal-grid { min-width: 980px; }
+.cal-month-scroll .cal-ev { display: flex; min-height: 28px; }
+.cal-month-scroll .cal-more { display: block; }
+.cal-month-scroll .cal-dots { display: none; }
 .cal-grid { min-width: 0; }
 .cal-cell { cursor: pointer; min-height: 106px; }
 .cal-cell.sel { background: var(--selected); }
@@ -687,7 +692,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .cal-cell.today .cal-select { background: var(--accent); color: #fff; font-weight: 650; }
 .cal-cell.sel .cal-select { font-weight: 700; }
 .cal-ev { font-size: 13px; gap: 4px; padding: 4px; border-left-width: 1px; }
-.cal-day { display: block; min-width: 0; margin: 0; padding-left: 24px; border-left: 1px solid var(--line); }
+.cal-day { display: block; min-width: 0; margin: 0; padding-left: 0; border-left: 0; }
 .agenda-head h2 { margin: 0; font-size: 18px; line-height: 1.4; font-weight: 650; letter-spacing: -.015em; }
 .agenda-count { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
 .agenda-nav { display: flex; gap: 8px; margin: 14px 0; }
@@ -730,6 +735,8 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
   .appts-head #appts-new { margin-left: auto; }
   .appts-toggle { margin-left: 0; }
   .cal-cell { min-height: 60px; padding: 2px; gap: 2px; }
+  .cal-month-scroll .cal-cell { align-items: stretch; min-height: 110px; padding: 4px; }
+  .cal-month-scroll .cal-ev, .cal-month-scroll .cal-more { min-height: 44px; }
   .cal-select { align-self: center; min-width: 0; width: 100%; max-width: 44px; height: 44px; }
   .cal-nav .icon-btn { width: 44px; min-height: 44px; }
   .cal-status { display: none; }
