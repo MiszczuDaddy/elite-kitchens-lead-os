@@ -71,6 +71,7 @@ test('push.js falls back to the Firebase web app id when the automatic config la
   const src = read('push.js');
   assert.match(src, /const WEB_APP_ID = '1:812360112616:web:[0-9a-f]{20,}';/); assert.match(src, /if \(options && !options\.appId\) options\.appId = WEB_APP_ID;/);
   assert.ok(src.indexOf('options.appId = WEB_APP_ID') < src.indexOf('firebase.messaging().getToken'), 'the id is set before messaging is used');
+  assert.match(src, /const VAPID_KEY = 'B[\w-]{80,100}';/, 'this project\'s own public Web Push key'); assert.match(src, /getToken\(\{ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg \}\)/, 'and it is passed to getToken');
 });
 
 // ---------------------------------------------------------------- the model behind the speed table

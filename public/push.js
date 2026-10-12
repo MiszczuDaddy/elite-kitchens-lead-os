@@ -24,10 +24,13 @@ window.PUSH = (() => {
   // Hosting's automatic Firebase config gained the web app's id only after the web app was registered (2026-10-12) and the next Hosting release; push needs it. It is public (it is in every
   // web page of the project), so it is used only as a fallback if the automatic config still lacks it.
   const WEB_APP_ID = '1:812360112616:web:2d739fad9219ebb92eec5d';
+  // This project's own Web Push key (the PUBLIC half of the "Web Push certificate" made in the Firebase console on 2026-10-12). Without it the browser used Firebase's shared default key and
+  // Firebase refused to send to the device ("mismatched-credential"). A public key: it is in every page that uses push, and nothing secret is kept here.
+  const VAPID_KEY = 'BMFJEP-z4x-jo2-CBsVZVsREJKXzNorUdLLVAnPTaJEM1yzU9M3osE1mfcpGHQBjUtsjAiZeh5-olo7j4L1jdpw';
   async function token() {
     const options = firebase.app().options; if (options && !options.appId) options.appId = WEB_APP_ID;
     const reg = await navigator.serviceWorker.ready;                                // our own tiny service worker (sw.js) receives the pushes
-    return firebase.messaging().getToken({ serviceWorkerRegistration: reg });
+    return firebase.messaging().getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
   }
   async function register(t) {
     const r = (await call('registerPushDevice')({ token: t, platform: platform() })).data;
