@@ -407,7 +407,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await showDay(mp, D1);
   assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   const md1 = mp.locator(`.cal-cell[data-day="${D1}"]`);
-  await md1.locator('.cal-dot').first().waitFor();
+  await md1.locator('.cal-ev').first().waitFor();
   assert.equal(await md1.locator('.cal-ev').first().isVisible(), true);               // readable chips remain visible on phones
   assert.equal(await md1.locator('.cal-dot').count(), 2);
   await md1.locator('.cal-select').tap();
