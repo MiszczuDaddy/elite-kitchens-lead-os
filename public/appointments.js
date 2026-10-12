@@ -297,13 +297,17 @@ window.APPT = (() => {
     host.dataset.range = rangeKey;
     const visible = A.calList.filter(a => A.showCancelled || a.status !== 'cancelled');
     const layouts = keys.map(k => CalendarLayout.layout(visible, k));
-    const scale = window.matchMedia('(max-width: 899px)').matches ? 1.6 : 1.4;
-    const minutes = Math.max(...layouts.map(l => l.minutes));
+    const mobile = window.matchMedia('(max-width: 899px)').matches;
+    const scale = mobile ? 44 / 60 : Math.max(.65, Math.min(.8, (innerHeight - 300) / 720)), step = mobile ? 60 : 30;
+    const windowRange = CalendarLayout.windowFor(keys, layouts, A.fullHours);
+    const { minutes, starts } = windowRange;
     const dateLabel = key => new Date(key + 'T12:00:00Z').toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
     $('cal-title').textContent = A.view === 'day' ? dateLabel(A.selDay) : dateLabel(keys[0]) + ' – ' + dateLabel(keys.at(-1));
     $('cal-status').textContent = 'Irish time';
     const status = el('p', 'time-status', A.calError || (!A.calLoaded ? 'Loading appointments…' : A.calLimited ? 'Showing the first 500 appointments. This schedule may be incomplete.' : 'Blank times show no Elite OS appointment. Travel time and Google-only events are not included.'));
     status.setAttribute('role', 'status');
+    const hours = button(A.fullHours ? 'Show 08:00–20:00' : 'Show all 24 hours', 'linkbtn time-hours', () => { A.fullHours = !A.fullHours; host.dataset.range = ''; render(); });
+    hours.setAttribute('aria-pressed', String(!!A.fullHours));
     const scroll = el('div', 'time-scroll'); scroll.tabIndex = 0; scroll.setAttribute('aria-label', 'Appointment schedule. Scroll for earlier or later times.');
     const grid = el('div', 'time-grid'); grid.style.setProperty('--days', keys.length);
     grid.classList.toggle('time-week', A.view === 'week');
@@ -316,26 +320,28 @@ window.APPT = (() => {
       if (layouts[i].minutes !== 1440) head.append(el('small', null, layouts[i].minutes / 60 + '-hour day · clocks change'));
       grid.append(head);
     }
-    const ruler = el('div', 'time-ruler'); ruler.style.height = minutes * scale + 'px';
-    const rulerSlots = A.view === 'day' ? CalendarLayout.slots(keys[0]) : Array.from({ length: minutes / 30 }, (_, i) => ({ minute: i * 30, time: pad(Math.floor(i / 2)) + ':00' }));
+    const ruler = el('div', 'time-ruler'); ruler.style.height = minutes * scale + 18 + 'px';
+    const rulerSlots = CalendarLayout.slots(keys[0]);
     for (const slot of rulerSlots.filter(s => s.minute % 60 === 0)) {
-      const label = el('span', null, slot.time); label.style.top = slot.minute * scale + 'px'; ruler.append(label);
+      if (slot.minute < starts[0] || slot.minute > starts[0] + minutes) continue;
+      const label = el('span', null, slot.time); label.style.top = (slot.minute - starts[0]) * scale + 'px'; ruler.append(label);
     }
     grid.append(ruler);
     for (const [i, key] of keys.entries()) {
       const layout = layouts[i], column = el('div', 'time-column'); column.dataset.day = key;
-      column.style.height = minutes * scale + 'px';
+      column.style.height = minutes * scale + 18 + 'px';
       for (const slot of CalendarLayout.slots(key)) {
+        if (slot.minute < starts[i] || slot.minute >= starts[i] + minutes || slot.minute % step) continue;
         const b = button('', 'time-slot', () => openPicker(key, slot.time));
         b.dataset.time = slot.time; b.dataset.focus = 'slot-' + key + '-' + slot.minute;
         b.setAttribute('aria-label', 'Book appointment on ' + longDay(key) + ' at ' + slot.time + (slot.bookable ? '' : ' (first occurrence; use the later time)'));
         b.disabled = !A.calLoaded || !!A.calError || A.calLimited || !validDrop(key) || !slot.bookable;
         b.tabIndex = slot.time === '09:00' && slot.bookable && i === keys.findIndex(validDrop) ? 0 : -1;
-        b.style.top = slot.minute * scale + 'px'; b.style.height = 30 * scale + 'px';
+        b.style.top = (slot.minute - starts[i]) * scale + 'px'; b.style.height = step * scale + 'px';
         if (slot.minute % 60 === 0) b.classList.add('hour-start');
         if (A.view === 'week' && layout.minutes !== 1440) b.append(el('span', 'time-dst-label', slot.time));
         b.onkeydown = e => {
-          const offsets = { ArrowDown: [i, slot.minute + 30], ArrowUp: [i, slot.minute - 30], ArrowLeft: [i - 1, slot.minute], ArrowRight: [i + 1, slot.minute] };
+          const offsets = { ArrowDown: [i, slot.minute + step], ArrowUp: [i, slot.minute - step], ArrowLeft: [i - 1, slot.minute - starts[i] + starts[i - 1]], ArrowRight: [i + 1, slot.minute - starts[i] + starts[i + 1]] };
           const target = offsets[e.key]; if (!target) return;
           e.preventDefault();
           const next = host.querySelector(`[data-focus="slot-${keys[target[0]]}-${target[1]}"]`);
@@ -347,25 +353,26 @@ window.APPT = (() => {
         const a = event.appointment;
         const b = button('', 'time-event' + (a.status === 'cancelled' ? ' cancelled' : ''), () => openTimelineDetail(a));
         b.dataset.id = a.id; b.dataset.focus = 'event-' + key + '-' + a.id;
-        b.style.top = event.top * scale + 'px'; b.style.height = event.duration * scale + 'px';
+        b.style.top = (event.top - starts[i]) * scale + 'px'; b.style.height = event.duration * scale + 'px';
         b.style.left = `calc(${event.column / event.columns * 100}% + 2px)`;
         b.style.width = `calc(${100 / event.columns}% - 4px)`;
         const label = `${clock(ts(a.start))}–${clock(ts(a.end))} · ${nameOf(a)}${a.location ? ' · ' + a.location : ''}${a.status === 'cancelled' ? ' · Cancelled' : ''}${event.continuesBefore ? ' · Continues from previous day' : ''}${event.continuesAfter ? ' · Continues next day' : ''}`;
         b.title = label; b.setAttribute('aria-label', label + '. Open appointment details');
         b.append(el('strong', null, nameOf(a)), el('span', null, clock(ts(a.start)) + '–' + clock(ts(a.end))));
-        if (event.duration >= 60 && a.location) b.append(el('span', 'time-place', a.location));
-        if (event.duration < 30) b.classList.add('time-event-short');
+        if (event.duration >= 120 && a.location) b.append(el('span', 'time-place', a.location));
+        if (event.duration < 60) b.classList.add('time-event-short');
         if (syncOf(a).state === 'failed') { b.classList.add('sync-failed'); b.append(el('span', null, 'Google sync failed')); }
         column.append(b);
       }
-      if (key === dublinDate(Date.now())) {
-        const now = el('div', 'time-now'); now.style.top = (Date.now() - layout.from) / 60000 * scale + 'px'; now.setAttribute('aria-hidden', 'true'); column.append(now);
+      const nowMinute = (Date.now() - layout.from) / 60000 - starts[i];
+      if (key === dublinDate(Date.now()) && nowMinute >= 0 && nowMinute <= minutes) {
+        const now = el('div', 'time-now'); now.style.top = nowMinute * scale + 'px'; now.setAttribute('aria-hidden', 'true'); column.append(now);
       }
       grid.append(column);
     }
-    scroll.append(grid); host.replaceChildren(status, scroll);
-    const earliest = Math.min(480, ...layouts.flatMap(l => l.events.map(e => e.top)));
-    scroll.scrollTop = scrollTop ?? Math.max(0, earliest * scale - 12); scroll.scrollLeft = scrollLeft;
+    const controls = el('div', 'time-controls'); controls.append(status, hours);
+    scroll.append(grid); host.replaceChildren(controls, scroll);
+    scroll.scrollTop = scrollTop ?? 0; scroll.scrollLeft = scrollLeft;
     if (A.detailId) {
       const a = A.calList.find(a => a.id === A.detailId && (A.showCancelled || a.status !== 'cancelled'));
       if (a) renderDetail(a); else if (A.calLoaded || A.calError) { closeDialog($('appt-detail-dlg')); A.detailId = null; }

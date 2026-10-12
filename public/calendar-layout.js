@@ -47,5 +47,18 @@
     for (const slot of out) slot.bookable = !out.some(other => other.at > slot.at && other.time === slot.time);
     return out;
   }
-  return { addDays, days, range, layout, slots };
+  // A shared window relative to 08:00 keeps ordinary hours aligned across DST weeks.
+  function windowFor(keys, layouts, full = false) {
+    const bases = keys.map(key => slots(key).find(s => s.time === '08:00').minute);
+    let before = 0, after = 720;
+    layouts.forEach((day, i) => {
+      if (full) { before = Math.min(before, -bases[i]); after = Math.max(after, day.minutes - bases[i]); }
+      for (const event of day.events) {
+        before = Math.min(before, Math.floor((event.top - bases[i]) / 60) * 60);
+        after = Math.max(after, Math.ceil((event.top + event.duration - bases[i]) / 60) * 60);
+      }
+    });
+    return { starts: bases.map(base => base + before), minutes: after - before };
+  }
+  return { addDays, days, range, layout, slots, windowFor };
 });

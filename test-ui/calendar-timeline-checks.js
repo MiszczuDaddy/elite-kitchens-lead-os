@@ -18,7 +18,14 @@ module.exports = async ({ page, db, cal, ok, SHOTS }) => {
   assert.ok(Math.abs(a.height/b.height-1.5)<.05, '90-minute block must be 1.5 times a 60-minute block');
   assert.equal(await page.locator('.time-event[draggable="true"]').count(),0);
   assert.equal(await page.locator(`.time-column[data-day="${today}"] .time-event[data-id="timeline-night"]`).count(),1);
-  await page.locator('.time-scroll').evaluate(e=>{e.scrollTop=8*60*1.4;});
+  await db.doc('appointments/timeline-night').delete();
+  await page.waitForFunction(()=>!document.querySelector('.time-event[data-id="timeline-night"]'));
+  assert.equal(await page.locator('.time-slot[data-time="07:00"]').count(),0);
+  assert.match(await page.locator('.time-ruler').innerText(),/20:00/);
+  await page.locator('.time-hours').click();
+  assert.equal(await page.locator('.time-slot[data-time="00:00"]').count(),7);
+  await page.locator('.time-hours').click();
+  await page.locator('.time-scroll').evaluate(e=>{e.scrollTop=0;});
   await page.screenshot({path:path.join(SHOTS,'redesign-week-desktop.png')});
   ok('Week defaults to seven days; overlapping blocks have separate columns and proportional durations; carry-in appointments are visible and hourly dragging is absent');
 
@@ -61,7 +68,7 @@ module.exports = async ({ page, db, cal, ok, SHOTS }) => {
   for(const width of [1360,1024,390,320]){
     await page.setViewportSize({width,height:860});
     await page.click('#appts-view [data-view="day"]');
-    await page.locator('.time-scroll').evaluate(e=>{e.scrollTop=8*60*(innerWidth<900?1.6:1.4);});
+    await page.locator('.time-scroll').evaluate(e=>{e.scrollTop=0;});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'page overflow '+width);
     if(width<900){const box=await page.locator('.time-slot[data-time="09:00"]').boundingBox();assert.ok(box.height>=44);}
     await page.screenshot({path:path.join(SHOTS,`redesign-day-${width}.png`)});
@@ -71,7 +78,7 @@ module.exports = async ({ page, db, cal, ok, SHOTS }) => {
   const detail=await page.locator('#appt-detail-dlg').boundingBox();assert.ok(detail.x>=0 && detail.x+detail.width<=320);
   await page.screenshot({path:path.join(SHOTS,'redesign-mobile-details.png')});
   await page.click('#appt-detail-close'); await page.setViewportSize({width:1360,height:860});
-  ok('Day view fits desktop and 390/320px phones; mobile half-hour slots meet 44px targets and appointment details fit the screen');
+  ok('Compact 08:00–20:00 Day view fits desktop and 390/320px phones; all-hours toggle works, mobile hourly slots meet 44px targets and details fit the screen');
   for(const [id] of fixtures)await db.doc('appointments/'+id).delete();
   await booked.ref.delete(); cal.events.delete(eventId);
 };

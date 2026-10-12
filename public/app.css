@@ -624,6 +624,9 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .cal-nav .cal-status { order: 4; margin-left: 8px; }
 .cal-title { flex: 1; min-width: 180px; font-size: 17px; }
 .time-status { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.time-controls { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.time-hours { flex: none; min-height: 36px; font-size: 13px; }
+.time-controls .time-status { margin-bottom: 8px; }
 .time-scroll { overflow: auto; max-height: calc(100dvh - 230px); min-height: 280px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overscroll-behavior: contain; }
 .time-grid { display: grid; grid-template-columns: 58px repeat(var(--days), minmax(0, 1fr)); position: relative; }
 .time-grid.time-week { grid-template-columns: 58px repeat(var(--days), minmax(112px, 1fr)); }
@@ -641,7 +644,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .time-slot:hover:not(:disabled), .time-slot:focus-visible { background: var(--selected); }
 .time-slot:disabled { cursor: default; background: var(--nav); opacity: .5; }
 .time-dst-label { position: absolute; right: 4px; top: 2px; color: var(--muted); font-size: 11px; }
-.time-event { position: absolute; z-index: 2; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; overflow: hidden; border: 1px solid #bdc8ba; border-radius: 4px; padding: 5px 6px; background: #e9ede3; color: var(--ink); text-align: left; cursor: pointer; font-size: 13px; line-height: 1.35; }
+.time-event { position: absolute; z-index: 2; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; overflow: hidden; border: 1px solid #bdc8ba; border-radius: 4px; padding: 2px 4px; background: #e9ede3; color: var(--ink); text-align: left; cursor: pointer; font-size: 13px; line-height: 1.2; }
 .time-event:hover { background: #dce4d5; }
 .time-event strong, .time-event span { display: block; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .time-event strong { font-size: 14px; font-weight: 600; }
@@ -662,6 +665,9 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
   .time-grid { grid-template-columns: 48px minmax(0, 1fr); }
   .time-grid.time-week { grid-template-columns: 48px repeat(7, minmax(120px, 1fr)); }
   .time-event { font-size: 13px; }
+  .time-controls { flex-wrap: wrap; gap: 0; }
+  .time-hours { min-height: 44px; }
+  .time-controls .time-status { margin-bottom: 0; }
 }
 /* Month overview retains its working day agenda and confirmed drag-to-reschedule. */
 .appts-cal { max-width: none; }

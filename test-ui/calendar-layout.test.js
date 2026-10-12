@@ -3,6 +3,24 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const L = require('../public/calendar-layout');
 const event = (id, start, end) => ({ id, start: Date.parse(start), end: Date.parse(end) });
+test('compact window covers 08:00–20:00, including on Dublin clock-change days', () => {
+  for (const key of ['2026-11-02','2026-10-25','2027-03-28']) {
+    const w = L.windowFor([key], [L.layout([], key)]);
+    assert.equal(w.minutes, 720);
+    assert.equal(L.slots(key).find(s => s.minute === w.starts[0]).time, '08:00');
+    assert.equal(L.slots(key).find(s => s.minute === w.starts[0]+w.minutes).time, '20:00');
+    const full = L.windowFor([key], [L.layout([], key)], true);
+    assert.equal(full.starts[0], 0); assert.equal(full.minutes, L.layout([], key).minutes);
+  }
+});
+test('compact windows expand to include early, late and cross-midnight appointments', () => {
+  const keys = L.days('2026-11-02', 'week');
+  const appointments = [event('early','2026-11-02T06:30Z','2026-11-02T07:30Z'),event('late','2026-11-03T19:30Z','2026-11-03T21:15Z')];
+  const w = L.windowFor(keys, keys.map(k => L.layout(appointments, k)));
+  assert.deepEqual(w.starts, keys.map(() => 360)); assert.equal(w.minutes, 960);
+  const night = L.layout([event('night','2026-11-01T23:30Z','2026-11-02T00:30Z')], keys[0]);
+  assert.equal(L.windowFor([keys[0]],[night]).starts[0],0);
+});
 test('week boundaries cross months, years and leap days without changing Dublin dates', () => {
   assert.deepEqual(L.days('2026-01-01', 'week'), ['2025-12-29','2025-12-30','2025-12-31','2026-01-01','2026-01-02','2026-01-03','2026-01-04']);
   assert.equal(L.addDays('2028-02-28', 1), '2028-02-29');
