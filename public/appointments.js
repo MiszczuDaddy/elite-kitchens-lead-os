@@ -404,7 +404,7 @@ window.APPT = (() => {
       pick.setAttribute('aria-label', longDay(k) + ', ' + items.length + ' appointments');
       pick.setAttribute('aria-pressed', String(k === A.selDay));
       if (k === today) pick.setAttribute('aria-current', 'date');
-      pick.onclick = e => { e.stopPropagation(); openDay(k); };
+      pick.onclick = e => { e.stopPropagation(); selectDay(k, null, true); };
       pick.onkeydown = e => {
         const offsets = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
         if (!Object.hasOwn(offsets, e.key)) return;
@@ -423,7 +423,7 @@ window.APPT = (() => {
         items.slice(0, 4).forEach((a) => { const d = el('span', 'cal-dot'); const st = stageOf(a); if (st) d.dataset.status = st; dots.append(d); });
         cell.append(dots);
       }
-      cell.onclick = () => openDay(k);
+      cell.onclick = () => selectDay(k, null, true);
       nodes.push(cell);
     }
     $('cal-grid').replaceChildren(...nodes);
@@ -452,7 +452,7 @@ window.APPT = (() => {
     if (A.calError) {
       body.append(el('p', 'agenda-message', A.calError), button('Try again', 'btn btn-ghost', () => { listen(); render(); }));
     } else if (!A.calLoaded) body.append(el('p', 'agenda-message', 'Loading appointments…'));
-    else if (!items.length) body.append(el('p', 'agenda-message', A.calLimited ? 'The calendar result limit was reached. This day may be incomplete.' : 'No appointments booked for this day.'));
+    else if (!items.length && A.calLimited) body.append(el('p', 'agenda-message', 'The calendar result limit was reached. This day may be incomplete.'));
     else body.append(...items.map(agendaEntry));
     if (A.calLimited && items.length) body.append(el('p', 'agenda-message', 'Showing the first 500 appointments in this calendar range. This day may be incomplete.'));
     day.replaceChildren(head, nav, book, body);

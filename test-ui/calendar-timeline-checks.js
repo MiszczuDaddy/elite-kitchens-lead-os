@@ -36,7 +36,8 @@ module.exports = async ({ page, db, cal, ok, SHOTS }) => {
   await page.click('#appt-detail-close');
   await page.click('#appts-view [data-view="calendar"]');
   await page.locator(`.cal-cell[data-day="${today}"] .cal-select`).click();
-  assert.equal(await page.getAttribute('#appts-view [data-view="day"]','aria-pressed'),'true');
+  assert.equal(await page.getAttribute('#appts-view [data-view="calendar"]','aria-pressed'),'true');
+  await page.click('#appts-view [data-view="day"]');
   assert.equal(await page.locator('.time-column').count(),1);
   await page.click('#cal-next');
   assert.equal(await page.locator('.time-column').getAttribute('data-day'),L.addDays(today,1));
@@ -63,7 +64,7 @@ module.exports = async ({ page, db, cal, ok, SHOTS }) => {
   const moved=(await booked.ref.get()).data();
   assert.equal(moved.sync.google.eventId,eventId); assert.equal(moved.version,2);
   assert.equal(new Date(cal.events.get(eventId).start.dateTime).getTime(),moved.start.toMillis());
-  ok('Month dates open Day; navigation and keyboard slot booking prefill the right date/time; double-submit creates one Google event and rescheduling updates the same event');
+  ok('Month dates retain Month; explicit Day selection works; navigation and keyboard slot booking prefill the right date/time; double-submit creates one Google event and rescheduling updates the same event');
 
   for(const width of [1360,1024,390,320]){
     await page.setViewportSize({width,height:860});

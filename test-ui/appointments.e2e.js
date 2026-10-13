@@ -411,14 +411,13 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   assert.equal(await md1.locator('.cal-ev').first().isVisible(), true);               // readable chips remain visible on phones
   assert.equal(await md1.locator('.cal-dot').count(), 2);
   await md1.locator('.cal-select').tap();
-  assert.equal(await mp.getAttribute('#appts-view button[data-view="day"]', 'aria-pressed'), 'true');
-  await mp.tap('#appts-view button[data-view="calendar"]');
+  assert.equal(await mp.getAttribute('#appts-view button[data-view="calendar"]', 'aria-pressed'), 'true');
   await mp.waitForFunction((k) => document.querySelector(`.cal-cell[data-day="${k}"]`).classList.contains('sel'), D1);
   await mp.locator('#cal-day .agenda-entry').nth(1).waitFor();
   assert.equal(await mp.locator('#cal-day .agenda-entry').count(), 2);
   assert.equal(await mp.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D1);
   await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-calendar.png') });
-  ok('phone: Day is the default; Month shows appointment times and names, and tapping a date opens Day; the month agenda remains available');
+  ok('phone: Day is the default; Month shows appointment times and names, and tapping a date retains Month and displays its agenda; the month agenda remains available');
   await mp.locator('.agenda-entry summary').first().tap();
   await mp.waitForSelector('#appt-detail-dlg[open]');
   assert.match(await mp.locator('#appt-detail-content').innerText(), /Lena Lead/);
@@ -454,7 +453,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await page.locator(`.cal-cell[data-day="${D7}"] .cal-select`).click();
   await page.click('#appts-view button[data-view="calendar"]');
   await page.locator('.cal-select[aria-pressed="true"]').focus();
-  await page.waitForFunction(() => document.querySelector('.agenda-message')?.textContent.includes('No appointments booked'));
+  await page.waitForFunction(() => document.querySelector('.agenda-count')?.textContent === '0 appointments' && document.querySelector('.agenda-list')?.textContent === '');
   assert.equal(await page.isVisible('#cal-day'), true);
   await page.keyboard.press('ArrowLeft');
   const D6 = dublin(Date.now() + 6 * DAY);
