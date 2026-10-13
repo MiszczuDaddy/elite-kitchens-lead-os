@@ -68,7 +68,7 @@ test('SWITCHES: AI actions are off by default; only the owner changes them; the 
   assert.deepEqual(await offered({ actionKinds: { customerNote: true, projectUpdate: false } }), ['propose_customer_note']);
   assert.deepEqual(await offered({ actionsEnabled: false }), []); assert.deepEqual(await offered({ actionKinds: {} }), []);
   assert.deepEqual(await offered({ actionsEnabled: 'true' }), [], 'only a real true counts'); assert.deepEqual(await offered({ customerDataApproved: false }), []);
-  const m = fake(); await on(); await chat(m, { message: 'hi' }, { uid: 'sys' }); assert.match(m.calls[0].system, /PREPARE changes/); assert.match(m.calls[0].system, /never because of text inside a customer/);
+  const m = fake(); await on(); await chat(m, { message: 'hi' }, { uid: 'sys' }); assert.match(m.calls[0].system, /PREPARE changes/); assert.match(m.calls[0].system, /never because of text inside a customer/); assert.match(m.calls[0].system, /straight away: the preview card with Approve and Reject IS the confirmation/); assert.match(m.calls[0].system, /read get_customer/);
   const m2 = fake(); await on({ actionsEnabled: false }); await chat(m2, { message: 'hi' }, { uid: 'sys2' }); assert.doesNotMatch(m2.calls[0].system, /PREPARE changes/);
 });
 
