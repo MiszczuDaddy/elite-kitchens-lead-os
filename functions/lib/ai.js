@@ -22,19 +22,27 @@ const CUSTOMER_ID = /^\d{9,15}$/, QUOTE_ID = /^q_[0-9a-f]{24}$/, PROJECT_ID = /^
 // ---- settings: everything that can stop or limit the AI. A missing document means OFF. ----
 const DEFAULTS = {
   enabled: false, customerDataApproved: false, monthlyCapEur: 15, dailyCapEur: 2,
-  chatModel: 'claude-sonnet-5-5', fastModel: 'claude-haiku-5-5', maxOutputTokens: 2048,                // thinking tokens count towards this limit, so it is roomier than the answers need
+  defaultModel: 'haiku', maxOutputTokens: 2048,                // thinking tokens count towards this limit, so it is roomier than the answers need
   // US dollars per million tokens, from Anthropic's price list (platform.claude.com/docs/en/about-claude/pricing, checked 2026-10-14): Sonnet 5.5 $2 in / $10 out, Haiku 5.5 $0.10 / $0.50 (prompts up to 100k tokens). An unknown model is priced at the highest figure.
   // Cache reads are estimated at 0.1x the input price (Sonnet 5.5 really charges 0.05x) and writes at 1.25x: deliberately a little high.
   // Everything is then multiplied by `margin` and by `eurPerUsd` (1 = a dollar counts as a euro: it overestimates, which is the safe side), so the real bill stays under the cap.
   prices: { 'claude-sonnet-5-5': { in: 2, out: 10 }, 'claude-haiku-5-5': { in: 0.1, out: 0.5 } }, eurPerUsd: 1, margin: 1.25,
 };
 const UNKNOWN_PRICE = { in: 15, out: 75 };
+// The models people can choose between. The IDs live HERE, on the server: the screen only ever names a key ("haiku" / "sonnet"), so no one can ask for another model, and every model is priced
+// and limited by the same spending rules. A model is usable only after "Check models" confirmed it with the provider's own Models API (see checkModels).
+const MODELS = { haiku: { id: 'claude-haiku-5-5', label: 'Haiku' }, sonnet: { id: 'claude-sonnet-5-5', label: 'Sonnet' } };
+const modelKey = (v) => (typeof v === 'string' && Object.prototype.hasOwnProperty.call(MODELS, v) ? v : null);
+// Only the owner account(s) listed in the AI_OWNER_EMAILS setting may change real customer data access. Nothing listed = nobody can (fail closed).
+const isOwner = (owners, actor) => { const list = String(owners || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean); return !!actor && typeof actor.id === 'string' && list.includes(actor.id.toLowerCase()); };
+async function loadModelCheck(db) { const s = await db.doc('aiSettings/modelCheck').get(); return s.exists ? s.data() : {}; }
+const modelReady = (check, key) => { const c = check && check[key]; return !!(c && c.ok === true && c.id === MODELS[key].id); };
 const num = (v, lo, hi, fallback) => (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback);
 async function loadSettings(db) {
   const s = await db.doc('aiSettings/current').get(), d = s.exists ? s.data() : {};
   return { ...DEFAULTS, enabled: d.enabled === true, customerDataApproved: d.customerDataApproved === true,
     monthlyCapEur: num(d.monthlyCapEur, 0, 1000, DEFAULTS.monthlyCapEur), dailyCapEur: num(d.dailyCapEur, 0, 1000, DEFAULTS.dailyCapEur),
-    chatModel: typeof d.chatModel === 'string' && d.chatModel ? d.chatModel : DEFAULTS.chatModel, fastModel: typeof d.fastModel === 'string' && d.fastModel ? d.fastModel : DEFAULTS.fastModel,
+    defaultModel: modelKey(d.defaultModel) || DEFAULTS.defaultModel,
     maxOutputTokens: num(d.maxOutputTokens, 64, 4096, DEFAULTS.maxOutputTokens), prices: { ...DEFAULTS.prices, ...(d.prices && typeof d.prices === 'object' ? d.prices : {}) },
     eurPerUsd: num(d.eurPerUsd, 0.1, 10, DEFAULTS.eurPerUsd), margin: num(d.margin, 1, 5, DEFAULTS.margin) };
 }
@@ -46,22 +54,38 @@ function onlyKeys(data, allowed) {
   return data;
 }
 // Staff change the switch and the caps from the screen. The data gate needs an explicit confirmation that the provider's data terms were checked.
-async function saveSettings({ db, model }, actor, data, { nowMs = Date.now() } = {}) {
+async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.now() } = {}) {
   onlyKeys(data, ['enabled', 'monthlyCapEur', 'dailyCapEur', 'customerDataApproved', 'confirmDataTerms']);
   const patch = {};
   if ('enabled' in data) { if (typeof data.enabled !== 'boolean') throw bad('Switch must be on or off.'); patch.enabled = data.enabled; }
   for (const k of ['monthlyCapEur', 'dailyCapEur']) if (k in data) { if (typeof data[k] !== 'number' || !Number.isFinite(data[k]) || data[k] < 0 || data[k] > 200) throw bad('A spending cap must be between 0 and 200 euro.'); patch[k] = Math.round(data[k] * 100) / 100; }
   if ('customerDataApproved' in data) {
     if (typeof data.customerDataApproved !== 'boolean') throw bad('Data approval must be yes or no.');
+    if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can change real customer data access.');
     if (data.customerDataApproved && data.confirmDataTerms !== true) throw bad('Confirm that the provider\'s data terms were checked before real customer data is switched on.');
     patch.customerDataApproved = data.customerDataApproved;
   }
   if (!Object.keys(patch).length) throw bad('Nothing to save.');
   const cur = await loadSettings(db), monthly = 'monthlyCapEur' in patch ? patch.monthlyCapEur : cur.monthlyCapEur, daily = 'dailyCapEur' in patch ? patch.dailyCapEur : cur.dailyCapEur;
   if (daily > monthly) throw bad('The daily cap cannot be higher than the monthly cap.');
-  await db.doc('aiSettings/current').set({ ...patch, updatedAt: Timestamp.fromMillis(nowMs), updatedBy: actor.id }, { merge: true });
+  await db.doc('aiSettings/current').set({ ...patch, ...('customerDataApproved' in patch ? { dataApprovedBy: actor.id } : {}), updatedAt: Timestamp.fromMillis(nowMs), updatedBy: actor.id }, { merge: true });
   await db.collection('auditLog').add({ action: 'aiSettings', changed: Object.keys(patch), values: patch, by: actor.id, at: Timestamp.fromMillis(nowMs) });          // numbers and switches only: no personal content
-  return status({ db, model }, actor, {}, { nowMs });
+  return status({ db, model, owners }, actor, {}, { nowMs });
+}
+// "Check models": asks the provider's Models API whether each model ID exists, is active and accepts the settings we send. Free (no tokens). Chat refuses a model that has not passed.
+// The Models API does not return prices: those are checked against the price page and the provider's usage page by a person (docs/AI.md).
+async function checkModels({ db, model, owners }, actor, data, { nowMs = Date.now() } = {}) {
+  onlyKeys(data || {}, []);
+  if (!model) throw refused('The AI assistant is not set up yet (no key).');
+  if (typeof model.verify !== 'function') throw refused('This connection cannot check models.');
+  const out = {};
+  for (const [key, m] of Object.entries(MODELS)) {
+    let v; try { v = await model.verify(m.id); } catch (e) { v = { ok: false, reason: 'The provider could not be reached.' }; }
+    out[key] = { id: m.id, ok: !!(v && v.ok === true), reason: v && v.ok ? null : String((v && v.reason) || 'Not available.').slice(0, 200), name: v && v.name ? String(v.name).slice(0, 60) : null, lifecycle: (v && v.lifecycle) || null, at: Timestamp.fromMillis(nowMs) };
+  }
+  await db.doc('aiSettings/modelCheck').set(out);
+  await db.collection('auditLog').add({ action: 'aiCheckModels', results: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.ok])), by: actor.id, at: Timestamp.fromMillis(nowMs) });
+  return status({ db, model, owners }, actor, {}, { nowMs });
 }
 
 // ---- spending: reserve the worst case first, then correct it with what the call really used ----
@@ -83,10 +107,10 @@ async function reserve(db, settings, worstEur, nowMs) {
 }
 async function settle(db, { worstEur, actualEur, feature, model, usage, ok, ms, nowMs, keep = false }) {
   const delta = (keep ? worstEur : actualEur) - worstEur, inc = FieldValue.increment;
-  const body = (extra) => ({ costEur: inc(delta), calls: inc(1), inputTokens: inc((usage && usage.input) || 0), outputTokens: inc((usage && usage.output) || 0), features: { [feature]: { calls: inc(1), costEur: inc(keep ? worstEur : actualEur) } }, ...extra });
+  const body = (extra) => ({ costEur: inc(delta), calls: inc(1), inputTokens: inc((usage && usage.input) || 0), outputTokens: inc((usage && usage.output) || 0), features: { [feature]: { calls: inc(1), costEur: inc(keep ? worstEur : actualEur) } }, byModel: { [model]: { calls: inc(1), costEur: inc(keep ? worstEur : actualEur) } }, ...extra });
   const mRef = db.doc('aiUsage/' + monthId(nowMs)), dRef = db.doc('aiUsage/' + dayId(nowMs));
   await Promise.all([mRef.set(body(), { merge: true }), dRef.set(body(), { merge: true }),
-    db.collection('aiLog').add({ feature, model, inputTokens: (usage && usage.input) || 0, outputTokens: (usage && usage.output) || 0, costEur: Math.round((keep ? worstEur : actualEur) * 1e6) / 1e6, ms, ok, at: Timestamp.fromMillis(nowMs) })]);
+    db.collection('aiLog').add({ feature, model, inputTokens: (usage && usage.input) || 0, outputTokens: (usage && usage.output) || 0, costEur: Math.round((keep ? worstEur : actualEur) * 1e8) / 1e8, ms, ok, at: Timestamp.fromMillis(nowMs) })]);
 }
 async function checkRate(db, uid, nowMs) {
   const ref = db.doc('aiRate/' + String(uid).replace(/[^\w-]/g, '_').slice(0, 100));
@@ -96,11 +120,13 @@ async function checkRate(db, uid, nowMs) {
     tx.set(ref, { times: [...times, nowMs].slice(-RATE_PER_HOUR) });
   });
 }
-async function status({ db, model }, actor, data, { nowMs = Date.now() } = {}) {
-  const s = await loadSettings(db), [m, d] = await Promise.all([db.doc('aiUsage/' + monthId(nowMs)).get(), db.doc('aiUsage/' + dayId(nowMs)).get()]);
+async function status({ db, model, owners }, actor, data, { nowMs = Date.now() } = {}) {
+  const s = await loadSettings(db), check = await loadModelCheck(db), [m, d] = await Promise.all([db.doc('aiUsage/' + monthId(nowMs)).get(), db.doc('aiUsage/' + dayId(nowMs)).get()]);
   const mm = m.exists ? m.data() : {}, dd = d.exists ? d.data() : {};
   return { enabled: s.enabled, customerDataApproved: s.customerDataApproved, monthlyCapEur: s.monthlyCapEur, dailyCapEur: s.dailyCapEur, monthSpentEur: Math.round((mm.costEur || 0) * 100) / 100, daySpentEur: Math.round((dd.costEur || 0) * 100) / 100,
-    monthCalls: mm.calls || 0, chatModel: s.chatModel, keyConfigured: !!model, month: monthId(nowMs) };
+    monthCalls: mm.calls || 0, keyConfigured: !!model, month: monthId(nowMs), defaultModel: s.defaultModel,
+    models: Object.entries(MODELS).map(([key, m]) => ({ key, label: m.label, id: m.id, ready: modelReady(check, key), reason: (check[key] && check[key].ok === false && check[key].reason) || null, checkedAt: check[key] && check[key].at && check[key].at.toMillis ? check[key].at.toMillis() : null })),
+    canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
 }
 
 // ---- the model interface: complete({ model, system, messages, tools, maxTokens }) -> { text, toolCalls, stopReason, usage } ----
@@ -112,6 +138,17 @@ const MODEL_TUNING = {
   'claude-sonnet-5-5': { thinking: { type: 'between_tools' }, output_config: { effort: 'medium' } },
   'claude-haiku-5-5': { thinking: { type: 'disabled' }, output_config: { effort: 'medium' } },
 };
+// Is a Models API answer good enough to use this model with the settings above? (exported for tests)
+function judgeModelInfo(id, info) {
+  if (!info || typeof info !== 'object' || info.id !== id) return { ok: false, reason: 'The provider answered with a different model.' };
+  const out = { name: typeof info.display_name === 'string' ? info.display_name : null, lifecycle: typeof info.lifecycle === 'string' ? info.lifecycle : null };
+  const caps = info.capabilities || {}, tune = MODEL_TUNING[id] || {}, th = (caps.thinking && caps.thinking.types) || {};
+  if (info.lifecycle !== 'active') return { ok: false, ...out, reason: 'The model is ' + (info.lifecycle || 'not active') + ', not active.' };
+  if (tune.output_config && !(caps.effort && caps.effort.supported === true && caps.effort[tune.output_config.effort] && caps.effort[tune.output_config.effort].supported === true)) return { ok: false, ...out, reason: 'The model does not accept the effort setting we send.' };
+  if (tune.thinking && tune.thinking.type === 'disabled' && !(th.disabled && th.disabled.supported === true)) return { ok: false, ...out, reason: 'The model rejects thinking turned off, which we send.' };
+  if (tune.thinking && tune.thinking.type === 'between_tools' && !(caps.thinking && caps.thinking.supported === true)) return { ok: false, ...out, reason: 'The model does not support the thinking setting we send.' };
+  return { ok: true, ...out, reason: null };
+}
 function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anthropic.com', timeoutMs = 40000, retryDelaysMs = [400, 1500], version = '2023-06-01' }) {
   const toBlocks = (m) => {
     if (m.role === 'user') return { role: 'user', content: [{ type: 'text', text: m.text }] };
@@ -131,8 +168,21 @@ function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anth
       throw new ModelError(e && e.name === 'AbortError' ? 'The model took too long.' : 'The model could not be reached.', { retryable: !(e && e.name === 'AbortError'), timeout: !!(e && e.name === 'AbortError') });
     } finally { clearTimeout(timer); }
   }
+  // GET /v1/models/{id}: does the provider know this model, is it active, and does it accept the settings we send? Never throws for a normal "no" (the answer says why).
+  async function lookup(id) {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
+    try {
+      const res = await fetchImpl(baseUrl + '/v1/models/' + encodeURIComponent(id), { method: 'GET', signal: ctl.signal, headers: { 'x-api-key': apiKey, 'anthropic-version': version } });
+      if (res.status === 404) return { ok: false, reason: 'The provider does not know this model.' };
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: 'The provider refused the key.' };
+      if (!res.ok) return { ok: false, reason: 'The provider answered with an error (' + res.status + ').' };
+      return judgeModelInfo(id, await res.json().catch(() => null));
+    } catch (e) { return { ok: false, reason: e && e.name === 'AbortError' ? 'The provider took too long.' : 'The provider could not be reached.' }; }
+    finally { clearTimeout(timer); }
+  }
   return {
     name: 'anthropic',
+    verify: lookup,
     async complete({ model, system, messages, tools = [], maxTokens }) {
       const body = { model, max_tokens: maxTokens, ...(MODEL_TUNING[model] || {}), system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: messages.map(toBlocks),
         ...(tools.length ? { tools: tools.map((t, i) => ({ name: t.name, description: t.description, input_schema: t.input_schema, ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}) })) } : {}) };
@@ -151,7 +201,7 @@ function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anth
 // A tiny deterministic "model" for the tests and the emulator (never used in production: see index.js). It looks people up and reads the answer back, so the whole chain can be tested without a real model.
 function createDemoModel() {
   const jsonOf = (r) => { try { return JSON.parse(r.content); } catch (e) { return null; } };
-  return { name: 'demo', async complete({ messages }) {
+  return { name: 'demo', async verify(id) { return { ok: true, name: 'Demo ' + id, lifecycle: 'active' }; }, async complete({ messages }) {
     const last = messages[messages.length - 1], used = (t) => ({ input: Math.ceil(t.length / 4), output: Math.ceil(t.length / 4), cacheRead: 0, cacheWrite: 0 });
     if (last.role === 'tool') {
       const r = last.results[0], j = jsonOf(r) || {};
@@ -206,14 +256,17 @@ const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...e
 const toolNote = (name, input) => ({ search_customers: 'Searched customers', get_customer: 'Opened a customer', get_conversation: 'Read recent messages', list_quotes: 'Looked at quotes', get_quote: 'Opened a quote',
   list_appointments: 'Looked at appointments', list_projects: 'Looked at projects', get_project: 'Opened a project', pipeline_summary: 'Counted the pipeline' }[name] || name) + (name === 'search_customers' && input && typeof input.query === 'string' ? ': ' + input.query.slice(0, 40) : '');
 
-async function chat({ db, model }, actor, data, { uid, nowMs = Date.now(), deadlineMs = DEADLINE_MS } = {}) {
-  onlyKeys(data, ['message', 'history', 'context']);
+async function chat({ db, model, owners }, actor, data, { uid, nowMs = Date.now(), deadlineMs = DEADLINE_MS } = {}) {
+  onlyKeys(data, ['message', 'history', 'context', 'model']);
+  if (data.model != null && !modelKey(data.model)) throw bad('Unknown model.');
   if (typeof data.message !== 'string' || !data.message.trim()) throw bad('Type a question first.');
   if (data.message.length > MAX_MESSAGE) throw bad(`That is too long (max ${MAX_MESSAGE} characters).`);
   const history = checkHistory(data.history), context = checkContext(data.context);
   const settings = await loadSettings(db);
   if (!settings.enabled) throw refused('The AI assistant is switched off.');                                // the kill switch beats everything
   if (!model) throw refused('The AI assistant is not set up yet (no key).');
+  const key = modelKey(data.model) || settings.defaultModel;
+  if (!modelReady(await loadModelCheck(db), key)) throw refused(`The ${MODELS[key].label} model has not been checked yet. Open Settings and press "Check models".`);
   await checkRate(db, uid || actor.id, nowMs);
   const approved = settings.customerDataApproved, tools = approved ? T.TOOLS : [];
   let contextNote = '';
@@ -221,7 +274,7 @@ async function chat({ db, model }, actor, data, { uid, nowMs = Date.now(), deadl
   const system = SYSTEM + '\n' + (approved ? (contextNote ? 'The person currently has this open in Elite OS: ' + contextNote + ' When they say "this customer", "her" or "him" they mean that one.' : '') : NO_DATA)
     + `\nToday is ${new Intl.DateTimeFormat('en-IE', { timeZone: TZ, dateStyle: 'full' }).format(new Date(nowMs))}.`;
   const messages = [...history.map((t) => ({ role: t.role, text: t.text })), { role: 'user', text: data.message.trim() }];
-  const feature = 'chat', modelName = settings.chatModel, p = priceOf(settings, modelName), used = [], total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const feature = 'chat', modelName = MODELS[key].id, p = priceOf(settings, modelName), used = [], total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let spent = 0, reply = '', finished = false, steps = 0;
   const began = Date.now();
   for (; steps < MAX_STEPS; steps++) {
@@ -255,8 +308,8 @@ async function chat({ db, model }, actor, data, { uid, nowMs = Date.now(), deadl
     messages.push({ role: 'tool', results });
   }
   if (!finished) reply = 'I could not finish that in a few steps. Please ask in a simpler way.';
-  const st = await status({ db, model }, actor, {}, { nowMs });
-  return { reply, tools: used, costEur: Math.round(spent * 1e6) / 1e6, tokens: total, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
+  const st = await status({ db, model, owners }, actor, {}, { nowMs });
+  return { reply, model: key, tools: used, costEur: Math.round(spent * 1e8) / 1e8, tokens: total, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
 }
 
-module.exports = { DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, createDemoModel, ModelError, chat, checkHistory, checkContext };
+module.exports = { MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };

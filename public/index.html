@@ -229,6 +229,7 @@
       <div id="as-msgs" class="as-msgs"></div>
     </div>
     <form id="as-form" class="as-form" autocomplete="off">
+      <div class="as-tools"><div id="as-model" class="seg as-model" role="group" aria-label="Model"><button type="button" data-model="haiku" aria-pressed="true" title="Fast and cheap. The default.">Haiku</button><button type="button" data-model="sonnet" aria-pressed="false" title="Slower and costs more, better at harder questions.">Sonnet</button></div><span class="as-model-hint">Haiku is fast and cheap. Sonnet is for harder questions.</span></div>
       <div id="as-context" class="as-context" hidden><span id="as-context-text"></span><button type="button" id="as-context-x" class="as-chip-x" aria-label="Stop using this as context" title="Stop using this as context">×</button></div>
       <div class="as-row"><textarea id="as-input" rows="1" maxlength="2000" placeholder="Ask the assistant…" aria-label="Your question"></textarea><button id="as-send" type="submit" class="btn btn-primary">Ask</button></div>
       <p class="as-foot">Read-only. It can be wrong: check anything important in Elite OS before you act on it.</p>
@@ -479,7 +480,9 @@
     <div class="as-caps"><label>Monthly limit (€)<input id="as-set-month" type="number" min="0" max="200" step="1" inputmode="decimal"></label><label>Daily limit (€)<input id="as-set-day" type="number" min="0" max="200" step="0.5" inputmode="decimal"></label></div>
     <p class="hint">The server refuses a question that might go over either limit. Spent so far: <strong id="as-set-spent"></strong>.</p>
     <label class="as-check"><input id="as-set-data" type="checkbox"> <span>Let the assistant see real customer data</span></label>
+    <p id="as-set-data-hint" class="hint" hidden></p>
     <label class="as-check as-check-sub"><input id="as-set-terms" type="checkbox"> <span>I have checked the AI provider's data terms (retention, training, eligibility) and accept them for customer data.</span></label>
+    <div class="as-models"><div class="as-models-head"><strong>Models</strong><button type="button" id="as-set-check" class="btn btn-ghost btn-sm">Check models</button></div><ul id="as-set-models" class="as-models-list"></ul><p class="hint">"Check models" asks the AI provider whether each model exists and is active. A model cannot be used until it passes. It costs nothing.</p></div>
     <p id="as-set-key" class="hint"></p>
     <div id="as-set-err" class="dlg-err" role="alert"></div>
     <div class="dlg-actions"><button type="button" id="as-set-cancel" class="btn btn-ghost">Cancel</button><button type="submit" id="as-set-save" class="btn btn-primary">Save</button></div>

@@ -29,7 +29,7 @@
 #                                                Needs the one-time Firebase web app first (docs/PUSH.md). This one DOES redeploy the live WhatsApp webhook: ask the owner first.
 #   ./scripts/deploy-quote-sending.sh projects   Phase 7 (Projects) backend: acceptQuote and reopenQuote (they now keep the quote's project), deleteCustomer (it now also erases
 #                                                projects and renders) and the 7 new project functions. Run it BEFORE "live" (the screen); screens that do not know projects keep working.
-#   ./scripts/deploy-quote-sending.sh ai         Phase 9 (AI assistant) backend: the 3 new functions (aiChat, aiStatus, setAiSettings). Needs the ANTHROPIC_API_KEY secret first. It is switched OFF until the owner
+#   ./scripts/deploy-quote-sending.sh ai         Phase 9 (AI assistant) backend: the 4 new functions (aiChat, aiStatus, setAiSettings, aiCheckModels). Needs the ANTHROPIC_API_KEY secret first; asks for the owner account (the only one that may switch real customer data on). Switched OFF until the owner
 #                                                switches it on in the screen. Run it BEFORE "live". No existing function is touched.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
@@ -61,7 +61,7 @@ PROJECT_FUNCS="$PROJECT_NEW $PROJECT_CHANGED"
 PUSH_NEW="registerPushDevice unregisterPushDevice sendTestPush pushReceipt"                                                  # Phase 8: new; pushReceipt is reached through a Hosting rewrite
 PUSH_CHANGED="webhook leadIntake"                                                                                           # Phase 8: they now send a push (never allowed to break or hold up the message / lead)
 PUSH_FUNCS="$PUSH_NEW $PUSH_CHANGED"
-AI_NEW="aiChat aiStatus setAiSettings"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
+AI_NEW="aiChat aiStatus setAiSettings aiCheckModels"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
 AI_FUNCS="$AI_NEW"
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
@@ -322,16 +322,23 @@ case "${1:-}" in
     else echo "   ANTHROPIC_API_KEY is not set yet. Set it first, typing the key into Cloud Shell only (never into a chat or a file):"; echo "     firebase functions:secrets:set ANTHROPIC_API_KEY --project $PROJECT"; exit 1; fi
     check_settings; check_access; check_routing $AI_FUNCS
     echo "Functions: $AI_FUNCS (all new; no existing function is redeployed)."
+    owner=$(value "$ENVF" AI_OWNER_EMAILS)
+    if [ -z "$owner" ]; then read -r -p "Owner account: the ONE Google account allowed to switch real customer data on (e.g. you@gmail.com): " owner; fi
+    case "$owner" in *@*.*) ;; *) echo "That does not look like an email address. Nothing was changed."; exit 1 ;; esac
+    allowed=",$(value "$ENVF" ALLOWED_EMAILS | tr -d ' ' | tr 'A-Z' 'a-z'),"; me=",$(printf '%s' "$owner" | tr -d ' ' | tr 'A-Z' 'a-z'),"
+    case "$allowed" in *"$me"*) ;; *) echo "$owner is not on the list of people who may use Elite OS (ALLOWED_EMAILS in $ENVF). Stop here and report it."; exit 1 ;; esac
+    echo "Only $owner will be able to switch real customer data on. Everyone else on the list can use the assistant and its on/off switch."
     echo "The assistant starts OFF and with real customer data OFF: it answers nothing until the owner switches it on in the screen (Assistant > Settings)."
     confirm "Deploy the Phase 9 (AI assistant) backend to the LIVE project?"
+    setting "$ENVF" AI_OWNER_EMAILS "$owner"
     install
     deploy_functions $AI_FUNCS
-    echo "==> making the 3 new functions reachable (each checks the signed-in staff account itself)"
+    echo "==> making the 4 new functions reachable (each checks the signed-in staff account itself)"
     for f in $AI_NEW; do
       gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
     done
     check_reachable "$AI_FUNCS"
-    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings --region $REGION --project $PROJECT (nothing else depends on them)."
+    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings aiCheckModels --region $REGION --project $PROJECT (nothing else depends on them)."
     ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }

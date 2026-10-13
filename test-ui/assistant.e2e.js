@@ -76,10 +76,19 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   // ------------------------------------------------------------------ 2. settings: switch on; real customer data stays off until it is confirmed
   await saveSettings(async () => { await page.check('#as-set-enabled'); });
   await page.waitForFunction(() => !document.getElementById('as-dlg').open);
+  await page.waitForFunction(() => /Haiku model has not been checked/.test(document.getElementById('as-notice').textContent));
+  assert.equal(await page.locator('#as-input').isDisabled(), true, 'a model cannot be used before it was checked with the provider');
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]');
+  await page.waitForFunction(() => /not checked yet/.test(document.getElementById('as-set-models').textContent));
+  assert.match(await page.locator('#as-set-models').innerText(), /Haiku: not checked yet[\s\S]*Sonnet: not checked yet/);
+  await page.click('#as-set-check');
+  await page.waitForFunction(() => /Haiku: ready/.test(document.getElementById('as-set-models').textContent) && /Sonnet: ready/.test(document.getElementById('as-set-models').textContent));
+  assert.equal((await db.doc('aiSettings/modelCheck').get()).data().haiku.ok, true);
+  await page.click('#as-set-cancel');
   await page.waitForFunction(() => /not switched on/.test(document.getElementById('as-notice').textContent));
   assert.equal(await page.locator('#as-input').isDisabled(), false);
   const s1 = (await settingsDoc().get()).data(); assert.equal(s1.enabled, true); assert.equal(s1.customerDataApproved, undefined); assert.equal(s1.updatedBy, 'staff@test.dev');
-  ok('switching it on works; customer data is still OFF and the screen says so');
+  ok('switching it on works; models must pass "Check models" first; customer data is still OFF and the screen says so');
 
   await ask('find anna');
   assert.match(await answers().last().innerText(), /not been switched on|cannot|could not/i);
@@ -111,6 +120,35 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   ok('"find anna" is answered from the data, shows which lookup was made and what it cost; nothing in the customer data changed');
   await page.screenshot({ path: path.join(SHOTS, 'assistant-chat.png') });
 
+  // ------------------------------------------------------------------ 3b. Haiku by default, Sonnet by choice, "Retry with Sonnet" once
+  assert.equal(await page.getAttribute('#as-model button[data-model=haiku]', 'aria-pressed'), 'true'); assert.equal(await page.getAttribute('#as-model button[data-model=sonnet]', 'aria-pressed'), 'false');
+  assert.equal(chatBodies.at(-1).model, 'haiku', 'Haiku is the default');
+  assert.match(await page.locator('.as-trace').last().innerText(), /Haiku/);
+  assert.equal(await page.locator('.as-retry').count(), 1, 'the last Haiku answer offers a retry');
+  const nBefore = await answers().count(), askedBefore = chatBodies.length;
+  await page.click('.as-retry');
+  await page.waitForFunction(() => /Sonnet/.test(document.querySelector('#as-msgs').lastElementChild.innerText));
+  assert.equal(chatBodies.length, askedBefore + 1, 'one request, one model: no automatic second call'); assert.equal(chatBodies.at(-1).model, 'sonnet');
+  assert.equal(chatBodies.at(-1).message, chatBodies.at(-2).message, 'the same question'); assert.deepEqual(chatBodies.at(-1).history, chatBodies.at(-2).history, 'the same earlier conversation');
+  assert.equal(await answers().count(), nBefore, 'the retry replaces the answer'); assert.equal(await page.locator('.as-retry').count(), 0, 'no retry offered after a Sonnet answer');
+  assert.match(await answers().last().innerText(), /Anna Apple \(Quoted\)/);
+  await page.click('#as-model button[data-model=sonnet]'); assert.equal(await page.getAttribute('#as-model button[data-model=sonnet]', 'aria-pressed'), 'true');
+  await ask('who are you'); assert.equal(chatBodies.at(-1).model, 'sonnet'); assert.equal(await page.locator('.as-retry').count(), 0);
+  await page.click('#as-model button[data-model=haiku]'); await ask('who are you again'); assert.equal(chatBodies.at(-1).model, 'haiku');
+  assert.equal(await page.locator('.as-retry').count(), 1);
+  assert.equal(await page.locator('#as-model button').count(), 2);
+  ok('Haiku is the default; Sonnet can be chosen; "Retry with Sonnet" re-asks the same question once with the other model; nothing escalates by itself');
+
+  // ------------------------------------------------------------------ 3c. only the owner account sees the customer-data switch as usable
+  await page.route(/\/aiStatus$/, async (route) => { const resp = await route.fetch(), j = await resp.json(); j.result.canApproveData = false; await route.fulfill({ response: resp, json: j }); });
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /Only the owner account/.test(document.getElementById('as-set-data-hint').textContent));
+  assert.equal(await page.locator('#as-set-data').isDisabled(), true); assert.equal(await page.locator('#as-set-enabled').isDisabled(), false);
+  await page.click('#as-set-cancel'); await page.unroute(/\/aiStatus$/);
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent));
+  assert.equal(await page.locator('#as-set-data').isDisabled(), false, 'the owner account can use it'); await page.click('#as-set-cancel');
+  ok('the customer-data box is disabled for any account that is not the owner (the server enforces it too), and usable for the owner');
+
+  for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
   // ------------------------------------------------------------------ 4. answers are text, never a page
   await ask('find zed');
   const reply = await answers().last().innerText();
@@ -132,13 +170,14 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await page.waitForSelector('#as-empty', { state: 'visible' }); assert.equal(await page.locator('#as-msgs .as-msg').count(), 0);
   ok('the conversation survives a reload of the tab, "New chat" clears it, and the server keeps none of it');
 
+  for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();            // the 8-a-minute speed limit is tested elsewhere; this run asks more often than that
   // ------------------------------------------------------------------ 6. the open customer is passed as an id; it can be removed
   await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.waitForSelector('#thread:not([hidden])');
   await page.click('#nav-assistant'); await page.waitForSelector('#assistant', { state: 'visible' });
   assert.equal(await page.locator('#as-context-text').innerText(), 'About: Anna Apple');
   await ask('who are you');
   assert.deepEqual(chatBodies.at(-1).context, { customerId: ph.anna });
-  assert.deepEqual(Object.keys(chatBodies.at(-1)).sort(), ['context', 'history', 'message']);
+  assert.deepEqual(Object.keys(chatBodies.at(-1)).sort(), ['context', 'history', 'message', 'model']);
   await page.click('#as-context-x'); assert.equal(await page.locator('#as-context').isVisible(), false);
   await ask('who are you again');
   assert.equal(chatBodies.at(-1).context, undefined);

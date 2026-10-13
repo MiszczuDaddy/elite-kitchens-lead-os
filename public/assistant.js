@@ -6,18 +6,19 @@
 window.ASSIST = (() => {
   const M = window.AssistantModel;
   const KEY = 'ek-assistant';
-  const A = { active: false, status: null, statusLoaded: false, turns: [], busy: false, context: {}, pending: null, started: false, settingsOpen: false };
+  const A = { modelKey: null, active: false, status: null, statusLoaded: false, turns: [], busy: false, context: {}, pending: null, started: false, settingsOpen: false };
   const showDialog = (d) => { if (typeof d.showModal === 'function') { if (!d.open) d.showModal(); } else d.setAttribute('open', ''); };
   const closeDialog = (d) => { if (typeof d.close === 'function') { if (d.open) d.close(); } else d.removeAttribute('open'); };
 
   // ---------- this tab's memory of the conversation ----------
   const uid = () => (auth.currentUser ? auth.currentUser.uid : null);
-  function keep() { try { sessionStorage.setItem(KEY, JSON.stringify({ uid: uid(), turns: A.turns.filter((t) => !t.pending).slice(-40), context: A.context })); } catch (e) { /* private window: the conversation just is not remembered */ } }
+  function keep() { try { sessionStorage.setItem(KEY, JSON.stringify({ uid: uid(), turns: A.turns.filter((t) => !t.pending).slice(-40), context: A.context, model: A.modelKey })); } catch (e) { /* private window: the conversation just is not remembered */ } }
   function restore() {
     try {
       const v = JSON.parse(sessionStorage.getItem(KEY) || 'null');
       if (v && v.uid && v.uid === uid() && Array.isArray(v.turns)) A.turns = v.turns.filter((t) => t && (t.role === 'user' || t.role === 'assistant') && typeof t.text === 'string').slice(-40);
       if (v && v.uid && v.uid === uid() && v.context) A.context = M.contextOf(v.context);
+      if (v && v.uid && v.uid === uid() && M.MODEL_KEYS.includes(v.model)) A.modelKey = v.model;
     } catch (e) { A.turns = []; A.context = {}; }
   }
 
@@ -76,7 +77,7 @@ window.ASSIST = (() => {
   }
   function toBottom() { const s = $('as-scroll'); s.scrollTop = s.scrollHeight; }
   function render() {
-    const n = M.notice(A.status), b = M.budget(A.status || {});
+    const mk = M.chosenModel(A.status, A.modelKey), n = M.notice(A.status, mk), b = M.budget(A.status || {});
     const box = $('as-notice'); box.hidden = !n.text; box.textContent = n.text; box.dataset.level = n.level;
     $('as-meter-fill').style.width = (A.status ? b.pct : 0) + '%'; $('as-meter').dataset.level = A.status ? b.level : 'ok'; $('as-meter').setAttribute('aria-valuenow', String(A.status ? b.pct : 0));
     $('as-meter-label').textContent = A.status ? b.label : (A.statusLoaded ? 'Spending unavailable' : '');
@@ -85,36 +86,53 @@ window.ASSIST = (() => {
     $('as-new').disabled = A.busy || !A.turns.length;
     $('as-empty').hidden = A.turns.length > 0;
     $('as-suggest').replaceChildren(...M.SUGGESTIONS.map((s) => { const x = el('button', '', s); x.type = 'button'; x.disabled = !canAsk; x.onclick = () => ask(s); return x; }));
+    for (const btn of $('as-model').querySelectorAll('button')) { const m = M.modelOf(A.status, btn.dataset.model); btn.setAttribute('aria-pressed', String(btn.dataset.model === mk)); btn.disabled = A.busy; btn.title = btn.title.split(' (')[0] + (m && !m.ready && A.status ? ' (not checked yet)' : ''); }
     const ctx = contextLabel(); $('as-context').hidden = !ctx; $('as-context-text').textContent = ctx ? 'About: ' + ctx : '';
     const host = $('as-msgs'); host.replaceChildren();
-    for (const t of A.turns) {
+    A.turns.forEach((t, i) => {
       host.append(bubble(t));
-      if (t.role === 'assistant' && !t.pending && !t.error && (t.tools && t.tools.length || t.cost != null)) {
+      if (t.role === 'assistant' && !t.pending && !t.error && ((t.tools && t.tools.length) || t.cost != null || t.model)) {
         const tr = el('div', 'as-trace', ''); for (const x of t.tools || []) tr.append(el('span', '', x));
+        if (t.model) tr.append(el('span', '', (M.modelOf(A.status, t.model) || { label: t.model }).label));
         if (t.cost != null) tr.append(el('span', '', t.cost < 0.001 ? 'under €0.001' : M.eur(t.cost, 3)));
+        if (M.canRetry(A.turns, i, A.status) && !A.busy) { const b = el('button', 'as-retry', 'Retry with Sonnet'); b.type = 'button'; b.onclick = () => retry(i); tr.append(b); }
         host.append(tr);
       }
-    }
+    });
     toBottom();
   }
 
   // ---------- asking ----------
   async function ask(text) {
     text = String(text || '').trim();
-    if (!text || A.busy || !A.status || !M.notice(A.status).ask) return;
-    const history = M.historyOf(A.turns), context = M.contextOf(A.context);
+    const mk = M.chosenModel(A.status, A.modelKey);
+    if (!text || A.busy || !A.status || !M.notice(A.status, mk).ask) return;
+    const history = M.historyOf(A.turns);
     A.turns.push({ role: 'user', text }); const p = { role: 'assistant', text: '', pending: true }; A.turns.push(p);
-    A.busy = true; $('as-input').value = ''; sizeInput(); render();
+    $('as-input').value = ''; sizeInput();
+    await send(text, history, mk, p, null);
+    if (A.active && !matchMedia('(max-width: 899px)').matches) $('as-input').focus();
+  }
+  // "Retry with Sonnet": the same question and the same earlier conversation, once, with the other model. The old answer is replaced (put back if the retry fails). No automatic retries anywhere.
+  async function retry(i) {
+    if (A.busy || !M.canRetry(A.turns, i, A.status)) return;
+    const q = A.turns[i - 1], old = A.turns[i], history = M.historyOf(A.turns.slice(0, i - 1)), p = { role: 'assistant', text: '', pending: true };
+    A.turns[i] = p; await send(q.text, history, 'sonnet', p, old);
+  }
+  // One request to the server with ONE model. `slot` is the waiting bubble; `old` is the answer it replaces (a retry).
+  async function send(text, history, modelKey, slot, old) {
+    const context = M.contextOf(A.context);
+    A.busy = true; render();
     try {
-      const r = (await call('aiChat')({ message: text, history, ...(Object.keys(context).length ? { context } : {}) })).data;
-      A.turns[A.turns.indexOf(p)] = { role: 'assistant', text: String(r.reply || ''), tools: (r.tools || []).map((x) => x.note).filter(Boolean).slice(0, 8), cost: typeof r.costEur === 'number' ? r.costEur : null };
+      const r = (await call('aiChat')({ message: text, history, model: modelKey, ...(Object.keys(context).length ? { context } : {}) })).data;
+      A.turns[A.turns.indexOf(slot)] = { role: 'assistant', text: String(r.reply || ''), model: M.MODEL_KEYS.includes(r.model) ? r.model : modelKey, tools: (r.tools || []).map((x) => x.note).filter(Boolean).slice(0, 8), cost: typeof r.costEur === 'number' ? r.costEur : null };
       if (A.status && typeof r.monthSpentEur === 'number') A.status.monthSpentEur = r.monthSpentEur;
     } catch (e) {
-      A.turns[A.turns.indexOf(p)] = { role: 'assistant', text: M.friendlyError(e), error: true };
-      loadStatus();                                                               // a refusal usually means the switch or the budget changed: show it
+      const i = A.turns.indexOf(slot), bad = { role: 'assistant', text: M.friendlyError(e), error: true };
+      if (old) A.turns.splice(i, 1, old, bad); else A.turns[i] = bad;
+      loadStatus();                                                               // a refusal usually means the switch, the budget or a model check changed: show it
     }
     A.busy = false; keep(); render();
-    if (A.active && !matchMedia('(max-width: 899px)').matches) $('as-input').focus();
   }
   function sizeInput() { const t = $('as-input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 160) + 'px'; }
 
@@ -126,9 +144,20 @@ window.ASSIST = (() => {
     $('as-set-enabled').checked = !!s.enabled; $('as-set-month').value = s.monthlyCapEur != null ? s.monthlyCapEur : 15; $('as-set-day').value = s.dailyCapEur != null ? s.dailyCapEur : 2;
     $('as-set-data').checked = !!s.customerDataApproved; $('as-set-terms').checked = false; $('as-set-terms').closest('label').hidden = !!s.customerDataApproved || !$('as-set-data').checked;
     $('as-set-spent').textContent = M.eur(s.monthSpentEur || 0) + ' this month, ' + M.eur(s.daySpentEur || 0) + ' today';
+    drawModels(s); const g = M.dataGate(s); $('as-set-data').disabled = g.disabled; $('as-set-data-hint').hidden = !g.hint; $('as-set-data-hint').textContent = g.hint;
     $('as-set-key').textContent = s.keyConfigured ? 'The connection to the AI provider is set up.' : 'The connection to the AI provider is not set up yet (the owner adds the key on the server).';
     render();
   }
+  function drawModels(s) {
+    const list = (s && s.models) || [];
+    $('as-set-models').replaceChildren(...list.map((m) => { const li = el('li', m.ready ? 'good' : m.reason ? 'bad' : '', M.modelLine(m)); return li; }));
+    $('as-set-check').disabled = !s || !s.keyConfigured;
+  }
+  $('as-set-check').onclick = async () => {
+    const b = $('as-set-check'); b.disabled = true; b.textContent = 'Checking…'; $('as-set-err').textContent = '';
+    try { A.status = (await call('aiCheckModels')()).data; drawModels(A.status); render(); } catch (err) { $('as-set-err').textContent = M.friendlyError(err); }
+    b.textContent = 'Check models'; b.disabled = !A.status || !A.status.keyConfigured;
+  };
   $('as-set-data').addEventListener('change', () => { const was = !!(A.status && A.status.customerDataApproved); $('as-set-terms').closest('label').hidden = was || !$('as-set-data').checked; });
   $('as-set-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -153,6 +182,7 @@ window.ASSIST = (() => {
   $('as-input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask($('as-input').value); } });
   $('as-input').addEventListener('input', sizeInput);
   $('as-new').onclick = () => { if (A.busy) return; A.turns = []; keep(); render(); $('as-input').focus(); };
+  $('as-model').addEventListener('click', (e) => { const b = e.target.closest('button[data-model]'); if (!b || A.busy) return; A.modelKey = b.dataset.model; keep(); render(); });
   $('as-context-x').onclick = () => { A.context = {}; keep(); render(); };
   $('as-settings').onclick = openSettings;
   $('as-back').onclick = () => { location.hash = ''; };

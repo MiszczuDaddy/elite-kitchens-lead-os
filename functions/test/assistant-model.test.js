@@ -74,3 +74,38 @@ test('errors are shown without technical prefixes; money formats as euro', () =>
   assert.equal(M.eur(1234.5), '€1,234.50'); assert.equal(M.eur(15, 0), '€15'); assert.equal(M.eur(undefined), '');
   assert.equal(M.SUGGESTIONS.length, 4);
 });
+
+test('models on the screen: Haiku unless the person chose Sonnet; a saved choice that is not a real model is ignored; the screen says when the chosen model is not ready', () => {
+  const ready = { keyConfigured: true, enabled: true, customerDataApproved: true, monthSpentEur: 1, monthlyCapEur: 15, defaultModel: 'haiku',
+    models: [{ key: 'haiku', label: 'Haiku', ready: true }, { key: 'sonnet', label: 'Sonnet', ready: true }], ownerConfigured: true, canApproveData: true };
+  assert.equal(M.chosenModel(ready, undefined), 'haiku'); assert.equal(M.chosenModel(ready, 'sonnet'), 'sonnet'); assert.equal(M.chosenModel(ready, 'claude-opus-5-5'), 'haiku'); assert.equal(M.chosenModel(null, null), 'haiku');
+  assert.equal(M.chosenModel({ defaultModel: 'sonnet' }, null), 'sonnet'); assert.equal(M.chosenModel({ defaultModel: 'evil' }, null), 'haiku');
+  assert.deepEqual(M.MODEL_KEYS, ['haiku', 'sonnet']);
+  assert.equal(M.notice(ready, 'sonnet').ask, true);
+  const unchecked = { ...ready, models: [{ key: 'haiku', label: 'Haiku', ready: false }, { key: 'sonnet', label: 'Sonnet', ready: true }] };
+  assert.equal(M.notice(unchecked).ask, false); assert.match(M.notice(unchecked).text, /Haiku model has not been checked yet/);
+  assert.equal(M.notice(unchecked, 'sonnet').ask, true, 'the other model still works');
+  const failed = { ...ready, models: [{ key: 'haiku', label: 'Haiku', ready: false, reason: 'The model is retired, not active.' }, ready.models[1]] };
+  assert.match(M.notice(failed).text, /failed its check: The model is retired/);
+  assert.equal(M.notice({ ...ready, enabled: false }, 'sonnet').ask, false, 'the switch comes first');
+  assert.equal(M.modelLine({ label: 'Haiku', ready: true }), 'Haiku: ready'); assert.equal(M.modelLine({ label: 'Sonnet' }), 'Sonnet: not checked yet'); assert.match(M.modelLine({ label: 'X', reason: 'No.' }), /failed\. No\./);
+});
+
+test('"Retry with Sonnet" is offered only on the last answer, only if it was not Sonnet, never on errors or while waiting, and only if Sonnet is usable', () => {
+  const status = { keyConfigured: true, enabled: true, customerDataApproved: true, monthSpentEur: 1, monthlyCapEur: 15, models: [{ key: 'haiku', label: 'Haiku', ready: true }, { key: 'sonnet', label: 'Sonnet', ready: true }] };
+  const turns = [{ role: 'user', text: 'a' }, { role: 'assistant', text: 'b', model: 'haiku' }, { role: 'user', text: 'c' }, { role: 'assistant', text: 'd', model: 'haiku' }];
+  assert.equal(M.canRetry(turns, 3, status), true); assert.equal(M.canRetry(turns, 1, status), false, 'only the last answer');
+  assert.equal(M.canRetry([...turns.slice(0, 3), { role: 'assistant', text: 'd', model: 'sonnet' }], 3, status), false);
+  assert.equal(M.canRetry([...turns.slice(0, 3), { role: 'assistant', text: 'x', error: true }], 3, status), false);
+  assert.equal(M.canRetry([...turns.slice(0, 3), { role: 'assistant', text: '', pending: true }], 3, status), false);
+  assert.equal(M.canRetry([{ role: 'assistant', text: 'orphan' }], 0, status), false); assert.equal(M.canRetry(turns, 9, status), false);
+  assert.equal(M.canRetry(turns, 3, { ...status, models: [status.models[0], { key: 'sonnet', label: 'Sonnet', ready: false }] }), false);
+  assert.equal(M.canRetry(turns, 3, { ...status, enabled: false }), false); assert.equal(M.canRetry(turns, 3, { ...status, monthSpentEur: 15 }), false); assert.equal(M.canRetry(turns, 3, null), false);
+});
+
+test('the customer-data box: usable only by the owner account; explained for everyone else', () => {
+  assert.deepEqual(M.dataGate({ ownerConfigured: true, canApproveData: true }), { disabled: false, hint: '' });
+  assert.equal(M.dataGate({ ownerConfigured: true, canApproveData: false }).disabled, true); assert.match(M.dataGate({ ownerConfigured: true, canApproveData: false }).hint, /Only the owner account/);
+  assert.equal(M.dataGate({ ownerConfigured: false, canApproveData: false }).disabled, true); assert.match(M.dataGate({ ownerConfigured: false }).hint, /has not been set up/);
+  assert.equal(M.dataGate(null).disabled, true); assert.equal(M.dataGate({}).disabled, true, 'unknown means closed');
+});

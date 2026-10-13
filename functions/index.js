@@ -204,9 +204,12 @@ const aiModel = () => {
   let key = ''; try { key = String(ANTHROPIC_API_KEY.value() || '').trim(); } catch (e) { key = ''; }
   return key ? ai.anthropicModel({ apiKey: key }) : null;
 };
-const aiDeps = () => ({ ...quoteDeps(), model: aiModel() });
+// Who may switch real customer data on: the AI_OWNER_EMAILS setting (comma-separated). Empty = nobody. It is written to the settings file by the deploy script's ai stage.
+const AI_OWNER_EMAILS = defineString('AI_OWNER_EMAILS', { default: '' });
+const aiDeps = () => ({ ...quoteDeps(), model: aiModel(), aiOwners: AI_OWNER_EMAILS.value() });
 exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 240 }, (req) => h.aiChat(req.auth, req.data, aiDeps()));
 exports.aiStatus = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.aiStatus(req.auth, req.data, aiDeps()));
 exports.setAiSettings = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.setAiSettings(req.auth, req.data, aiDeps()));
+exports.aiCheckModels = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60 }, (req) => h.aiCheckModels(req.auth, req.data, aiDeps()));
 
 exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { res.sendStatus(await h.pushReceipt(req, { db: getFirestore() })); });

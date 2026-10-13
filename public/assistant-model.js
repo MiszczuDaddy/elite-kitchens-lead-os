@@ -61,16 +61,35 @@
     return { pct, level: cap <= 0 || pct >= 100 ? 'full' : pct >= 80 ? 'high' : 'ok', label: `${eur(spent)} of ${eur(cap, cap % 1 ? 2 : 0)} used this month` };
   }
   // What the page says about the assistant's state: why a question cannot be asked, and what is switched off.
-  function notice(status) {
+  function notice(status, modelKey) {
     if (!status) return { ask: false, text: '', level: 'info' };
     if (!status.keyConfigured) return { ask: false, text: 'The assistant is not connected yet: the key has not been set up on the server.', level: 'warn' };
     if (!status.enabled) return { ask: false, text: 'The assistant is switched off. Open Settings to switch it on.', level: 'warn' };
     if (budget(status).level === 'full') return { ask: false, text: 'This month\'s AI budget is used up. It starts again next month, or the cap can be raised in Settings.', level: 'warn' };
+    const chosen = modelOf(status, chosenModel(status, modelKey));
+    if (chosen && !chosen.ready) return { ask: false, text: chosen.reason ? `The ${chosen.label} model failed its check: ${chosen.reason} Open Settings and press "Check models".` : `The ${chosen.label} model has not been checked yet. Open Settings and press "Check models".`, level: 'warn' };
     if (!status.customerDataApproved) return { ask: true, text: 'Customer data is not switched on yet, so the assistant can only answer general questions. The owner switches it on in Settings once the provider\'s data terms are checked.', level: 'info' };
     return { ask: true, text: '', level: 'info' };
   }
+  // The model chosen on the screen: the saved choice if it is one of the server's models, else the server's default (Haiku).
+  const MODEL_KEYS = ['haiku', 'sonnet'];
+  const chosenModel = (status, saved) => (MODEL_KEYS.includes(saved) ? saved : (status && MODEL_KEYS.includes(status.defaultModel) ? status.defaultModel : 'haiku'));
+  const modelOf = (status, key) => ((status && status.models) || []).find((m) => m.key === key) || null;
+  // "Retry with Sonnet": only on the last answer, only when it did not come from Sonnet, and only when Sonnet is usable now.
+  function canRetry(turns, index, status) {
+    const t = (turns || [])[index], q = (turns || [])[index - 1], s = modelOf(status, 'sonnet');
+    return !!(t && q && index === turns.length - 1 && t.role === 'assistant' && !t.error && !t.pending && t.model !== 'sonnet' && q.role === 'user' && typeof q.text === 'string' && q.text.trim() && s && s.ready && notice(status, 'sonnet').ask);
+  }
+  // The data box in Settings: only the owner account may change it (the server enforces this; the screen just explains).
+  function dataGate(status) {
+    if (!status) return { disabled: true, hint: '' };
+    if (!status.ownerConfigured) return { disabled: true, hint: 'The owner account has not been set up on the server, so nobody can switch real customer data on yet.' };
+    if (!status.canApproveData) return { disabled: true, hint: 'Only the owner account can change real customer data access.' };
+    return { disabled: false, hint: '' };
+  }
+  const modelLine = (m) => (m.ready ? `${m.label}: ready` : m.reason ? `${m.label}: failed. ${m.reason}` : `${m.label}: not checked yet`);
   const friendlyError = (e) => String((e && e.message) || e || 'Something went wrong.').replace(/^(functions\/)?[\w-]+:\s*/, '').slice(0, 300);
   const SUGGESTIONS = ['Which quotes are waiting for an answer?', 'Who are the newest leads?', 'What is booked this week?', 'Which projects still need doors ordered?'];
 
-  return { MAX_TURNS, MAX_TURN_CHARS, MAX_TOTAL_CHARS, historyOf, contextOf, blocks, inline, eur, budget, notice, friendlyError, SUGGESTIONS };
+  return { MODEL_KEYS, chosenModel, modelOf, canRetry, dataGate, modelLine, MAX_TURNS, MAX_TURN_CHARS, MAX_TOTAL_CHARS, historyOf, contextOf, blocks, inline, eur, budget, notice, friendlyError, SUGGESTIONS };
 });

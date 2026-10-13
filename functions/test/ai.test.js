@@ -39,7 +39,9 @@ function fake(script = [{ text: 'Hello.' }]) {
   return m;
 }
 const use = (name, input, id = 'tu_1') => ({ toolCalls: [{ id, name, input }], stopReason: 'tool_use' });
-const on = (extra = {}) => db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, monthlyCapEur: 15, dailyCapEur: 2, ...extra });
+const OWNERS = 'thomas@example.com';                      // the AI_OWNER_EMAILS setting in these tests
+const checked = (only) => db.doc('aiSettings/modelCheck').set(Object.fromEntries(Object.entries(ai.MODELS).filter(([k]) => !only || only.includes(k)).map(([k, m]) => [k, { id: m.id, ok: true, name: m.label, lifecycle: 'active', at: ts(NOW) }])));
+const on = async (extra = {}) => { await checked(); await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, monthlyCapEur: 15, dailyCapEur: 2, ...extra }); };
 const chat = (model, data, o = {}) => ai.chat({ db, model }, actor, data, { uid: 'u1', nowMs: NOW, ...o });
 const month = async () => (await db.doc('aiUsage/' + ai.monthId(NOW)).get()).data() || {};
 const day = async () => (await db.doc('aiUsage/' + ai.dayId(NOW)).get()).data() || {};
@@ -114,25 +116,25 @@ test('the kill switch stops the very next question; switching on without a key s
   await on();
   const model = fake();
   await chat(model, { message: 'hi' });
-  await ai.saveSettings({ db }, actor, { enabled: false }, { nowMs: NOW });
+  await ai.saveSettings({ db, owners: OWNERS }, actor, { enabled: false }, { nowMs: NOW });
   await rejects(chat(model, { message: 'hi again' }), 'failed-precondition', /switched off/);
   assert.equal(model.calls.length, 1);
-  await ai.saveSettings({ db }, actor, { enabled: true }, { nowMs: NOW });
+  await ai.saveSettings({ db, owners: OWNERS }, actor, { enabled: true }, { nowMs: NOW });
   await rejects(chat(null, { message: 'hi' }), 'failed-precondition', /no key/);
 });
 
 test('settings: validated, bounded, audited with numbers only; the daily cap cannot exceed the monthly cap; real data needs an explicit confirmation', async () => {
-  await rejects(ai.saveSettings({ db }, actor, { enabled: 'yes' }), 'invalid-argument');
-  await rejects(ai.saveSettings({ db }, actor, { monthlyCapEur: -1 }), 'invalid-argument');
-  await rejects(ai.saveSettings({ db }, actor, { monthlyCapEur: 5000 }), 'invalid-argument');
-  await rejects(ai.saveSettings({ db }, actor, { monthlyCapEur: NaN }), 'invalid-argument');
-  await rejects(ai.saveSettings({ db }, actor, { chatModel: 'anything' }), 'invalid-argument', /Unknown field/);
-  await rejects(ai.saveSettings({ db }, actor, {}), 'invalid-argument', /Nothing to save/);
-  await rejects(ai.saveSettings({ db }, actor, { monthlyCapEur: 5, dailyCapEur: 6 }), 'invalid-argument', /daily cap/);
-  await rejects(ai.saveSettings({ db }, actor, { customerDataApproved: true }), 'invalid-argument', /data terms/);
-  await rejects(ai.saveSettings({ db }, actor, { customerDataApproved: true, confirmDataTerms: 'true' }), 'invalid-argument');
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { enabled: 'yes' }), 'invalid-argument');
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { monthlyCapEur: -1 }), 'invalid-argument');
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { monthlyCapEur: 5000 }), 'invalid-argument');
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { monthlyCapEur: NaN }), 'invalid-argument');
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { chatModel: 'anything' }), 'invalid-argument', /Unknown field/);
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, {}), 'invalid-argument', /Nothing to save/);
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { monthlyCapEur: 5, dailyCapEur: 6 }), 'invalid-argument', /daily cap/);
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { customerDataApproved: true }), 'invalid-argument', /data terms/);
+  await rejects(ai.saveSettings({ db, owners: OWNERS }, actor, { customerDataApproved: true, confirmDataTerms: 'true' }), 'invalid-argument');
   assert.equal((await db.doc('aiSettings/current').get()).exists, false);
-  const r = await ai.saveSettings({ db }, actor, { enabled: true, monthlyCapEur: 15, dailyCapEur: 2.499, customerDataApproved: true, confirmDataTerms: true }, { nowMs: NOW });
+  const r = await ai.saveSettings({ db, owners: OWNERS }, actor, { enabled: true, monthlyCapEur: 15, dailyCapEur: 2.499, customerDataApproved: true, confirmDataTerms: true }, { nowMs: NOW });
   assert.equal(r.enabled, true); assert.equal(r.customerDataApproved, true); assert.equal(r.dailyCapEur, 2.5);
   const log = (await db.collection('auditLog').where('action', '==', 'aiSettings').get()).docs.map((d) => d.data());
   assert.equal(log.length, 1); assert.deepEqual(log[0].changed.sort(), ['customerDataApproved', 'dailyCapEur', 'enabled', 'monthlyCapEur']); assert.equal(log[0].by, 'thomas@example.com');
@@ -150,7 +152,7 @@ test('data gate: until the owner approves real customer data the model gets NO t
   assert.equal(JSON.stringify(model.calls).includes('Kowalska'), false);
   assert.equal(r.tools.length, 1);                                         // the model asked, but the lookup answered with an error, never with data
   assert.match(JSON.stringify(model.calls[1].messages), /Unknown tool|not available|error/i);
-  await ai.saveSettings({ db }, actor, { customerDataApproved: true, confirmDataTerms: true }, { nowMs: NOW });
+  await ai.saveSettings({ db, owners: OWNERS }, actor, { customerDataApproved: true, confirmDataTerms: true }, { nowMs: NOW });
   const m2 = fake([use('search_customers', { query: 'anna' }), { text: 'ok' }]);
   await chat(m2, { message: 'find anna' });
   assert.equal(m2.calls[0].tools.length, T.TOOLS.length);
@@ -162,7 +164,7 @@ test('every call is paid for in advance and corrected afterwards; the month, the
   await on();
   const model = fake([{ text: 'A', usage: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0 } }]);
   const r = await chat(model, { message: 'hi' });
-  const expected = (1000 * 2 + 500 * 10) / 1e6 * 1.25;                      // Sonnet 5.5 list price x margin
+  const expected = (1000 * 0.1 + 500 * 0.5) / 1e6 * 1.25;                    // Haiku 5.5 list price x margin (the default model)
   assert.ok(Math.abs(r.costEur - expected) < 1e-9, String(r.costEur));
   const m = await month(), d = await day();
   assert.ok(Math.abs(m.costEur - expected) < 1e-9 && Math.abs(d.costEur - expected) < 1e-9, 'the reservation must be corrected to the real cost');
@@ -174,11 +176,11 @@ test('every call is paid for in advance and corrected afterwards; the month, the
 
 test('the monthly cap is a hard stop: when the next call might not fit, the model is NOT called and the message says so', async () => {
   await on({ monthlyCapEur: 0.05, dailyCapEur: 0.05 });
-  await db.doc('aiUsage/' + ai.monthId(NOW)).set({ costEur: 0.049 });
+  await db.doc('aiUsage/' + ai.monthId(NOW)).set({ costEur: 0.0499 });
   const model = fake();
-  await rejects(chat(model, { message: 'hi' }), 'failed-precondition', /monthly AI budget/);
+  for (const m of ['haiku', 'sonnet']) await rejects(chat(model, { message: 'hi', model: m }), 'failed-precondition', /monthly AI budget/);       // the cap holds whichever model is chosen
   assert.equal(model.calls.length, 0);
-  assert.equal((await month()).costEur, 0.049, 'a refused question reserves nothing');
+  assert.equal((await month()).costEur, 0.0499, 'a refused question reserves nothing');
   await on({ monthlyCapEur: 0, dailyCapEur: 0 });                           // a zero cap means no AI at all
   await rejects(chat(model, { message: 'hi' }), 'failed-precondition');
   assert.equal(model.calls.length, 0);
@@ -186,9 +188,10 @@ test('the monthly cap is a hard stop: when the next call might not fit, the mode
 
 test('the daily cap stops a runaway day while the month still has room; the next day is fresh', async () => {
   await on({ monthlyCapEur: 15, dailyCapEur: 0.05 });
-  await db.doc('aiUsage/' + ai.dayId(NOW)).set({ costEur: 0.049 });
+  await db.doc('aiUsage/' + ai.dayId(NOW)).set({ costEur: 0.0499 });
   const model = fake();
   await rejects(chat(model, { message: 'hi' }), 'failed-precondition', /Today/);
+  await rejects(chat(model, { message: 'hi', model: 'sonnet' }), 'failed-precondition', /Today/);
   assert.equal(model.calls.length, 0);
   const tomorrow = NOW + 24 * 36e5;
   await chat(model, { message: 'hi' }, { nowMs: tomorrow });
@@ -199,7 +202,7 @@ test('ten questions at the same instant cannot overshoot the cap: the total spen
   const cap = 0.1;
   await on({ monthlyCapEur: cap, dailyCapEur: cap });
   const model = fake([async () => { await new Promise((r) => setTimeout(r, 1500)); return { text: 'ok' }; }]);
-  const results = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => chat(model, { message: 'question ' + i }, { uid: 'u' + i })));
+  const results = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => chat(model, { message: 'question ' + i, model: 'sonnet' }, { uid: 'u' + i })));
   const ok = results.filter((r) => r.status === 'fulfilled').length, refused = results.filter((r) => r.status === 'rejected' && r.reason.code === 'failed-precondition').length;
   assert.equal(model.calls.length, ok);
   assert.ok(ok >= 1 && refused >= 1 && ok + refused === 10, `ok ${ok}, refused ${refused}`);
@@ -352,7 +355,7 @@ test('nothing about a person or a question is logged or stored in the usage reco
 
 test('end to end through the real wrapper with the demo model: a lookup and a plain answer', async () => {
   await on();
-  const deps = { db, cfg, model: ai.createDemoModel() };
+  const deps = { db, cfg, model: ai.createDemoModel(), aiOwners: OWNERS };
   const r = await h.aiChat(staff, { message: 'find anna' }, deps);
   assert.match(r.reply, /Anna Kowalska \(Quoted\)/); assert.equal(r.tools[0].name, 'search_customers');
   const s = await h.aiStatus(staff, {}, deps);
@@ -482,7 +485,7 @@ test('the assistant writes only its own records: ai* collections and one audit l
   assert.equal(/wa\.|sendText|getStorage|bucket/.test(src), false);
   const idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
   assert.match(idx, /FUNCTIONS_EMULATOR === 'true' && process\.env\.AI_FAKE_MODEL === 'on'/, 'the fake model must only exist in the emulator');
-  for (const name of ['aiChat', 'aiStatus', 'setAiSettings']) assert.match(idx, new RegExp(`exports\\.${name} = onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\][^\\n]*aiDeps\\(\\)`), name + ' must get the key and the model (setAiSettings answers with keyConfigured)');
+  for (const name of ['aiChat', 'aiStatus', 'setAiSettings', 'aiCheckModels']) assert.match(idx, new RegExp(`exports\\.${name} = onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\][^\\n]*aiDeps\\(\\)`), name + ' must get the key and the model (setAiSettings answers with keyConfigured)');
   assert.equal(/apiKey:\s*['"`]sk-/.test(idx + fs.readFileSync(path.join(__dirname, '../lib/ai.js'), 'utf8')), false, 'no key in the code');
 });
 
@@ -499,7 +502,7 @@ test('data is not changed by a whole chat that reads everything', async () => {
 // ======================================================= the model adapter =====================================================
 function fakeFetch(...answers) {
   const f = async (url, init) => {
-    f.calls.push({ url, init, body: JSON.parse(init.body) });
+    f.calls.push({ url, init, body: init.body ? JSON.parse(init.body) : undefined });
     const a = answers[Math.min(f.calls.length - 1, answers.length - 1)];
     if (typeof a === 'function') return a(init);
     return { ok: a.status === undefined || a.status < 400, status: a.status || 200, json: async () => a.json };
@@ -598,7 +601,7 @@ const CUSTOMER_AREAS = /^(conversations|contacts|quotes|projects|appointments|pu
 test('GATE: without the confirmation, nothing about any customer is read from the database, whatever the model or the screen asks for', async () => {
   const everyTool = T.TOOLS.map((t, i) => ({ id: 'g' + i, name: t.name, input: { customerId: ANNA, query: 'anna', quoteId: QID.sent, projectId: 'p_' + hex(3), ref: 'EK-0199', limit: 15 } }));
   for (const approvedValue of [undefined, false, 'true', 1, 'yes', null, {}]) {
-    await db.doc('aiSettings/current').set({ enabled: true, monthlyCapEur: 15, dailyCapEur: 2, ...(approvedValue === undefined ? {} : { customerDataApproved: approvedValue }) });
+    await checked(); await db.doc('aiSettings/current').set({ enabled: true, monthlyCapEur: 15, dailyCapEur: 2, ...(approvedValue === undefined ? {} : { customerDataApproved: approvedValue }) });
     const paths = [], model = fake([{ toolCalls: everyTool, stopReason: 'tool_use' }, { text: 'done' }]);
     const r = await ai.chat({ db: spyDb(paths), model }, actor, { message: 'tell me everything about anna', context: { customerId: ANNA, quoteId: QID.sent, projectId: 'p_' + hex(3) }, history: [{ role: 'user', text: 'earlier' }, { role: 'assistant', text: 'ok' }] }, { uid: 'g' + String(approvedValue), nowMs: NOW });
     assert.equal(r.reply, 'done');
@@ -611,7 +614,7 @@ test('GATE: without the confirmation, nothing about any customer is read from th
 });
 
 test('GATE: once the confirmation is saved (only a real true), the same request reads the customer', async () => {
-  await db.doc('aiSettings/current').set({ enabled: true, monthlyCapEur: 15, dailyCapEur: 2, customerDataApproved: true });
+  await checked(); await db.doc('aiSettings/current').set({ enabled: true, monthlyCapEur: 15, dailyCapEur: 2, customerDataApproved: true });
   const paths = [], model = fake([use('get_customer', { customerId: ANNA }), { text: 'ok' }]);
   await ai.chat({ db: spyDb(paths), model }, actor, { message: 'x', context: { customerId: ANNA } }, { uid: 'g-open', nowMs: NOW });
   assert.ok(paths.some((p) => /^conversations/.test(p)) && paths.some((p) => /^contacts/.test(p)));
@@ -622,4 +625,164 @@ test('GATE: the Assistant\'s own status and settings calls never read customers 
   await ai.status({ db: spyDb(paths), model: fake() }, actor, {}, { nowMs: NOW });
   await ai.saveSettings({ db: spyDb(paths), model: fake() }, actor, { enabled: true }, { nowMs: NOW });
   assert.deepEqual(paths.filter((p) => CUSTOMER_AREAS.test(p)), []);
+});
+
+// ======================================================= model choice: Haiku by default, Sonnet on request =====================================================
+const HAIKU = 'claude-haiku-5-5', SONNET = 'claude-sonnet-5-5';
+
+test('MODEL: Haiku answers by default; Sonnet only when asked; one model for the whole question; the server decides what the names mean', async () => {
+  await on();
+  const m1 = fake([use('pipeline_summary', {}), use('pipeline_summary', {}, 'tu_2'), { text: 'done' }]);
+  const r1 = await chat(m1, { message: 'summary' });
+  assert.equal(r1.model, 'haiku'); assert.deepEqual(m1.calls.map((c) => c.model), [HAIKU, HAIKU, HAIKU], 'one model for every step of the question');
+  const m2 = fake([use('pipeline_summary', {}), { text: 'done' }]);
+  const r2 = await chat(m2, { message: 'summary', model: 'sonnet' });
+  assert.equal(r2.model, 'sonnet'); assert.deepEqual(m2.calls.map((c) => c.model), [SONNET, SONNET]);
+  const m3 = fake(); await chat(m3, { message: 'x', model: 'haiku' }); assert.equal(m3.calls[0].model, HAIKU);
+  await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, monthlyCapEur: 15, dailyCapEur: 2, defaultModel: 'sonnet' });
+  const m4 = fake(); assert.equal((await chat(m4, { message: 'x' }, { uid: 'd1' })).model, 'sonnet');
+  await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, monthlyCapEur: 15, dailyCapEur: 2, defaultModel: 'claude-opus-5-5' });
+  const m5 = fake(); assert.equal((await chat(m5, { message: 'x' }, { uid: 'd2' })).model, 'haiku', 'a bad default falls back to Haiku');
+  assert.equal((await ai.loadSettings(db)).defaultModel, 'haiku');
+});
+
+test('MODEL: nothing but the two names is accepted: raw model IDs, other models and tricks are refused before anything is reserved or called', async () => {
+  await on();
+  const model = fake();
+  for (const bad of ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-fable-5-1', 'opus', 'HAIKU', 'Haiku ', '', '__proto__', 'constructor', 'toString', 'hasOwnProperty', 5, true, {}, ['haiku']])
+    await rejects(chat(model, { message: 'x', model: bad }), 'invalid-argument', /Unknown model/);
+  assert.equal(model.calls.length, 0); assert.deepEqual(await month(), {});
+  assert.deepEqual(Object.keys(ai.MODELS), ['haiku', 'sonnet']); assert.equal(ai.DEFAULTS.defaultModel, 'haiku');
+});
+
+test('MODEL: a model works only after "Check models" passed for its exact ID; a failed or missing check blocks that model, not the other', async () => {
+  await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, monthlyCapEur: 15, dailyCapEur: 2 });
+  const model = fake();
+  await rejects(chat(model, { message: 'x' }), 'failed-precondition', /Haiku model has not been checked/);
+  await rejects(chat(model, { message: 'x', model: 'sonnet' }), 'failed-precondition', /Sonnet model has not been checked/);
+  await checked(['haiku']);
+  assert.equal((await chat(model, { message: 'x' })).model, 'haiku');
+  await rejects(chat(model, { message: 'x', model: 'sonnet' }, { uid: 'u2' }), 'failed-precondition', /Sonnet/);
+  await db.doc('aiSettings/modelCheck').set({ haiku: { id: HAIKU, ok: false, reason: 'The model is retired, not active.' }, sonnet: { id: 'claude-sonnet-5', ok: true } });       // failed, and an old ID
+  await rejects(chat(model, { message: 'x' }, { uid: 'u3' }), 'failed-precondition', /Haiku/); await rejects(chat(model, { message: 'x', model: 'sonnet' }, { uid: 'u3' }), 'failed-precondition', /Sonnet/);
+  assert.equal(model.calls.length, 1);
+  const st = await ai.status({ db, model, owners: OWNERS }, actor, {}, { nowMs: NOW });
+  assert.deepEqual(st.models.map((m) => [m.key, m.id, m.ready]), [['haiku', HAIKU, false], ['sonnet', SONNET, false]]); assert.match(st.models[0].reason, /retired/);
+});
+
+test('MODEL: "Check models" asks the provider about each ID, stores the answer, audits it without content, and needs a key that can check', async () => {
+  const verifying = (answers) => ({ name: 'v', calls: [], async verify(id) { this.calls.push(id); const a = answers[id]; if (a instanceof Error) throw a; return a; }, async complete() { return { text: 'ok', toolCalls: [], stopReason: 'end_turn', usage: USAGE }; } });
+  await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true });
+  const good = verifying({ [HAIKU]: { ok: true, name: 'Claude Haiku 5.5', lifecycle: 'active' }, [SONNET]: { ok: false, reason: 'The provider does not know this model.' } });
+  const st = await ai.checkModels({ db, model: good, owners: OWNERS }, actor, undefined, { nowMs: NOW });
+  assert.deepEqual(good.calls, [HAIKU, SONNET]);
+  assert.deepEqual(st.models.map((m) => [m.key, m.ready]), [['haiku', true], ['sonnet', false]]); assert.equal(st.models[1].reason, 'The provider does not know this model.');
+  assert.equal((await chat(good, { message: 'x' })).model, 'haiku'); await rejects(chat(good, { message: 'x', model: 'sonnet' }, { uid: 'v2' }), 'failed-precondition');
+  const audit = (await db.collection('auditLog').where('action', '==', 'aiCheckModels').get()).docs.map((d) => d.data());
+  assert.equal(audit.length, 1); assert.deepEqual(audit[0].results, { haiku: true, sonnet: false }); assert.equal(audit[0].by, 'thomas@example.com');
+  const flaky = verifying({ [HAIKU]: new Error('network down with secret sk-ant-1'), [SONNET]: { ok: true } });
+  const st2 = await ai.checkModels({ db, model: flaky, owners: OWNERS }, actor, {}, { nowMs: NOW });
+  assert.deepEqual(st2.models.map((m) => m.ready), [false, true]); assert.equal(JSON.stringify(st2).includes('sk-ant'), false);
+  await rejects(ai.checkModels({ db, model: null }, actor, {}), 'failed-precondition', /no key/);
+  await rejects(ai.checkModels({ db, model: fake() }, actor, {}), 'failed-precondition', /cannot check/);
+  await rejects(ai.checkModels({ db, model: good }, actor, { extra: 1 }), 'invalid-argument');
+  await rejects(h.aiCheckModels(null, {}, { db, cfg, model: good }), 'unauthenticated');
+  await rejects(h.aiCheckModels({ uid: 'x', token: { email: 'stranger@gmail.com', email_verified: true, staff: true } }, {}, { db, cfg, model: good }), 'permission-denied');
+  const demo = await h.aiCheckModels(staff, {}, { db, cfg, model: ai.createDemoModel(), aiOwners: OWNERS });
+  assert.deepEqual(demo.models.map((m) => m.ready), [true, true]);
+});
+
+test('MODEL: the provider\'s answer is judged strictly: unknown, retired, wrong model, missing effort, thinking-off mismatches and bad keys all fail; the key never appears in the result', async () => {
+  const info = (id, over = {}) => ({ id, display_name: 'X', lifecycle: 'active', capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, max: { supported: true } },
+    thinking: { supported: true, types: { adaptive: { supported: true }, enabled: { supported: false }, disabled: { supported: id === HAIKU } } } }, ...over });
+  const verify = async (id, ...answers) => { const f = fakeFetch(...answers); const r = await ai.anthropicModel({ apiKey: 'sk-ant-SECRET', fetchImpl: f }).verify(id); return { r, f }; };
+  const ok1 = await verify(HAIKU, { json: info(HAIKU) });
+  assert.equal(ok1.r.ok, true); assert.equal(ok1.f.calls[0].url, 'https://api.anthropic.com/v1/models/' + HAIKU); assert.equal(ok1.f.calls[0].init.method, 'GET'); assert.equal(ok1.f.calls[0].init.body, undefined);
+  assert.equal(ok1.f.calls[0].init.headers['x-api-key'], 'sk-ant-SECRET'); assert.equal(ok1.f.calls[0].init.headers['anthropic-version'], '2023-06-01');
+  assert.equal((await verify(SONNET, { json: info(SONNET) })).r.ok, true, 'Sonnet does not accept thinking off, and we do not send it');
+  const bads = [[HAIKU, { status: 404, json: {} }, /does not know/], [HAIKU, { status: 401, json: {} }, /refused the key/], [HAIKU, { status: 500, json: {} }, /error \(500\)/],
+    [HAIKU, { json: info(HAIKU, { lifecycle: 'retired' }) }, /retired/], [HAIKU, { json: info(HAIKU, { lifecycle: 'deprecated' }) }, /deprecated/], [HAIKU, { json: info('claude-haiku-4-5') }, /different model/], [HAIKU, { json: null }, /different model/],
+    [HAIKU, { json: info(HAIKU, { capabilities: { effort: { supported: false }, thinking: { supported: true, types: { disabled: { supported: true } } } } }) }, /effort/],
+    [HAIKU, { json: info(HAIKU, { capabilities: { effort: info(HAIKU).capabilities.effort, thinking: { supported: true, types: { disabled: { supported: false } } } } }) }, /thinking turned off/],
+    [SONNET, { json: info(SONNET, { capabilities: { effort: info(SONNET).capabilities.effort, thinking: { supported: false, types: {} } } }) }, /thinking setting/]];
+  for (const [id, answer, why] of bads) { const { r } = await verify(id, answer); assert.equal(r.ok, false, JSON.stringify(answer).slice(0, 80)); assert.match(r.reason, why); assert.equal(JSON.stringify(r).includes('sk-ant'), false); }
+  const down = await ai.anthropicModel({ apiKey: 'sk-ant-SECRET', fetchImpl: async () => { throw new TypeError('fetch failed sk-ant-SECRET'); } }).verify(HAIKU);
+  assert.equal(down.ok, false); assert.equal(JSON.stringify(down).includes('sk-ant'), false);
+  const hang = await ai.anthropicModel({ apiKey: 'k', fetchImpl: async () => { const e = new Error('x'); e.name = 'AbortError'; throw e; } }).verify(HAIKU);
+  assert.match(hang.reason, /too long/);
+});
+
+// ======================================================= spending, whichever model =====================================================
+test('MODEL + SPENDING: each model is priced at its own rate, both count against the same limits, and the usage records show which model spent what', async () => {
+  await on();
+  const usage = { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0 };
+  const rh = await chat(fake([{ text: 'a', usage }]), { message: 'q' }), rs = await chat(fake([{ text: 'a', usage }]), { message: 'q', model: 'sonnet' }, { uid: 'u2' });
+  const eh = (1000 * 0.1 + 500 * 0.5) / 1e6 * 1.25, es = (1000 * 2 + 500 * 10) / 1e6 * 1.25;
+  assert.ok(Math.abs(rh.costEur - eh) < 1e-9 && Math.abs(rs.costEur - es) < 1e-9 && es > 10 * eh, `${rh.costEur} ${rs.costEur}`);
+  const m = await month();
+  assert.ok(Math.abs(m.costEur - (eh + es)) < 1e-9, 'one shared total'); assert.equal(m.byModel[HAIKU].calls, 1); assert.equal(m.byModel[SONNET].calls, 1);
+  assert.ok(Math.abs(m.byModel[SONNET].costEur - es) < 1e-9);
+  assert.deepEqual((await db.collection('aiLog').get()).docs.map((d) => d.data().model).sort(), [HAIKU, SONNET]);
+});
+
+test('MODEL + SPENDING: the worst case reserved before the call depends on the model: a tight budget still allows Haiku but not Sonnet', async () => {
+  await on({ monthlyCapEur: 0.005, dailyCapEur: 0.005 });
+  const model = fake();
+  await rejects(chat(model, { message: 'q', model: 'sonnet' }), 'failed-precondition', /monthly AI budget/);
+  assert.equal(model.calls.length, 0);
+  assert.equal((await chat(model, { message: 'q' })).model, 'haiku'); assert.equal(model.calls.length, 1);
+  await on({ monthlyCapEur: 0, dailyCapEur: 0 });
+  for (const m of ['haiku', 'sonnet']) await rejects(chat(model, { message: 'q', model: m }, { uid: 'z' + m }), 'failed-precondition');
+  assert.equal(model.calls.length, 1);
+});
+
+test('RETRY WITH SONNET: asking again with the other model is a second, separate, fully limited request with the same question and history; there is no automatic escalation', async () => {
+  await on();
+  const history = [{ role: 'user', text: 'earlier' }, { role: 'assistant', text: 'ok' }];
+  const haiku = fake([{ text: 'unhelpful' }]), sonnet = fake([{ text: 'better' }]);
+  const a = await chat(haiku, { message: 'which quotes are open?', history });
+  assert.equal(haiku.calls.length, 1, 'a weak or empty answer never triggers a second model by itself');
+  const b = await chat(sonnet, { message: 'which quotes are open?', history, model: 'sonnet' }, { uid: 'u1' });
+  assert.equal(a.reply, 'unhelpful'); assert.equal(b.reply, 'better'); assert.equal(sonnet.calls.length, 1);
+  assert.deepEqual(sonnet.calls[0].messages, haiku.calls[0].messages, 'the same question and history reach the second model');
+  assert.equal(sonnet.calls[0].model, SONNET);
+  assert.equal((await month()).calls, 2, 'both requests are counted');
+  await db.doc('aiUsage/' + ai.monthId(NOW)).set({ costEur: 14.99 }, { merge: true });                           // the retry is limited like any request
+  await rejects(chat(fake(), { message: 'which quotes are open?', history, model: 'sonnet' }, { uid: 'u4' }), 'failed-precondition', /monthly AI budget/);
+});
+
+// ======================================================= who may switch real customer data on =====================================================
+test('OWNER: only the owner account can change real customer data access (on or off); everyone else keeps the kill switch and the limits; nothing is saved or audited on a refusal', async () => {
+  const other = { kind: 'staff', id: 'other@example.com' };
+  const attempt = (owners, who, data) => ai.saveSettings({ db, owners }, who, data, { nowMs: NOW });
+  const grant = { customerDataApproved: true, confirmDataTerms: true };
+  for (const [owners, who] of [[OWNERS, other], ['', actor], [undefined, actor], [null, actor], [' , ', actor], [OWNERS, { kind: 'staff', id: 'xthomas@example.com' }], [OWNERS, { kind: 'staff', id: 'thomas@example.com.evil.io' }], [OWNERS, { kind: 'staff' }], [OWNERS, null], ['other@example.com', actor]])
+    await rejects(attempt(owners, who, grant), 'permission-denied', /Only the owner/);
+  await rejects(attempt(OWNERS, other, { customerDataApproved: false }), 'permission-denied');
+  assert.equal((await db.doc('aiSettings/current').get()).exists, false); assert.equal((await db.collection('auditLog').get()).size, 0);
+  const s1 = await attempt(OWNERS, other, { enabled: true, monthlyCapEur: 10, dailyCapEur: 1 });                // the rest stays open to staff
+  assert.deepEqual([s1.enabled, s1.monthlyCapEur, s1.dailyCapEur, s1.customerDataApproved, s1.canApproveData], [true, 10, 1, false, false]);
+  assert.equal((await attempt(OWNERS, other, { enabled: false })).enabled, false);                              // any staff can still pull the kill switch
+  const s2 = await attempt(' Other@Example.com , THOMAS@example.com ', actor, grant);
+  assert.equal(s2.customerDataApproved, true); assert.equal(s2.canApproveData, true); assert.equal(s2.ownerConfigured, true);
+  const doc = (await db.doc('aiSettings/current').get()).data(); assert.equal(doc.dataApprovedBy, 'thomas@example.com'); assert.equal(doc.customerDataApproved, true);
+  await rejects(attempt(OWNERS, other, { customerDataApproved: false }), 'permission-denied'); assert.equal((await ai.loadSettings(db)).customerDataApproved, true);
+  assert.equal((await attempt(OWNERS, actor, { customerDataApproved: false })).customerDataApproved, false);
+  assert.equal((await ai.status({ db, owners: OWNERS }, other, {}, { nowMs: NOW })).canApproveData, false);
+  assert.equal((await ai.status({ db, owners: '' }, actor, {}, { nowMs: NOW })).ownerConfigured, false);
+});
+
+test('OWNER: through the real function wrapper, a second allowed staff account is refused, the owner is accepted, and the default stays closed', async () => {
+  const cfg2 = { allowedEmails: 'thomas@example.com,other@example.com' };
+  const other = { uid: 'u2', token: { email: 'other@example.com', email_verified: true, staff: true } };
+  const deps = { db, cfg: cfg2, model: ai.createDemoModel(), aiOwners: OWNERS };
+  await rejects(h.setAiSettings(other, { customerDataApproved: true, confirmDataTerms: true }, deps), 'permission-denied', /Only the owner/);
+  await rejects(h.setAiSettings(other, { customerDataApproved: true, confirmDataTerms: true }, { ...deps, aiOwners: undefined }), 'permission-denied');
+  assert.equal((await ai.loadSettings(db)).customerDataApproved, false, 'closed by default and after the refusals');
+  assert.equal((await h.aiStatus(other, {}, deps)).canApproveData, false); assert.equal((await h.aiStatus(staff, {}, { ...deps, cfg: cfg2 })).canApproveData, true);
+  assert.equal((await h.setAiSettings(other, { enabled: true }, deps)).enabled, true);
+  assert.equal((await h.setAiSettings(staff, { customerDataApproved: true, confirmDataTerms: true }, { ...deps, cfg: cfg2 })).customerDataApproved, true);
+  const idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
+  assert.match(idx, /defineString\('AI_OWNER_EMAILS', \{ default: '' \}\)/, 'an unset owner setting means nobody can switch customer data on');
+  assert.match(idx, /aiOwners: AI_OWNER_EMAILS\.value\(\)/);
 });

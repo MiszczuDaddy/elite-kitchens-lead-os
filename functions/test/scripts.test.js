@@ -655,7 +655,7 @@ test('Phase 7: the projects stage names exactly the seven new project functions 
 test('Phase 9: the ai stage names exactly the three new callables (each bound to the Anthropic secret), checks the key before asking, touches no existing function, and the screen waits for them', () => {
   const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
   const m = /^AI_NEW="([^"]*)"/m.exec(s); assert.ok(m); const fresh = m[1].trim().split(/\s+/);
-  assert.deepEqual([...fresh].sort(), ['aiChat', 'aiStatus', 'setAiSettings']);
+  assert.deepEqual([...fresh].sort(), ['aiChat', 'aiCheckModels', 'aiStatus', 'setAiSettings']);
   assert.match(s, /^AI_FUNCS="\$AI_NEW"/m);
   const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
   for (const f of fresh) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\]', 'm'), f + ' is not a callable bound to the Anthropic secret in functions/index.js');
@@ -663,6 +663,8 @@ test('Phase 9: the ai stage names exactly the three new callables (each bound to
   assert.match(stage, /deploy_functions \$AI_FUNCS/); assert.match(stage, /for f in \$AI_NEW; do[\s\S]*add-iam-policy-binding[\s\S]*done/); assert.match(stage, /check_reachable "\$AI_FUNCS"/);
   assert.ok(stage.indexOf('ANTHROPIC_API_KEY is not set yet') < stage.indexOf('confirm "') && stage.indexOf('check_routing') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'key and checks first, then the question, then the deploy');
   assert.equal(/functions:secrets:set[^\n]*\$\(|ANTHROPIC_API_KEY=/.test(stage), false, 'the script never handles the key itself');
+  assert.match(stage, /read -r -p "Owner account/); assert.match(stage, /ALLOWED_EMAILS/); assert.ok(stage.indexOf('Owner account') < stage.indexOf('confirm "'), 'the owner is asked before the question');
+  assert.ok(stage.indexOf('confirm "') < stage.indexOf('setting "$ENVF" AI_OWNER_EMAILS') && stage.indexOf('setting "$ENVF" AI_OWNER_EMAILS') < stage.indexOf('deploy_functions'), 'nothing is written before the yes');
   const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j));
   assert.match(live, /serving_revision aichat[\s\S]*Deploy the AI assistant backend first/); assert.ok(live.indexOf('aichat') < live.indexOf('confirm "'));
 });
