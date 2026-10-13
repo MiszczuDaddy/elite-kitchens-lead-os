@@ -53,7 +53,7 @@ window.ASSIST = (() => {
     setTimeout(() => { if (A.active) { toBottom(); if (!$('as-input').disabled && window.matchMedia && !matchMedia('(max-width: 899px)').matches) $('as-input').focus(); } }, 0);
   }
   function hide() { A.active = false; setNav(false); closeDialog($('as-dlg')); setView(); }
-  function stop() { hide(); A.turns = []; A.context = {}; A.pending = null; A.status = null; A.statusLoaded = false; A.busy = false; A.started = false; $('as-input').value = ''; render(); }
+  function stop() { hide(); A.turns = []; A.context = {}; A.pending = null; A.status = null; A.statusLoaded = false; A.busy = false; A.started = false; cards.clear(); cardNote.clear(); cardBusy.clear(); $('as-input').value = ''; render(); }
   // Signing out forgets the conversation; a reload (which also passes through stop()) keeps it.
   function forget() { try { sessionStorage.removeItem(KEY); } catch (e) { /* nothing kept */ } }
 
@@ -99,8 +99,48 @@ window.ASSIST = (() => {
         if (M.canRetry(A.turns, i, A.status) && !A.busy) { const b = el('button', 'as-retry', 'Retry with Sonnet'); b.type = 'button'; b.onclick = () => retry(i); tr.append(b); }
         host.append(tr);
       }
+      if (t.role === 'assistant' && !t.pending && !t.error) for (const pr of t.proposals || []) host.append(card(pr.id));
     });
     toBottom();
+  }
+
+  // ---------- proposal cards (Phase 9.2a): an exact before/after preview with Approve and Reject. The words are the server's (built by code); nothing is saved until Approve. ----------
+  const cards = new Map(), cardNote = new Map(), cardBusy = new Set();
+  async function loadCard(id) {
+    try { const s = await db.doc('aiProposals/' + id).get(); cards.set(id, s.exists ? { id, ...s.data() } : { id, status: 'gone', title: 'This proposal no longer exists', preview: { rows: [] } }); }
+    catch (e) { cards.set(id, { id, status: 'gone', title: 'Cannot load this proposal', preview: { rows: [] } }); }
+    if (A.active) render();
+  }
+  function card(id) {
+    const p = cards.get(id), d = el('div', 'as-card');
+    if (!p) { d.textContent = 'Loading the preview…'; loadCard(id); return d; }
+    const v = M.proposalView(p, Date.now()), note = cardNote.get(id);
+    d.dataset.state = v.status; d.append(el('div', 'as-card-title', v.title));
+    for (const r of v.rows) {
+      const row = el('div', 'as-card-row'); row.append(el('div', 'as-card-label', r.label || ''));
+      if (r.type === 'append') { if (r.existing) row.append(el('div', 'as-card-old', r.existing)); row.append(el('div', 'as-card-new', '+ ' + (r.added || ''))); }
+      else { row.append(el('div', 'as-card-old before', 'Before: ' + (r.before == null ? '' : r.before))); row.append(el('div', 'as-card-new', 'After: ' + (r.after == null ? '' : r.after))); }
+      d.append(row);
+    }
+    if (v.footer) d.append(el('p', 'as-card-foot', v.footer));
+    if (v.canDecide) {
+      const bar = el('div', 'as-card-actions'), ok = el('button', 'btn btn-primary btn-sm', cardBusy.has(id) ? 'Working…' : 'Approve'), no = el('button', 'btn btn-ghost btn-sm', 'Reject');
+      ok.type = 'button'; no.type = 'button'; ok.disabled = no.disabled = cardBusy.has(id);
+      ok.onclick = () => decideCard(id, 'approve'); no.onclick = () => decideCard(id, 'reject');
+      bar.append(ok, no); if (v.minutes != null) bar.append(el('span', 'as-card-exp', 'Expires in ' + v.minutes + ' min')); d.append(bar);
+    } else {
+      d.append(el('div', 'as-card-state', v.label + (v.message && v.status !== 'rejected' && v.status !== 'expired' ? ': ' + v.message : '')));
+      if (v.status === 'partial' && v.results.length) { const ul = el('ul', 'as-card-res'); for (const x of v.results) ul.append(el('li', x.ok ? '' : 'bad', (x.ok ? 'Saved: ' : 'Not saved: ') + (x.label || ''))); d.append(ul); }
+    }
+    if (note && v.canDecide) d.append(el('div', 'as-card-state', note));
+    return d;
+  }
+  async function decideCard(id, decision) {
+    if (cardBusy.has(id)) return;
+    cardBusy.add(id); cardNote.delete(id); render();
+    try { const r = (await call('aiDecide')({ proposalId: id, decision })).data; if (r && r.message && r.status === 'pending') cardNote.set(id, r.message); }
+    catch (e) { cardNote.set(id, M.friendlyError(e)); }
+    cardBusy.delete(id); await loadCard(id);
   }
 
   // ---------- asking ----------
@@ -126,7 +166,8 @@ window.ASSIST = (() => {
     A.busy = true; render();
     try {
       const r = (await call('aiChat')({ message: text, history, model: modelKey, ...(Object.keys(context).length ? { context } : {}) })).data;
-      A.turns[A.turns.indexOf(slot)] = { role: 'assistant', text: String(r.reply || ''), model: r.model === null ? null : (M.MODEL_KEYS.includes(r.model) ? r.model : modelKey), tools: (r.tools || []).map((x) => x.note).filter(Boolean).slice(0, 8), cost: typeof r.costEur === 'number' ? r.costEur : null };
+      A.turns[A.turns.indexOf(slot)] = { role: 'assistant', text: String(r.reply || ''), model: r.model === null ? null : (M.MODEL_KEYS.includes(r.model) ? r.model : modelKey), tools: (r.tools || []).map((x) => x.note).filter(Boolean).slice(0, 8), cost: typeof r.costEur === 'number' ? r.costEur : null,
+        proposals: (r.proposals || []).filter((x) => x && /^ap_[0-9a-f]{24}$/.test(x.id)).slice(0, 5).map((x) => ({ id: x.id })) };
       if (A.status && typeof r.monthSpentEur === 'number') A.status.monthSpentEur = r.monthSpentEur;
     } catch (e) {
       const i = A.turns.indexOf(slot), bad = { role: 'assistant', text: M.friendlyError(e), error: true };
@@ -145,6 +186,10 @@ window.ASSIST = (() => {
     $('as-set-enabled').checked = !!s.enabled; $('as-set-month').value = s.monthlyCapEur != null ? s.monthlyCapEur : 15; $('as-set-day').value = s.dailyCapEur != null ? s.dailyCapEur : 2;
     $('as-set-data').checked = !!s.customerDataApproved; $('as-set-terms').checked = false; $('as-set-terms').closest('label').hidden = !!s.customerDataApproved || !$('as-set-data').checked;
     $('as-set-spent').textContent = M.eur(s.monthSpentEur || 0) + ' this month, ' + M.eur(s.daySpentEur || 0) + ' today';
+    const ag = M.actionsGate(s), act = s.actions || {};
+    $('as-set-actions').checked = !!act.enabled; $('as-set-actions').disabled = ag.disabled;
+    for (const cb of $('as-set-kinds').querySelectorAll('input')) { cb.checked = !!(act.kinds && act.kinds[cb.dataset.kind]); cb.disabled = ag.disabled; }
+    if (ag.hint) $('as-set-actions-hint').textContent = ag.hint;
     drawModels(s); const g = M.dataGate(s); $('as-set-data').disabled = g.disabled; $('as-set-data-hint').hidden = !g.hint; $('as-set-data-hint').textContent = g.hint;
     $('as-set-key').textContent = s.keyConfigured ? 'The connection to the AI provider is set up.' : 'The connection to the AI provider is not set up yet (the owner adds the key on the server).';
     render();
@@ -169,6 +214,12 @@ window.ASSIST = (() => {
     if (data !== !!s.customerDataApproved) {
       if (data && !$('as-set-terms').checked) { $('as-set-err').textContent = 'Tick the box that says the provider\'s data terms were checked, or leave real customer data switched off.'; return; }
       patch.customerDataApproved = data; if (data) patch.confirmDataTerms = true;
+    }
+    const act = s.actions || {}, kinds = {};
+    for (const cb of $('as-set-kinds').querySelectorAll('input')) kinds[cb.dataset.kind] = cb.checked;
+    if (!$('as-set-actions').disabled) {
+      if ($('as-set-actions').checked !== !!act.enabled) patch.actionsEnabled = $('as-set-actions').checked;
+      if (Object.keys(kinds).some((k) => kinds[k] !== !!(act.kinds && act.kinds[k]))) patch.actionKinds = kinds;
     }
     if (!Object.keys(patch).length) { closeDialog($('as-dlg')); return; }
     const b = $('as-set-save'); b.disabled = true; $('as-set-err').textContent = '';

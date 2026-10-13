@@ -210,6 +210,7 @@ const aiDeps = () => ({ ...quoteDeps(), model: aiModel(), aiOwners: AI_OWNER_EMA
 exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 240 }, (req) => h.aiChat(req.auth, req.data, aiDeps()));
 exports.aiStatus = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.aiStatus(req.auth, req.data, aiDeps()));
 exports.setAiSettings = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.setAiSettings(req.auth, req.data, aiDeps()));
+exports.aiDecide = onCall({}, (req) => h.aiDecide(req.auth, req.data, quoteDeps()));
 exports.aiCheckModels = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60 }, (req) => h.aiCheckModels(req.auth, req.data, aiDeps()));
 
 exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { res.sendStatus(await h.pushReceipt(req, { db: getFirestore() })); });

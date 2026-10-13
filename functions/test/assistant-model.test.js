@@ -110,3 +110,21 @@ test('the customer-data box: usable only by the owner account; explained for eve
   assert.equal(M.dataGate({ ownerConfigured: false, canApproveData: false }).disabled, true); assert.match(M.dataGate({ ownerConfigured: false }).hint, /has not been set up/);
   assert.equal(M.dataGate(null).disabled, true); assert.equal(M.dataGate({}).disabled, true, 'unknown means closed');
 });
+
+test('proposal cards: the state shown comes from the stored proposal; a pending one past its time shows as expired; only a pending one can be decided', () => {
+  const doc = (status, extra = {}) => ({ id: 'ap_' + 'a'.repeat(24), title: 'Add a note to Anna', status, preview: { rows: [{ label: 'Notes', type: 'append', existing: 'x', added: 'y' }], footer: 'Saved to Notes.' }, expiresAt: { toMillis: () => 1000000 }, ...extra });
+  const p = M.proposalView(doc('pending'), 1000000 - 5 * 60000);
+  assert.deepEqual([p.status, p.canDecide, p.minutes, p.label, p.rows.length, p.footer], ['pending', true, 5, 'Waiting for your approval', 1, 'Saved to Notes.']);
+  const late = M.proposalView(doc('pending'), 1000001); assert.deepEqual([late.status, late.canDecide, late.minutes], ['expired', false, null]);
+  for (const s of ['applied', 'partial', 'stale', 'expired', 'rejected', 'failed', 'applying']) { const v = M.proposalView(doc(s), 1); assert.equal(v.canDecide, false, s); assert.equal(v.label, M.STATE_LABEL[s]); }
+  assert.equal(M.proposalView(doc('applied', { result: { message: 'The note was added.', results: [{ label: 'Notes', ok: true }] } }), 1).message, 'The note was added.');
+  assert.equal(M.proposalView(null, 1), null); assert.deepEqual(M.proposalView({ id: 'x', status: 'pending' }, 1).rows, []);
+  assert.equal(M.proposalView(doc('pending', { expiresAt: 2000000 }), 1000000).minutes, 17);
+});
+
+test('AI actions box in Settings: owner only; explained for everyone else; needs customer data', () => {
+  assert.deepEqual(M.actionsGate({ ownerConfigured: true, canApproveData: true, customerDataApproved: true }), { disabled: false, hint: '' });
+  assert.match(M.actionsGate({ ownerConfigured: true, canApproveData: true, customerDataApproved: false }).hint, /customer data/); assert.equal(M.actionsGate({ ownerConfigured: true, canApproveData: true, customerDataApproved: false }).disabled, false);
+  assert.deepEqual([M.actionsGate({ ownerConfigured: true, canApproveData: false }).disabled, M.actionsGate({ ownerConfigured: false }).disabled, M.actionsGate(null).disabled], [true, true, true]);
+  assert.match(M.actionsGate({ ownerConfigured: true, canApproveData: false }).hint, /Only the owner account/);
+});

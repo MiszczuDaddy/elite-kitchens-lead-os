@@ -482,6 +482,11 @@
     <label class="as-check"><input id="as-set-data" type="checkbox"> <span>Let the assistant see real customer data</span></label>
     <p id="as-set-data-hint" class="hint" hidden></p>
     <label class="as-check as-check-sub"><input id="as-set-terms" type="checkbox"> <span>I have checked the AI provider's data terms (retention, training, eligibility) and accept them for customer data.</span></label>
+    <div class="as-actions">
+      <label class="as-check"><input id="as-set-actions" type="checkbox"> <span>AI actions: let the assistant PREPARE changes for my approval</span></label>
+      <div id="as-set-kinds" class="as-kinds"><label class="as-check as-check-sub"><input id="as-set-kind-customerNote" data-kind="customerNote" type="checkbox"> <span>Customer notes</span></label><label class="as-check as-check-sub"><input id="as-set-kind-projectUpdate" data-kind="projectUpdate" type="checkbox"> <span>Project updates (checklist, installation date, notes)</span></label></div>
+      <p id="as-set-actions-hint" class="hint">Nothing is saved until you press Approve on the preview it shows. Only the person who asked can approve.</p>
+    </div>
     <div class="as-models"><div class="as-models-head"><strong>Models</strong><button type="button" id="as-set-check" class="btn btn-ghost btn-sm">Check models</button></div><ul id="as-set-models" class="as-models-list"></ul><p class="hint">"Check models" asks the AI provider whether each model exists and is active. A model cannot be used until it passes. It costs nothing.</p></div>
     <p id="as-set-key" class="hint"></p>
     <div id="as-set-err" class="dlg-err" role="alert"></div>

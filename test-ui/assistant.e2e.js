@@ -149,6 +149,31 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   ok('the customer-data box is disabled for any account that is not the owner (the server enforces it too), and usable for the owner');
 
   for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
+  // ------------------------------------------------------------------ 3d. AI actions (9.2a): off by default; the owner switches them on; a note is prepared, shown exactly, and saved only on Approve
+  await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.waitForSelector('#thread:not([hidden])');
+  await page.click('#nav-assistant'); await page.waitForSelector('#assistant', { state: 'visible' });
+  await ask('note: call after 5pm');
+  assert.equal(await page.locator('.as-card').count(), 0, 'with AI actions off nothing is prepared');
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent));
+  assert.equal(await page.locator('#as-set-actions').isDisabled(), false); assert.equal(await page.locator('#as-set-actions').isChecked(), false);
+  await page.check('#as-set-actions'); await page.check('#as-set-kind-customerNote'); await page.click('#as-set-save'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
+  const act = (await settingsDoc().get()).data(); assert.equal(act.actionsEnabled, true); assert.deepEqual(act.actionKinds, { customerNote: true, projectUpdate: false });
+  for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
+  const notesNow = async () => ((await db.doc('contacts/' + ph.anna).get()).data() || {}).notes || null;
+  await ask('note: call after 5pm');
+  await page.waitForSelector('.as-card[data-state=pending]');
+  assert.match(await page.locator('.as-card').last().innerText(), /Add a note to Anna Apple[\s\S]*\+ \d+ \w+ \d{4}: call after 5pm[\s\S]*Approve[\s\S]*Reject/);
+  assert.equal(await notesNow(), null, 'nothing is saved before Approve');
+  await page.click('.as-card[data-state=pending] >> text=Approve'); await page.waitForSelector('.as-card[data-state=applied]');
+  assert.match(await page.locator('.as-card[data-state=applied]').innerText(), /Done: The note was added/); assert.match(await notesNow(), /call after 5pm$/);
+  assert.equal(await page.locator('.as-card[data-state=applied] button').count(), 0, 'a decided card has no buttons');
+  await ask('note: not wanted');
+  await page.click('.as-card[data-state=pending] >> text=Reject'); await page.waitForSelector('.as-card[data-state=rejected]');
+  assert.doesNotMatch(await notesNow(), /not wanted/);
+  assert.deepEqual((await db.collection('auditLog').where('action', '==', 'aiProposal').get()).docs.map((d) => d.data().event).sort(), ['applied', 'created', 'created', 'rejected']);
+  ok('AI actions: off by default; the owner switches them on; a note is shown exactly as a preview, saved only on Approve, never on Reject; audited');
+  for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
+
   // ------------------------------------------------------------------ 4. answers are text, never a page
   await ask('find zed');
   const reply = await answers().last().innerText();
@@ -182,7 +207,7 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   assert.equal(chatBodies.at(-1).message, 'summary');
   const sum = await answers().last().innerText();
   assert.match(sum, /Aoife Apple|Anna Apple/); assert.match(sum, /Budget: not recorded/); assert.match(sum, /Latest quote: none yet/); assert.match(sum, /Next appointment: none scheduled/);
-  assert.equal(await page.locator('#as-msgs .as-msg.assistant').last().locator('strong').count(), 1, 'the name is bold'); assert.equal(await page.locator('#as-msgs .as-msg.assistant').last().locator('li').count(), 5);
+  assert.equal(await page.locator('#as-msgs .as-msg.assistant').last().locator('strong').count(), 1, 'the name is bold'); assert.equal(await page.locator('#as-msgs .as-msg.assistant').last().locator('li').count(), 6, 'five fields plus the Notes line, which now holds the approved note'); assert.match(sum, /Notes: .*call after 5pm/);
   assert.match(await page.locator('.as-trace').last().innerText(), /No AI used/); assert.equal(await page.locator('.as-retry').count(), 0, 'nothing to retry on an instant summary');
   await page.click('#as-context-x'); assert.equal(await page.locator('#as-context').isVisible(), false);
   await ask('who are you again');

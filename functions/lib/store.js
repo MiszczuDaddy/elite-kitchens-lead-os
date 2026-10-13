@@ -187,6 +187,9 @@ async function deleteCustomerData(db, bucket, phone) {
   const pushDocs = async () => (await db.collection('pushEvents').where('phone', '==', phone).get()).docs;       // Phase 8: notification records hold the number
   let pushEvents = 0;
   for (const d of await pushDocs()) { await d.ref.delete(); pushEvents++; }
+  const proposalDocs = async () => (await db.collection('aiProposals').where('phone', '==', phone).get()).docs;       // Phase 9.2a: AI proposals hold note text and the number
+  let aiProposals = 0;
+  for (const d of await proposalDocs()) { await d.ref.delete(); aiProposals++; }
   const appts = await db.collection('appointments').where('phone', '==', phone).get();
   for (let i = 0; i < appts.size; i += 400) { const b = db.batch(); appts.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref)); await b.commit(); }
   const quoteDocs = async () => (await db.collection('quotes').where('phone', '==', phone).get()).docs;
@@ -197,13 +200,14 @@ async function deleteCustomerData(db, bucket, phone) {
   for (const d of await quoteDocs()) { await db.recursiveDelete(d.ref); quotes++; }      // one created while this ran
   for (const d of await projectDocs()) { await d.ref.delete(); projects++; }             // one made (or a quote accepted) while this ran
   for (const d of await pushDocs()) { await d.ref.delete(); pushEvents++; }               // a message that arrived while this ran
+  for (const d of await proposalDocs()) { await d.ref.delete(); aiProposals++; }          // a proposal made while this ran
   const late = (await bucket.getFiles({ prefix }))[0].length;
   if (late) { files += late; await bucket.deleteFiles({ prefix, force: true }); }
   const lateQuoteFiles = (await bucket.getFiles({ prefix: quotePrefix }))[0].length;
   if (lateQuoteFiles) { quoteFiles += lateQuoteFiles; await bucket.deleteFiles({ prefix: quotePrefix, force: true }); }
   const lateProjectFiles = (await bucket.getFiles({ prefix: projectPrefix }))[0].length;
   if (lateProjectFiles) { projectFiles += lateProjectFiles; await bucket.deleteFiles({ prefix: projectPrefix, force: true }); }
-  return { messages, files, appointments: appts.size, quotes, quoteFiles, projects, projectFiles, pushEvents };
+  return { messages, files, appointments: appts.size, quotes, quoteFiles, projects, projectFiles, pushEvents, aiProposals };
 }
 
 // Phase 6: a customer added by staff WITHOUT any message (a phone, email or walk-in enquiry): a New lead with no stage, like a

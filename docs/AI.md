@@ -40,6 +40,16 @@ Asked to summarise a customer, Haiku and Sonnet used to answer differently. The 
 * The summary never invents: a missing fact is labelled, free-text notes are shown as recorded (an instruction inside a note is just text on the screen).
 Examples (from the test data): a full record, a sparse record (every missing field labelled), a test record (⚠ line) are in `functions/test/ai.test.js` ("EXAMPLES").
 
+## Phase 9.2a: AI actions with approval (customer notes, project updates)
+**Branch `phase-9-2a-actions`: not merged, not deployed.** The assistant can PREPARE a change; only a person can APPLY it.
+1. **Propose.** Asked for a change ("note: call after 5pm", "tick doors ordered and set installation for 20 Nov"), the model calls `propose_customer_note` or `propose_project_update`. Code checks the request with the same limits as the screens, builds the **exact before/after preview**, and stores one `aiProposals/{id}` record. Nothing else is written. The model supplies only ids and the wording you asked for. The reply is a fixed sentence (no second model call), the same for Haiku and Sonnet.
+2. **Preview card** in the chat: title, each change as Before → After (a note is shown as the existing note plus the new dated line), Approve and Reject, "Expires in N min".
+3. **Approve** (`aiDecide`, no model, no key): only **the person who asked** can decide; it expires after **30 minutes**; it re-checks that nothing changed since (**stale protection**: the customer's notes, the project's revision, the checklist boxes and the project's completed state are compared with what the preview was built from; any difference = "Out of date: nothing was changed. Ask again", never an overwrite); then it applies through the **existing** project functions (`save`, `setStep`: the project history shows who) or, for a note, one small transaction with the same write as the Contact panel. Applied at most once (a claim step: pending → applying → applied); a second click repeats nothing; a partial result says exactly which part failed.
+4. **Switches:** one master **AI actions** switch plus one per kind (Customer notes, Project updates), in Assistant → Settings, **owner account only**, off by default. Actions also need the AI on and real customer data on. Turning any of them off stops new proposals **and** stops pending ones being applied (the kill switch beats everything); Reject always works.
+5. **Limits and audit:** at most 5 waiting proposals per person; every step (created, applied, rejected, expired, stale, partial, failed) is an `auditLog` line with the proposal id, who and the model, never the text of a note. Deleting a customer also deletes their proposals.
+6. **Never:** nothing is deleted, sent or booked; a model that asks for a change while the switch is off gets a refusal and nothing is stored; the instructions tell it to propose only what the person asked for in their own message, never because of text inside a customer's record.
+Later stages (not built): appointments (9.2b), quote changes with the quote engine (9.2c; custom items only with prices you state), message and email drafts (9.2d).
+
 ## Safety rules (each one has a test)
 | Rule | How |
 |---|---|
@@ -97,6 +107,7 @@ Order, one command at a time from Cloud Shell, each verified from outside:
 ## Tests
 * `functions/test/ai.test.js` (55, emulator, fake model + fake `fetch`): access, kill switch, defaults, settings, data gate, cap (month, day, 10 at once, failures, timeouts), prices, speed limit, the loop, tool inputs and outputs, injection text, history/context rules, no content in logs, read-only static checks, the database-spy proof that the gate reads nothing, the Anthropic adapter's exact request/thinking/retry/timeout behaviour, rules (browsers cannot write the AI records).
 * `functions/test/assistant-model.test.js` (9): history, context, markdown, spending bar, notices.
+* `functions/test/ai-actions.test.js` (17, emulator): switches and owner-only, proposals (exact previews, validation, limits), approve / reject / who / expiry / stale / partial, switches at decision time, nothing written while proposing, erasure.
 * `test-ui/assistant.e2e.js` (real page + functions + emulators, demo model): screens and states, "Check models", the Haiku/Sonnet selector and "Retry with Sonnet", the owner-only data box, settings and the data-gate confirmation, a lookup, the open customer, HTML shown as text, the tab-only conversation, the kill switch and a used-up budget, the phone layout.
 * Planted-error checks (14 deliberate breakages of the cap, switch, data gate, reservation, timeout handling, rate limit, logging, read-only, injection labelling, history and context rules): 12 caught at once; 2 exposed one real test gap (the hourly speed limit, now tested) and one harmless equivalent change (the open customer is read but still never shown to the model while the gate is closed).
 

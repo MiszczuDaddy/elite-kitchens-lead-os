@@ -87,9 +87,27 @@
     if (!status.canApproveData) return { disabled: true, hint: 'Only the owner account can change real customer data access.' };
     return { disabled: false, hint: '' };
   }
+  // A proposal card: what the server stored, as the screen shows it. The words come from the server (built by code); this only decides which state to show.
+  const STATE_LABEL = { pending: 'Waiting for your approval', applying: 'Saving…', applied: 'Done', partial: 'Partly saved', stale: 'Out of date: nothing was changed', expired: 'Expired: nothing was changed', rejected: 'Rejected: nothing was changed', failed: 'Not saved' };
+  function proposalView(p, nowMs) {
+    if (!p) return null;
+    const exp = p.expiresAt && typeof p.expiresAt.toMillis === 'function' ? p.expiresAt.toMillis() : (typeof p.expiresAt === 'number' ? p.expiresAt : null);
+    const status = p.status === 'pending' && exp != null && nowMs > exp ? 'expired' : String(p.status || '');
+    const pv = p.preview || {};
+    return { id: p.id, title: String(p.title || ''), rows: Array.isArray(pv.rows) ? pv.rows : [], footer: String(pv.footer || ''), status, label: STATE_LABEL[status] || status, canDecide: status === 'pending',
+      minutes: exp != null && status === 'pending' ? Math.max(1, Math.ceil((exp - nowMs) / 60000)) : null, message: (p.result && p.result.message) || '', results: (p.result && Array.isArray(p.result.results)) ? p.result.results : [] };
+  }
+  // AI actions in Settings: only the owner account can change them (the server enforces it too).
+  function actionsGate(status) {
+    if (!status) return { disabled: true, hint: '' };
+    if (!status.ownerConfigured) return { disabled: true, hint: 'The owner account has not been set up on the server.' };
+    if (!status.canApproveData) return { disabled: true, hint: 'Only the owner account can change AI actions.' };
+    if (!status.customerDataApproved) return { disabled: false, hint: 'AI actions also need real customer data to be switched on.' };
+    return { disabled: false, hint: '' };
+  }
   const modelLine = (m) => (m.ready ? `${m.label}: ready` : m.reason ? `${m.label}: failed. ${m.reason}` : `${m.label}: not checked yet`);
   const friendlyError = (e) => String((e && e.message) || e || 'Something went wrong.').replace(/^(functions\/)?[\w-]+:\s*/, '').slice(0, 300);
   const SUGGESTIONS = ['Which quotes are waiting for an answer?', 'Who are the newest leads?', 'What is booked this week?', 'Which projects still need doors ordered?'];
 
-  return { MODEL_KEYS, chosenModel, modelOf, canRetry, dataGate, modelLine, MAX_TURNS, MAX_TURN_CHARS, MAX_TOTAL_CHARS, historyOf, contextOf, blocks, inline, eur, budget, notice, friendlyError, SUGGESTIONS };
+  return { STATE_LABEL, proposalView, actionsGate, MODEL_KEYS, chosenModel, modelOf, canRetry, dataGate, modelLine, MAX_TURNS, MAX_TURN_CHARS, MAX_TOTAL_CHARS, historyOf, contextOf, blocks, inline, eur, budget, notice, friendlyError, SUGGESTIONS };
 });
