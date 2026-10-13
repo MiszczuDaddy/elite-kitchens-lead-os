@@ -178,10 +178,16 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await ask('who are you');
   assert.deepEqual(chatBodies.at(-1).context, { customerId: ph.anna });
   assert.deepEqual(Object.keys(chatBodies.at(-1)).sort(), ['context', 'history', 'message', 'model']);
+  await ask('summary');
+  assert.equal(chatBodies.at(-1).message, 'summary');
+  const sum = await answers().last().innerText();
+  assert.match(sum, /Aoife Apple|Anna Apple/); assert.match(sum, /Budget: not recorded/); assert.match(sum, /Latest quote: none yet/); assert.match(sum, /Next appointment: none scheduled/);
+  assert.equal(await page.locator('#as-msgs .as-msg.assistant').last().locator('strong').count(), 1, 'the name is bold'); assert.equal(await page.locator('#as-msgs .as-msg.assistant').last().locator('li').count(), 5);
+  assert.match(await page.locator('.as-trace').last().innerText(), /No AI used/); assert.equal(await page.locator('.as-retry').count(), 0, 'nothing to retry on an instant summary');
   await page.click('#as-context-x'); assert.equal(await page.locator('#as-context').isVisible(), false);
   await ask('who are you again');
   assert.equal(chatBodies.at(-1).context, undefined);
-  assert.equal(chatBodies.at(-1).history.length, 2); assert.deepEqual(chatBodies.at(-1).history.map((t) => t.role), ['user', 'assistant']);
+  assert.equal(chatBodies.at(-1).history.length, 4); assert.deepEqual(chatBodies.at(-1).history.map((t) => t.role), ['user', 'assistant', 'user', 'assistant']);
   ok('the open customer goes to the server as an id only; removing the chip stops it; only plain text turns go back as history');
 
   // ------------------------------------------------------------------ 7. keyboard: Enter sends, Shift+Enter is a new line

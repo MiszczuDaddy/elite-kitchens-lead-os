@@ -91,10 +91,11 @@ window.ASSIST = (() => {
     const host = $('as-msgs'); host.replaceChildren();
     A.turns.forEach((t, i) => {
       host.append(bubble(t));
-      if (t.role === 'assistant' && !t.pending && !t.error && ((t.tools && t.tools.length) || t.cost != null || t.model)) {
+      if (t.role === 'assistant' && !t.pending && !t.error && ((t.tools && t.tools.length) || t.cost != null || t.model || t.model === null)) {
         const tr = el('div', 'as-trace', ''); for (const x of t.tools || []) tr.append(el('span', '', x));
         if (t.model) tr.append(el('span', '', (M.modelOf(A.status, t.model) || { label: t.model }).label));
-        if (t.cost != null) tr.append(el('span', '', t.cost < 0.001 ? 'under €0.001' : M.eur(t.cost, 3)));
+        if (t.model === null) tr.append(el('span', '', 'No AI used'));
+        if (t.cost != null && t.model !== null) tr.append(el('span', '', t.cost < 0.001 ? 'under €0.001' : M.eur(t.cost, 3)));
         if (M.canRetry(A.turns, i, A.status) && !A.busy) { const b = el('button', 'as-retry', 'Retry with Sonnet'); b.type = 'button'; b.onclick = () => retry(i); tr.append(b); }
         host.append(tr);
       }
@@ -125,7 +126,7 @@ window.ASSIST = (() => {
     A.busy = true; render();
     try {
       const r = (await call('aiChat')({ message: text, history, model: modelKey, ...(Object.keys(context).length ? { context } : {}) })).data;
-      A.turns[A.turns.indexOf(slot)] = { role: 'assistant', text: String(r.reply || ''), model: M.MODEL_KEYS.includes(r.model) ? r.model : modelKey, tools: (r.tools || []).map((x) => x.note).filter(Boolean).slice(0, 8), cost: typeof r.costEur === 'number' ? r.costEur : null };
+      A.turns[A.turns.indexOf(slot)] = { role: 'assistant', text: String(r.reply || ''), model: r.model === null ? null : (M.MODEL_KEYS.includes(r.model) ? r.model : modelKey), tools: (r.tools || []).map((x) => x.note).filter(Boolean).slice(0, 8), cost: typeof r.costEur === 'number' ? r.costEur : null };
       if (A.status && typeof r.monthSpentEur === 'number') A.status.monthSpentEur = r.monthSpentEur;
     } catch (e) {
       const i = A.turns.indexOf(slot), bad = { role: 'assistant', text: M.friendlyError(e), error: true };

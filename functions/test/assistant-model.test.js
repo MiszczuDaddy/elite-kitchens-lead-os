@@ -99,6 +99,7 @@ test('"Retry with Sonnet" is offered only on the last answer, only if it was not
   assert.equal(M.canRetry([...turns.slice(0, 3), { role: 'assistant', text: 'x', error: true }], 3, status), false);
   assert.equal(M.canRetry([...turns.slice(0, 3), { role: 'assistant', text: '', pending: true }], 3, status), false);
   assert.equal(M.canRetry([{ role: 'assistant', text: 'orphan' }], 0, status), false); assert.equal(M.canRetry(turns, 9, status), false);
+  assert.equal(M.canRetry([...turns.slice(0, 3), { role: 'assistant', text: 'summary', model: null }], 3, status), false, 'an instant summary (no AI used) has nothing to retry');
   assert.equal(M.canRetry(turns, 3, { ...status, models: [status.models[0], { key: 'sonnet', label: 'Sonnet', ready: false }] }), false);
   assert.equal(M.canRetry(turns, 3, { ...status, enabled: false }), false); assert.equal(M.canRetry(turns, 3, { ...status, monthSpentEur: 15 }), false); assert.equal(M.canRetry(turns, 3, null), false);
 });

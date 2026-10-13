@@ -78,7 +78,7 @@
   // "Retry with Sonnet": only on the last answer, only when it did not come from Sonnet, and only when Sonnet is usable now.
   function canRetry(turns, index, status) {
     const t = (turns || [])[index], q = (turns || [])[index - 1], s = modelOf(status, 'sonnet');
-    return !!(t && q && index === turns.length - 1 && t.role === 'assistant' && !t.error && !t.pending && t.model !== 'sonnet' && q.role === 'user' && typeof q.text === 'string' && q.text.trim() && s && s.ready && notice(status, 'sonnet').ask);
+    return !!(t && q && index === turns.length - 1 && t.role === 'assistant' && !t.error && !t.pending && t.model === 'haiku' && q.role === 'user' && typeof q.text === 'string' && q.text.trim() && s && s.ready && notice(status, 'sonnet').ask);
   }
   // The data box in Settings: only the owner account may change it (the server enforces this; the screen just explains).
   function dataGate(status) {

@@ -19,8 +19,26 @@ browser (Assistant screen) --aiChat--> Cloud Function --> model wrapper --> Anth
 * **The open customer/quote/project** is sent as ids only. The server reads the names itself, so a screen cannot feed the model made-up facts.
 * **Model-independent:** Elite OS talks to a tiny interface (`complete({model, system, messages, tools})`). `anthropicModel()` in `functions/lib/ai.js` turns it into the Anthropic API (one `fetch`, no SDK, prompt caching on, retries on busy/failing servers, a time limit). Another provider is another adapter; nothing else changes. **Models:** two, chosen by name on the screen: **Haiku** (`claude-haiku-5-5`, the default for everything) and **Sonnet** (`claude-sonnet-5-5`). The IDs live on the server only; the screen can send nothing but "haiku" or "sonnet" (anything else is refused). One model answers one question, start to finish: nothing escalates by itself. **"Retry with Sonnet"** under the last Haiku answer re-asks the same question, with the same earlier conversation, once, with Sonnet; it is a second request and counts against the same limits. The default can be changed with `aiSettings/current.defaultModel` ("haiku" or "sonnet").
 
-### The nine tools (all read-only, strict input checks, small capped answers)
+### The ten tools (all read-only, strict input checks, small capped answers)
 `search_customers`, `get_customer`, `get_conversation` (≤15 messages, each ≤300 characters), `list_quotes`, `get_quote`, `list_appointments`, `list_projects`, `get_project`, `pipeline_summary`. They use the same rules as the screens (e.g. the project status/"waiting to order" logic is checked against `public/project-model.js` for all 64 combinations). **The assistant never does maths:** prices are quoted exactly as stored; quotes are only ever calculated by the quote engine.
+
+### Customer summaries: one format, built by code
+Asked to summarise a customer, Haiku and Sonnet used to answer differently. The cause was both: the lookup left gaps (no Eircode field, appointments newest-first with past and cancelled ones mixed in, no "latest quote", no test-record hint), so each model filled them in its own way, and the answer format was free. Now the **server builds the summary** (`functions/lib/aiSummary.js`) from the records by fixed rules, in this order:
+```
+**Customer Name**
+- Budget: €XX,XXX–€XX,XXX      (a clear free-text budget is reshaped; anything unclear is shown "as recorded"; none = not recorded)
+- Location: Town
+- Eircode: XXX XXXX            (from the saved address, else the notes; two different codes = not recorded)
+- Latest quote: Quote number — Status   (the newest quote; "Sent (expired)" once its valid-until date has passed; none yet)
+- Next appointment: Date, time (the next one that is not cancelled; none scheduled)
+- Notes: only relevant information     (left out when there is none: project type, requirements, a short project status; not the lead-form boilerplate, address, Eircode or budget)
+⚠ Possible test record: ...    (only when the name, email, phone, notes or quote number look like test data)
+```
+* The model's only job is to call `customer_summary`; its reply is the tool's text, so Haiku and Sonnet are identical by construction (a model's own wording is discarded). That also saves tokens: **no second model call** is made to restate it.
+* **"Summarise this customer" with a customer open** (plain whole-message requests only: "summary", "overview", "summarise this customer", "tell me about her"…) needs **no model at all**: answered instantly, free, chip "No AI used". Anything more specific goes to the model as usual.
+* Every other answer stays free-form, with the same short style rules for both models (answer first, no lead-in, "not recorded" for missing facts, one short ⚠ line for suspected test data). `get_customer` (for specific questions) now also returns the budget, Eircode, latest quote, next appointment and test hints, so no model has to dig for them.
+* The summary never invents: a missing fact is labelled, free-text notes are shown as recorded (an instruction inside a note is just text on the screen).
+Examples (from the test data): a full record, a sparse record (every missing field labelled), a test record (⚠ line) are in `functions/test/ai.test.js` ("EXAMPLES").
 
 ## Safety rules (each one has a test)
 | Rule | How |

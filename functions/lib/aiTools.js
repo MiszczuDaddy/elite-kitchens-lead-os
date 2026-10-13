@@ -4,6 +4,7 @@
 // the assistant is told never to obey it (prompt-injection defence, see SYSTEM in ai.js).
 const { normalizePhone } = require('./whatsapp');
 const PR = require('./projects');
+const S = require('./aiSummary');
 
 const TZ = 'Europe/Dublin';
 class ToolError extends Error { constructor(message) { super(message); this.name = 'ToolError'; } }
@@ -64,7 +65,9 @@ const projectBrief = (id, p) => ({ id, customerId: p.phone, customer: text(p.cus
 const TOOLS = [
   { name: 'search_customers', description: 'Find customers by name, phone number, email, area or project type. Returns up to 10 with their pipeline stage. Use it first whenever a person is named.',
     input_schema: { type: 'object', properties: { query: { type: 'string', description: 'part of a name, phone number, email or area' }, stage: { type: 'string', enum: Object.keys(STAGES), description: 'only customers in this pipeline stage' }, limit: { type: 'integer' } }, additionalProperties: false } },
-  { name: 'get_customer', description: 'Everything about one customer: contact details, pipeline stage, notes, and their quotes, projects and appointments in brief.',
+  { name: 'customer_summary', description: 'USE THIS when asked to summarise a customer, give an overview, or "tell me about" them. Returns the finished summary (budget, location, Eircode, latest quote, next appointment, notes, test-record warning) in the standard format. Reply with its text and nothing else.',
+    input_schema: { type: 'object', properties: { customerId: { type: 'string', description: 'the customer id (the phone number, digits only)' } }, required: ['customerId'], additionalProperties: false } },
+  { name: 'get_customer', description: 'The details of one customer for a SPECIFIC question: contact details, budget, Eircode, pipeline stage, notes, latest quote, next appointment, and their quotes, projects and appointments in brief. For a general summary use customer_summary.',
     input_schema: { type: 'object', properties: { customerId: { type: 'string', description: 'the customer id from search_customers (the phone number, digits only)' } }, required: ['customerId'], additionalProperties: false } },
   { name: 'get_conversation', description: 'The most recent WhatsApp messages with a customer (newest last). Text only; long messages are shortened.',
     input_schema: { type: 'object', properties: { customerId: { type: 'string' }, limit: { type: 'integer', description: 'how many messages, up to 15' } }, required: ['customerId'], additionalProperties: false } },
@@ -83,6 +86,29 @@ const TOOLS = [
 ];
 
 async function convs(db) { return (await db.collection('conversations').limit(CAP.scan).get()).docs; }
+
+// One customer's records, read once, and the facts the summary needs (computed here, in code, so no model has to work them out).
+async function loadCustomer(db, id) {
+  const [c, k, qs, ps, as] = await Promise.all([db.doc('conversations/' + id).get(), db.doc('contacts/' + id).get(), db.collection('quotes').where('phone', '==', id).get(),
+    db.collection('projects').where('phone', '==', id).get(), db.collection('appointments').where('phone', '==', id).get()]);
+  if (!c.exists && !k.exists) throw new ToolError('No customer with that id.');
+  return { id, conv: c.exists ? c.data() : {}, con: k.exists ? k.data() : {}, qs: qs.docs, ps: ps.docs, as: as.docs };
+}
+function factsOf({ id, conv, con, qs, ps, as }, nowMs) {
+  const today = S.dayOf(nowMs);
+  const quotes = qs.map((d) => d.data()).sort((a, b) => (ms(b.createdAt) || ms(b.updatedAt) || 0) - (ms(a.createdAt) || ms(a.updatedAt) || 0));
+  const latest = quotes[0] || null;
+  const next = as.map((d) => d.data()).filter((a) => a.status !== 'cancelled' && ms(a.start) >= nowMs).sort((a, b) => ms(a.start) - ms(b.start))[0] || null;
+  const live = ps.map((d) => d.data()).sort((a, b) => (a.status === 'completed') - (b.status === 'completed') || (a.installDate || '9999') .localeCompare(b.installDate || '9999'))[0] || null;
+  const project = live ? 'Project: ' + projectStatus(live) + (live.installDate && live.status !== 'completed' ? ', installation ' + S.dayLabel(live.installDate) : '') : null;
+  const name = text((con && con.name) || (conv && conv.name), 80), budget = S.budgetOf(con.budget);
+  const location = text(con.location || conv.location, 80);
+  const eircode = S.eircodeOf(con.address, con.notes);
+  return { id, name, location, eircode, budgetRaw: text(con.budget, 60), budget: budget.text,
+    latestQuote: latest ? { ref: latest.ref, label: S.quoteLabel(latest, today) } : null, nextAppointment: next ? S.when(ms(next.start)) : null,
+    notes: S.notesOf({ notes: con.notes, projectType: con.projectType || conv.projectType, project }),
+    testReasons: S.testReasons({ name, email: con.email, phone: id, notes: con.notes, quoteRefs: quotes.map((q) => q.ref) }) };
+}
 
 const IMPL = {
   async search_customers({ db }, input) {
@@ -106,18 +132,21 @@ const IMPL = {
     hits.sort((a, b) => b.at - a.at);
     return { note: NOTE, total: hits.length, customers: hits.slice(0, limit).map((h) => h.row) };
   },
-  async get_customer({ db }, input) {
-    const id = customerId(only(input, ['customerId']).customerId);
-    const [c, k, qs, ps, as] = await Promise.all([db.doc('conversations/' + id).get(), db.doc('contacts/' + id).get(), db.collection('quotes').where('phone', '==', id).get(),
-      db.collection('projects').where('phone', '==', id).get(), db.collection('appointments').where('phone', '==', id).get()]);
-    if (!c.exists && !k.exists) throw new ToolError('No customer with that id.');
-    const conv = c.exists ? c.data() : {}, con = k.exists ? k.data() : {};
+  async get_customer({ db, nowMs }, input) {
+    const id = customerId(only(input, ['customerId']).customerId), L = await loadCustomer(db, id), f = factsOf(L, nowMs);
+    const { id: _id, conv, con, qs, ps, as } = L;
     const stageDates = {}; for (const [s, v] of Object.entries(conv.stageDates || {})) { const d = day(v); if (d) stageDates[STAGES[s] || s] = d; }
-    return { note: NOTE, ...customerBrief(id, conv, con), email: text(con.email, 120), address: text(con.address, 200), budget: text(con.budget, 40), source: text(con.source, 40), notes: text(con.notes, 600),
+    return { note: NOTE, ...customerBrief(id, conv, con), email: text(con.email, 120), address: text(con.address, 200), budget: f.budgetRaw, budgetDisplay: f.budget, eircode: f.eircode || S.NOT_RECORDED, source: text(con.source, 40), notes: text(con.notes, 600),
+      latestQuote: f.latestQuote ? { ref: f.latestQuote.ref, status: f.latestQuote.label } : null, nextAppointment: f.nextAppointment || null, possibleTestRecord: f.testReasons.length ? f.testReasons : null,
       stageDates, unreadMessages: conv.unreadCount || 0, lastContact: when(conv.lastInboundAt),
-      quotes: qs.docs.map((d) => ({ at: ms(d.data().updatedAt) || 0, row: quoteBrief(d.id, d.data()) })).sort((a, b) => b.at - a.at).slice(0, 10).map((x) => x.row),
-      projects: ps.docs.map((d) => projectBrief(d.id, d.data())).slice(0, 10),
-      appointments: as.docs.map((d) => ({ at: ms(d.data().start) || 0, row: apptBrief(d.id, d.data()) })).sort((a, b) => b.at - a.at).slice(0, 10).map((x) => x.row) };
+      quotes: qs.map((d) => ({ at: ms(d.data().updatedAt) || 0, row: quoteBrief(d.id, d.data()) })).sort((x, y) => y.at - x.at).slice(0, 10).map((x) => x.row),
+      projects: ps.map((d) => projectBrief(d.id, d.data())).slice(0, 10),
+      appointments: as.map((d) => ({ at: ms(d.data().start) || 0, row: apptBrief(d.id, d.data()) })).sort((x, y) => y.at - x.at).slice(0, 10).map((x) => x.row) };
+  },
+  // The finished summary, built here by fixed rules (see aiSummary.js): the same text whichever model asked for it.
+  async customer_summary({ db, nowMs }, input) {
+    const id = customerId(only(input, ['customerId']).customerId), f = factsOf(await loadCustomer(db, id), nowMs);
+    return { display: S.formatSummary(f), customerId: id };
   },
   async get_conversation({ db }, input) {
     const i = only(input, ['customerId', 'limit']), id = customerId(i.customerId), limit = limitOf(i.limit, CAP.messages, 10);
