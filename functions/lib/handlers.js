@@ -9,6 +9,7 @@ const calendarSync = require('./calendarSync');
 const quotes = require('./quotes');
 const projects = require('./projects');
 const push = require('./push');
+const ai = require('./ai');
 const reopenLib = require('./reopen');
 const delivery = require('./quoteDelivery');
 const { WINDOW_MS } = require('./windowState');          // 24 hours; the same rule the screen uses (Phase 6.1)
@@ -389,6 +390,13 @@ async function pushReceipt(req, { db }) {
   try { return await push.receipt({ db }, req.body); } catch (e) { log('error', 'push receipt failed'); return 500; }
 }
 
+// ---- Phase 9: the AI assistant (docs/AI.md). Staff only; read-only; the spending cap, the switch and the data gate are enforced inside ai.js. ----
+const aiAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps.cfg); return fn({ db: deps.db, model: deps.model || null, owners: deps.aiOwners || '' }, actorOf(auth), data, { uid: auth.uid }); };
+const aiChat = aiAction(ai.chat);
+const aiStatus = aiAction(ai.status);
+const setAiSettings = aiAction(ai.saveSettings);
+const aiCheckModels = aiAction(ai.checkModels);
+
 async function projectRenderUrl(auth, data, deps) { assertStaff(auth, deps.cfg); return projects.renderLink(deps, actorOf(auth), data, { signedUrl: mediaLib.signedUrl }); }
 
 // ---- Phase 6.1: Reopen conversation (a general WhatsApp capability, not tied to quotes). The rules live in ./reopen and
@@ -413,6 +421,6 @@ async function quoteChannels(auth, data, deps) {
 
 module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
-  registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt,
+  registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

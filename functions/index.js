@@ -8,6 +8,7 @@ const { getAuth } = require('firebase-admin/auth');
 const { getStorage } = require('firebase-admin/storage');
 const { getMessaging } = require('firebase-admin/messaging');
 const push = require('./lib/push');
+const ai = require('./lib/ai');
 const { createClient } = require('./lib/whatsapp');
 const h = require('./lib/handlers');
 
@@ -196,4 +197,19 @@ const pushDeps = () => ({ ...quoteDeps(), messaging: getMessaging() });
 exports.registerPushDevice = onCall({}, (req) => h.registerPushDevice(req.auth, req.data, pushDeps()));
 exports.unregisterPushDevice = onCall({}, (req) => h.unregisterPushDevice(req.auth, req.data, pushDeps()));
 exports.sendTestPush = onCall({ timeoutSeconds: 30 }, (req) => h.sendTestPush(req.auth, req.data, pushDeps()));
+// ---- Phase 9: the AI assistant (docs/AI.md). Read-only. ANTHROPIC_API_KEY is a Secret Manager secret the owner sets himself (never in the code). The fake model exists ONLY in the emulator.
+const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
+const aiModel = () => {
+  if (process.env.FUNCTIONS_EMULATOR === 'true' && process.env.AI_FAKE_MODEL === 'on') return ai.createDemoModel();
+  let key = ''; try { key = String(ANTHROPIC_API_KEY.value() || '').trim(); } catch (e) { key = ''; }
+  return key ? ai.anthropicModel({ apiKey: key }) : null;
+};
+// Who may switch real customer data on: the AI_OWNER_EMAILS setting (comma-separated). Empty = nobody. It is written to the settings file by the deploy script's ai stage.
+const AI_OWNER_EMAILS = defineString('AI_OWNER_EMAILS', { default: '' });
+const aiDeps = () => ({ ...quoteDeps(), model: aiModel(), aiOwners: AI_OWNER_EMAILS.value() });
+exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 240 }, (req) => h.aiChat(req.auth, req.data, aiDeps()));
+exports.aiStatus = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.aiStatus(req.auth, req.data, aiDeps()));
+exports.setAiSettings = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.setAiSettings(req.auth, req.data, aiDeps()));
+exports.aiCheckModels = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60 }, (req) => h.aiCheckModels(req.auth, req.data, aiDeps()));
+
 exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { res.sendStatus(await h.pushReceipt(req, { db: getFirestore() })); });

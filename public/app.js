@@ -158,6 +158,7 @@ auth.onAuthStateChanged(async (user) => {
   $('login-signout').hidden = true;
   if (!user) {
     stopAccessRenewal();
+    if (window.ASSIST) ASSIST.forget();            // Phase 9: a signed-out browser keeps no conversation
     $('login').hidden = false; $('app').hidden = true;
     return;
   }
@@ -189,6 +190,7 @@ function stopListening() {
   if (window.APPT) APPT.stop();
   if (window.QUOTES) QUOTES.stop();
   if (window.PROJ) PROJ.stop();
+  if (window.ASSIST) ASSIST.stop();
   if (window.PUSH) PUSH.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
@@ -319,6 +321,16 @@ function routeFromHash() {
   // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
   if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
   if (window.PROJ && !PROJ.mayLeave(location.hash)) return;           // Phase 7: leaving a project with unsaved notes asks first
+  // Assistant (Phase 9): #assistant
+  if (window.ASSIST && ASSIST.handles(location.hash)) {
+    if (S.selected) closeConversation(true);
+    if (window.PIPE && PIPE.active) PIPE.hide();
+    if (window.APPT && APPT.active) APPT.hide();
+    if (window.QUOTES && QUOTES.active) QUOTES.hide();
+    if (window.PROJ && PROJ.active) PROJ.hide();
+    ASSIST.show(); return;
+  }
+  if (window.ASSIST && ASSIST.active) ASSIST.hide();
   if (window.QUOTES && QUOTES.handles(location.hash)) {
     if (S.selected) closeConversation(true);
     if (window.PIPE && PIPE.active) PIPE.hide();
@@ -345,7 +357,7 @@ function routeFromHash() {
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.ASSIST && ASSIST.active ? 'assistant' : window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
