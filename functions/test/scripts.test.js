@@ -608,9 +608,11 @@ test('every stage that deploys functions runs the routing check BEFORE it asks f
   assert.ok(!/check_routing/.test(stage('rules')) && !/check_routing/.test(stage('live')), 'stages that deploy no functions do not need it');
   before(stage('projects'), 'projects'); assert.match(stage('projects'), /check_routing \$PROJECT_FUNCS/);
   before(stage('push'), 'push'); assert.match(stage('push'), /check_routing \$PUSH_FUNCS/);
-  assert.match(s, /^usage\(\) \{ sed -n '2,37p'/m); assert.match(s.split('\n').slice(0, 37).join('\n'), /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
-  assert.match(s.split('\n').slice(0, 37).join('\n'), /deploy-quote-sending\.sh projects/, 'the help text must show the projects stage');
-  assert.match(s.split('\n').slice(0, 37).join('\n'), /deploy-quote-sending\.sh push /, 'the help text must show the push stage');
+  before(stage('ai'), 'ai'); assert.match(stage('ai'), /check_routing \$AI_FUNCS/);
+  assert.match(s, /^usage\(\) \{ sed -n '2,39p'/m); assert.match(s.split('\n').slice(0, 39).join('\n'), /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+  assert.match(s.split('\n').slice(0, 39).join('\n'), /deploy-quote-sending\.sh projects/, 'the help text must show the projects stage');
+  assert.match(s.split('\n').slice(0, 39).join('\n'), /deploy-quote-sending\.sh push /, 'the help text must show the push stage');
+  assert.match(s.split('\n').slice(0, 39).join('\n'), /deploy-quote-sending\.sh ai /, 'the help text must show the ai stage');
 });
 
 // ============================ Phase 8: the "push" stage deploys exactly the right functions (the live webhook among them), and the screen waits for them ======================
@@ -647,6 +649,22 @@ test('Phase 7: the projects stage names exactly the seven new project functions 
   assert.match(stage, /check_reachable "\$PROJECT_FUNCS"/); assert.ok(stage.indexOf('check_settings') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'checks, then the question, then the deploy');
   const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j));
   assert.match(live, /serving_revision createproject[\s\S]*Deploy the Projects backend first/); assert.ok(live.indexOf('createproject') < live.indexOf('confirm "'), 'the screen cannot be published before the Projects backend');
+});
+
+// ============================ Phase 9: the "ai" stage deploys exactly the three new functions, needs the key first, and the screen waits for them ======================
+test('Phase 9: the ai stage names exactly the three new callables (each bound to the Anthropic secret), checks the key before asking, touches no existing function, and the screen waits for them', () => {
+  const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const m = /^AI_NEW="([^"]*)"/m.exec(s); assert.ok(m); const fresh = m[1].trim().split(/\s+/);
+  assert.deepEqual([...fresh].sort(), ['aiChat', 'aiStatus', 'setAiSettings']);
+  assert.match(s, /^AI_FUNCS="\$AI_NEW"/m);
+  const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
+  for (const f of fresh) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\]', 'm'), f + ' is not a callable bound to the Anthropic secret in functions/index.js');
+  const i = s.indexOf('\n  ai)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));
+  assert.match(stage, /deploy_functions \$AI_FUNCS/); assert.match(stage, /for f in \$AI_NEW; do[\s\S]*add-iam-policy-binding[\s\S]*done/); assert.match(stage, /check_reachable "\$AI_FUNCS"/);
+  assert.ok(stage.indexOf('ANTHROPIC_API_KEY is not set yet') < stage.indexOf('confirm "') && stage.indexOf('check_routing') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'key and checks first, then the question, then the deploy');
+  assert.equal(/functions:secrets:set[^\n]*\$\(|ANTHROPIC_API_KEY=/.test(stage), false, 'the script never handles the key itself');
+  const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j));
+  assert.match(live, /serving_revision aichat[\s\S]*Deploy the AI assistant backend first/); assert.ok(live.indexOf('aichat') < live.indexOf('confirm "'));
 });
 
 test('the "mail off" stage stops on a pinned function before it asks anything, and asks as usual when nothing is pinned', () => {

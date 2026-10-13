@@ -205,7 +205,7 @@ const aiModel = () => {
   return key ? ai.anthropicModel({ apiKey: key }) : null;
 };
 const aiDeps = () => ({ ...quoteDeps(), model: aiModel() });
-exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 120 }, (req) => h.aiChat(req.auth, req.data, aiDeps()));
+exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 240 }, (req) => h.aiChat(req.auth, req.data, aiDeps()));
 exports.aiStatus = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.aiStatus(req.auth, req.data, aiDeps()));
 exports.setAiSettings = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.setAiSettings(req.auth, req.data, aiDeps()));
 

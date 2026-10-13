@@ -14,6 +14,7 @@ const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const T = require('./aiTools');
 
 const TZ = 'Europe/Dublin';
+const DEADLINE_MS = 100000;                    // no new model call is started once a question has run this long (the function itself may run 240 s; one call is limited to 40 s, 3 tries)
 const MAX_STEPS = 6, MAX_TOOLS_PER_STEP = 4, MAX_MESSAGE = 2000, MAX_HISTORY = 12, MAX_HISTORY_CHARS = 12000, MAX_TURN_CHARS = 4000;
 const RATE_PER_MINUTE = 8, RATE_PER_HOUR = 60;
 const CUSTOMER_ID = /^\d{9,15}$/, QUOTE_ID = /^q_[0-9a-f]{24}$/, PROJECT_ID = /^[pm]_[0-9a-f]{24}$/;
@@ -21,10 +22,11 @@ const CUSTOMER_ID = /^\d{9,15}$/, QUOTE_ID = /^q_[0-9a-f]{24}$/, PROJECT_ID = /^
 // ---- settings: everything that can stop or limit the AI. A missing document means OFF. ----
 const DEFAULTS = {
   enabled: false, customerDataApproved: false, monthlyCapEur: 15, dailyCapEur: 2,
-  chatModel: 'claude-sonnet-5-5', fastModel: 'claude-haiku-5-5', maxOutputTokens: 1024,
-  // US dollars per million tokens. THESE ARE ASSUMPTIONS to be checked against the price list of the Anthropic account; an unknown model is priced at the highest figure.
+  chatModel: 'claude-sonnet-5-5', fastModel: 'claude-haiku-5-5', maxOutputTokens: 2048,                // thinking tokens count towards this limit, so it is roomier than the answers need
+  // US dollars per million tokens, from Anthropic's price list (platform.claude.com/docs/en/about-claude/pricing, checked 2026-10-14): Sonnet 5.5 $2 in / $10 out, Haiku 5.5 $0.10 / $0.50 (prompts up to 100k tokens). An unknown model is priced at the highest figure.
+  // Cache reads are estimated at 0.1x the input price (Sonnet 5.5 really charges 0.05x) and writes at 1.25x: deliberately a little high.
   // Everything is then multiplied by `margin` and by `eurPerUsd` (1 = a dollar counts as a euro: it overestimates, which is the safe side), so the real bill stays under the cap.
-  prices: { 'claude-sonnet-5-5': { in: 3, out: 15 }, 'claude-haiku-5-5': { in: 1, out: 5 } }, eurPerUsd: 1, margin: 1.25,
+  prices: { 'claude-sonnet-5-5': { in: 2, out: 10 }, 'claude-haiku-5-5': { in: 0.1, out: 0.5 } }, eurPerUsd: 1, margin: 1.25,
 };
 const UNKNOWN_PRICE = { in: 15, out: 75 };
 const num = (v, lo, hi, fallback) => (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback);
@@ -104,9 +106,16 @@ async function status({ db, model }, actor, data, { nowMs = Date.now() } = {}) {
 // ---- the model interface: complete({ model, system, messages, tools, maxTokens }) -> { text, toolCalls, stopReason, usage } ----
 // messages: { role:'user', text } | { role:'assistant', text, toolCalls:[{id,name,input}] } | { role:'tool', results:[{id, name, content, isError}] }
 class ModelError extends Error { constructor(message, { status = 0, retryable = false, timeout = false } = {}) { super(message); this.name = 'ModelError'; this.status = status; this.retryable = retryable; this.timeout = timeout; } }
-function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anthropic.com', timeoutMs = 60000, retryDelaysMs = [400, 1500], version = '2023-06-01' }) {
+// Per-model request settings (from Anthropic's thinking/effort docs, 2026-10-14). These models think by default and the thinking is billed as output: Sonnet 5.5 cannot switch it off, its lowest
+// setting is between_tools; Haiku 5.5 can ("disabled"). Effort medium keeps tool use short. Other models get the provider's defaults. Never send a setting a model rejects: it answers 400.
+const MODEL_TUNING = {
+  'claude-sonnet-5-5': { thinking: { type: 'between_tools' }, output_config: { effort: 'medium' } },
+  'claude-haiku-5-5': { thinking: { type: 'disabled' }, output_config: { effort: 'medium' } },
+};
+function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anthropic.com', timeoutMs = 40000, retryDelaysMs = [400, 1500], version = '2023-06-01' }) {
   const toBlocks = (m) => {
     if (m.role === 'user') return { role: 'user', content: [{ type: 'text', text: m.text }] };
+    if (m.role === 'assistant' && Array.isArray(m.raw)) return { role: 'assistant', content: m.raw };         // exactly what the model sent (its thinking blocks must come back unchanged within a tool turn)
     if (m.role === 'assistant') return { role: 'assistant', content: [...(m.text ? [{ type: 'text', text: m.text }] : []), ...(m.toolCalls || []).map((c) => ({ type: 'tool_use', id: c.id, name: c.name, input: c.input }))] };
     return { role: 'user', content: m.results.map((r) => ({ type: 'tool_result', tool_use_id: r.id, content: r.content, ...(r.isError ? { is_error: true } : {}) })) };
   };
@@ -125,7 +134,7 @@ function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anth
   return {
     name: 'anthropic',
     async complete({ model, system, messages, tools = [], maxTokens }) {
-      const body = { model, max_tokens: maxTokens, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: messages.map(toBlocks),
+      const body = { model, max_tokens: maxTokens, ...(MODEL_TUNING[model] || {}), system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: messages.map(toBlocks),
         ...(tools.length ? { tools: tools.map((t, i) => ({ name: t.name, description: t.description, input_schema: t.input_schema, ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}) })) } : {}) };
       let json, last;
       for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
@@ -135,7 +144,7 @@ function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anth
       if (!json) throw last;
       const blocks = Array.isArray(json.content) ? json.content : [], u = json.usage || {};
       return { text: blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim(), toolCalls: blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, input: b.input && typeof b.input === 'object' ? b.input : {} })),
-        stopReason: json.stop_reason || null, usage: { input: u.input_tokens || 0, output: u.output_tokens || 0, cacheRead: u.cache_read_input_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0 } };
+        raw: blocks, stopReason: json.stop_reason || null, usage: { input: u.input_tokens || 0, output: u.output_tokens || 0, cacheRead: u.cache_read_input_tokens || 0, cacheWrite: u.cache_creation_input_tokens || 0 } };
     },
   };
 }
@@ -197,7 +206,7 @@ const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...e
 const toolNote = (name, input) => ({ search_customers: 'Searched customers', get_customer: 'Opened a customer', get_conversation: 'Read recent messages', list_quotes: 'Looked at quotes', get_quote: 'Opened a quote',
   list_appointments: 'Looked at appointments', list_projects: 'Looked at projects', get_project: 'Opened a project', pipeline_summary: 'Counted the pipeline' }[name] || name) + (name === 'search_customers' && input && typeof input.query === 'string' ? ': ' + input.query.slice(0, 40) : '');
 
-async function chat({ db, model }, actor, data, { uid, nowMs = Date.now() } = {}) {
+async function chat({ db, model }, actor, data, { uid, nowMs = Date.now(), deadlineMs = DEADLINE_MS } = {}) {
   onlyKeys(data, ['message', 'history', 'context']);
   if (typeof data.message !== 'string' || !data.message.trim()) throw bad('Type a question first.');
   if (data.message.length > MAX_MESSAGE) throw bad(`That is too long (max ${MAX_MESSAGE} characters).`);
@@ -214,7 +223,9 @@ async function chat({ db, model }, actor, data, { uid, nowMs = Date.now() } = {}
   const messages = [...history.map((t) => ({ role: t.role, text: t.text })), { role: 'user', text: data.message.trim() }];
   const feature = 'chat', modelName = settings.chatModel, p = priceOf(settings, modelName), used = [], total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let spent = 0, reply = '', finished = false, steps = 0;
+  const began = Date.now();
   for (; steps < MAX_STEPS; steps++) {
+    if (Date.now() - began > deadlineMs) break;
     // the worst this single call could cost, reserved BEFORE the call
     const chars = system.length + JSON.stringify(tools).length + messages.reduce((n, m) => n + JSON.stringify(m).length, 0);
     const worst = eur(settings, p, { input: roughTokens(chars) * 1.25, output: settings.maxOutputTokens, cacheWrite: 0 });
@@ -232,9 +243,10 @@ async function chat({ db, model }, actor, data, { uid, nowMs = Date.now() } = {}
     for (const k of Object.keys(total)) total[k] += res.usage[k] || 0;
     log('info', 'ai call', { feature, model: modelName, in: res.usage.input, out: res.usage.output, ms: Date.now() - t0, steps: steps + 1 });
     if (!res.toolCalls.length) { reply = res.text; finished = true; if (res.stopReason === 'max_tokens') reply += '\n\n(The answer was cut short. Ask me to continue.)'; break; }
-    messages.push({ role: 'assistant', text: res.text, toolCalls: res.toolCalls.slice(0, MAX_TOOLS_PER_STEP) });
+    messages.push({ role: 'assistant', text: res.text, toolCalls: res.toolCalls, raw: res.raw });
     const results = [];
-    for (const c of res.toolCalls.slice(0, MAX_TOOLS_PER_STEP)) {
+    for (const [i, c] of res.toolCalls.entries()) {                    // every lookup the model asked for must be answered; only the first few are run
+      if (i >= MAX_TOOLS_PER_STEP) { results.push({ id: c.id, name: c.name, content: JSON.stringify({ error: 'Too many lookups at once. Ask for fewer.' }), isError: true }); continue; }
       used.push({ name: c.name, note: toolNote(c.name, c.input) });
       if (!approved) { results.push({ id: c.id, name: c.name, content: JSON.stringify({ error: 'Real customer data has not been switched on, so nothing can be looked up.' }), isError: true }); continue; }       // the data gate holds even if the model asks anyway
       try { results.push({ id: c.id, name: c.name, content: JSON.stringify(await T.run({ db, nowMs }, c.name, c.input)) }); }
@@ -247,4 +259,4 @@ async function chat({ db, model }, actor, data, { uid, nowMs = Date.now() } = {}
   return { reply, tools: used, costEur: Math.round(spent * 1e6) / 1e6, tokens: total, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
 }
 
-module.exports = { DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, createDemoModel, ModelError, chat, checkHistory, checkContext };
+module.exports = { DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, createDemoModel, ModelError, chat, checkHistory, checkContext };

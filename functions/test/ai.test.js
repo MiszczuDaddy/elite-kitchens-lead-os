@@ -162,7 +162,7 @@ test('every call is paid for in advance and corrected afterwards; the month, the
   await on();
   const model = fake([{ text: 'A', usage: { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0 } }]);
   const r = await chat(model, { message: 'hi' });
-  const expected = (1000 * 3 + 500 * 15) / 1e6 * 1.25;                      // sonnet assumption x margin
+  const expected = (1000 * 2 + 500 * 10) / 1e6 * 1.25;                      // Sonnet 5.5 list price x margin
   assert.ok(Math.abs(r.costEur - expected) < 1e-9, String(r.costEur));
   const m = await month(), d = await day();
   assert.ok(Math.abs(m.costEur - expected) < 1e-9 && Math.abs(d.costEur - expected) < 1e-9, 'the reservation must be corrected to the real cost');
@@ -222,7 +222,8 @@ test('a failed call gives its reservation back; a call that timed out keeps it (
 test('prices: an unknown model is priced at the highest figure; cache reads are cheap; the margin and the exchange rate apply', () => {
   const s = { ...ai.DEFAULTS };
   const u = { input: 1e6, output: 1e6, cacheRead: 0, cacheWrite: 0 };
-  assert.equal(ai.eur(s, ai.priceOf(s, 'claude-sonnet-5-5'), u), (3 + 15) * 1.25);
+  assert.equal(ai.eur(s, ai.priceOf(s, 'claude-sonnet-5-5'), u), (2 + 10) * 1.25);
+  assert.equal(ai.eur(s, ai.priceOf(s, 'claude-haiku-5-5'), u), (0.1 + 0.5) * 1.25);
   assert.equal(ai.eur(s, ai.priceOf(s, 'some-new-model'), u), (15 + 75) * 1.25);
   assert.ok(ai.eur(s, ai.priceOf(s, 'claude-sonnet-5-5'), { input: 0, output: 0, cacheRead: 1e6, cacheWrite: 0 }) < ai.eur(s, ai.priceOf(s, 'claude-sonnet-5-5'), { input: 1e6, output: 0, cacheRead: 0, cacheWrite: 0 }));
   assert.equal(ai.eur({ ...s, eurPerUsd: 2, margin: 1 }, { in: 1, out: 1 }, { input: 1e6, output: 0 }), 2);
@@ -267,16 +268,24 @@ test('a model that never stops asking for lookups is cut off after six steps, an
   assert.equal((await month()).calls, ai.MAX_STEPS);
 });
 
-test('a bad lookup is reported to the model as an error, not thrown; an unknown tool is refused; at most four lookups per step', async () => {
+test('a question that has run too long gets no further model calls (the limit is checked before each step)', async () => {
+  await on();
+  const model = fake([async () => { await new Promise((r) => setTimeout(r, 120)); return use('pipeline_summary', {}); }]);
+  const r = await chat(model, { message: 'slow' }, { deadlineMs: 50 });
+  assert.equal(model.calls.length, 1); assert.match(r.reply, /could not finish/);
+});
+
+test('a bad lookup is reported to the model as an error, not thrown; an unknown tool is refused; at most four are run per step', async () => {
   await on();
   const model = fake([{ toolCalls: [{ id: 'a', name: 'get_customer', input: { customerId: 'nope' } }, { id: 'b', name: 'delete_everything', input: {} }, { id: 'c', name: 'pipeline_summary', input: { x: 1 } },
     { id: 'd', name: 'pipeline_summary', input: {} }, { id: 'e', name: 'pipeline_summary', input: {} }], stopReason: 'tool_use' }, { text: 'done' }]);
   const r = await chat(model, { message: 'try' });
   assert.equal(r.reply, 'done');
   const results = model.calls[1].messages[2].results;
-  assert.equal(results.length, 4);
-  assert.ok(results.slice(0, 3).every((x) => x.isError), 'bad input, unknown tool and unknown field are errors for the model');
-  assert.equal(results[3].isError, undefined);
+  assert.equal(results.length, 5, 'every lookup the model asked for is answered (the provider requires it)');
+  assert.ok([0, 1, 2, 4].every((i) => results[i].isError), 'bad input, unknown tool, unknown field and the fifth lookup are errors for the model');
+  assert.match(results[4].content, /Too many lookups/); assert.equal(results[3].isError, undefined);
+  assert.deepEqual(model.calls[1].messages[1].toolCalls.map((c) => c.id), ['a', 'b', 'c', 'd', 'e']);
 });
 
 test('the open customer: only ids are accepted from the screen; the name comes from the database; a forged name never reaches the model', async () => {
@@ -510,12 +519,13 @@ test('adapter: sends the key and version as headers (never in the body), caches 
   assert.equal(c.init.headers['x-api-key'], 'sk-ant-TEST'); assert.equal(c.init.headers['anthropic-version'], '2023-06-01');
   assert.equal(JSON.stringify(c.body).includes('sk-ant'), false);
   assert.equal(c.body.model, 'claude-sonnet-5-5'); assert.equal(c.body.max_tokens, 100);
+  assert.deepEqual(c.body.thinking, { type: 'between_tools' }, 'Sonnet 5.5 rejects thinking disabled; this is its lowest setting'); assert.deepEqual(c.body.output_config, { effort: 'medium' });
   assert.deepEqual(c.body.system, [{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } }]);
   assert.equal(c.body.tools.length, 2); assert.deepEqual(c.body.tools[1].cache_control, { type: 'ephemeral' }); assert.equal(c.body.tools[0].cache_control, undefined);
   assert.deepEqual(c.body.messages[0], { role: 'user', content: [{ type: 'text', text: 'hi' }] });
   assert.deepEqual(c.body.messages[1].content[1], { type: 'tool_use', id: 'tu_1', name: 'get_customer', input: { customerId: ANNA } });
   assert.deepEqual(c.body.messages[2], { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: '{"a":1}' }, { type: 'tool_result', tool_use_id: 'tu_2', content: '{"error":"no"}', is_error: true }] });
-  assert.deepEqual(r, { text: 'Hello', toolCalls: [{ id: 'tu_9', name: 'get_customer', input: { customerId: ANNA } }], stopReason: 'tool_use', usage: { input: 11, output: 7, cacheRead: 5, cacheWrite: 3 } });
+  assert.deepEqual(r, { raw: OK.json.content, text: 'Hello', toolCalls: [{ id: 'tu_9', name: 'get_customer', input: { customerId: ANNA } }], stopReason: 'tool_use', usage: { input: 11, output: 7, cacheRead: 5, cacheWrite: 3 } });
   assert.equal((await ai.anthropicModel({ apiKey: 'k', fetchImpl: fakeFetch(OK) }).complete({ ...REQ, tools: [] })).text, 'Hello');
   const noTools = fakeFetch(OK); await ai.anthropicModel({ apiKey: 'k', fetchImpl: noTools }).complete({ ...REQ, tools: [] });
   assert.equal('tools' in noTools.calls[0].body, false);
@@ -551,4 +561,65 @@ test('the wrapper is model-independent: any object with complete() works, and th
 test('a cut-off answer says so', async () => {
   await on();
   assert.match((await chat(fake([{ text: 'Part of an answ', stopReason: 'max_tokens' }]), { message: 'long' })).reply, /cut short/);
+});
+
+test('adapter: per-model settings follow the provider docs (Haiku can switch thinking off, Sonnet cannot; an unknown model gets the provider defaults)', async () => {
+  const send = async (model) => { const f = fakeFetch(OK); await ai.anthropicModel({ apiKey: 'k', fetchImpl: f }).complete({ ...REQ, model }); return f.calls[0].body; };
+  const h = await send('claude-haiku-5-5'); assert.deepEqual(h.thinking, { type: 'disabled' }); assert.deepEqual(h.output_config, { effort: 'medium' });
+  const s = await send('claude-sonnet-5-5'); assert.deepEqual(s.thinking, { type: 'between_tools' });
+  const o = await send('claude-opus-5-5'); assert.equal('thinking' in o, false); assert.equal('output_config' in o, false, 'Opus 5.5 rejects thinking disabled and between_tools');
+  assert.deepEqual(Object.keys(ai.MODEL_TUNING).sort(), ['claude-haiku-5-5', 'claude-sonnet-5-5']);
+});
+
+test('adapter: the thinking blocks of the model are sent back unchanged with the lookup results, as the provider requires; the person never sees them', async () => {
+  const think = { type: 'thinking', thinking: '', signature: 'SIG-abc' }, progress = { type: 'thinking', thinking: 'looking her up', signature: 'SIG-def' };
+  const reply = { json: { content: [think, { type: 'text', text: 'One moment.' }, progress, { type: 'tool_use', id: 'tu_1', name: 'pipeline_summary', input: {} }], stop_reason: 'tool_use', usage: { input_tokens: 5, output_tokens: 5 } } };
+  const done = { json: { content: [{ type: 'text', text: 'All good.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } } };
+  const f = fakeFetch(reply, done);
+  await on();
+  const r = await chat(ai.anthropicModel({ apiKey: 'k', fetchImpl: f }), { message: 'summary please' });
+  assert.equal(r.reply, 'All good.'); assert.equal(f.calls.length, 2);
+  assert.deepEqual(f.calls[1].body.messages[1], { role: 'assistant', content: reply.json.content }, 'the assistant turn is sent back exactly as received');
+  assert.equal(f.calls[1].body.messages[2].content[0].type, 'tool_result');
+  assert.equal(JSON.stringify(r).includes('SIG-'), false); assert.equal(JSON.stringify(r).includes('looking her up'), false);
+});
+
+// ======================================================= the gate, proven by watching the database =====================================================
+function spyDb(paths) {                                   // records every document / collection path anyone asks the database for
+  const wrap = (obj) => new Proxy(obj, { get(t, k) {
+    const v = t[k];
+    if (k === 'doc' || k === 'collection') return (p) => { paths.push(String(p)); return wrap(v.call(t, p)); };
+    return typeof v === 'function' ? v.bind(t) : v;
+  } });
+  return wrap(db);
+}
+const CUSTOMER_AREAS = /^(conversations|contacts|quotes|projects|appointments|pushEvents|pushDevices|leads|messages)\b/;
+
+test('GATE: without the confirmation, nothing about any customer is read from the database, whatever the model or the screen asks for', async () => {
+  const everyTool = T.TOOLS.map((t, i) => ({ id: 'g' + i, name: t.name, input: { customerId: ANNA, query: 'anna', quoteId: QID.sent, projectId: 'p_' + hex(3), ref: 'EK-0199', limit: 15 } }));
+  for (const approvedValue of [undefined, false, 'true', 1, 'yes', null, {}]) {
+    await db.doc('aiSettings/current').set({ enabled: true, monthlyCapEur: 15, dailyCapEur: 2, ...(approvedValue === undefined ? {} : { customerDataApproved: approvedValue }) });
+    const paths = [], model = fake([{ toolCalls: everyTool, stopReason: 'tool_use' }, { text: 'done' }]);
+    const r = await ai.chat({ db: spyDb(paths), model }, actor, { message: 'tell me everything about anna', context: { customerId: ANNA, quoteId: QID.sent, projectId: 'p_' + hex(3) }, history: [{ role: 'user', text: 'earlier' }, { role: 'assistant', text: 'ok' }] }, { uid: 'g' + String(approvedValue), nowMs: NOW });
+    assert.equal(r.reply, 'done');
+    assert.deepEqual(paths.filter((p) => CUSTOMER_AREAS.test(p)), [], `value ${JSON.stringify(approvedValue)} must keep the gate closed, but these were read`);
+    assert.deepEqual(model.calls[0].tools, []);
+    const sent = JSON.stringify(model.calls);
+    for (const word of ['Kowalska', 'anna@example.com', 'Swords', 'Howth', 'Too dear', 'Call before 5pm', '9000.5', 'Wants shaker doors', 'Maria Nowak']) assert.equal(sent.includes(word), false, 'reached the model: ' + word);
+    assert.equal(model.calls[1].messages.at(-1).results.every((x) => x.isError), true);
+  }
+});
+
+test('GATE: once the confirmation is saved (only a real true), the same request reads the customer', async () => {
+  await db.doc('aiSettings/current').set({ enabled: true, monthlyCapEur: 15, dailyCapEur: 2, customerDataApproved: true });
+  const paths = [], model = fake([use('get_customer', { customerId: ANNA }), { text: 'ok' }]);
+  await ai.chat({ db: spyDb(paths), model }, actor, { message: 'x', context: { customerId: ANNA } }, { uid: 'g-open', nowMs: NOW });
+  assert.ok(paths.some((p) => /^conversations/.test(p)) && paths.some((p) => /^contacts/.test(p)));
+});
+
+test('GATE: the Assistant\'s own status and settings calls never read customers either', async () => {
+  const paths = [];
+  await ai.status({ db: spyDb(paths), model: fake() }, actor, {}, { nowMs: NOW });
+  await ai.saveSettings({ db: spyDb(paths), model: fake() }, actor, { enabled: true }, { nowMs: NOW });
+  assert.deepEqual(paths.filter((p) => CUSTOMER_AREAS.test(p)), []);
 });
