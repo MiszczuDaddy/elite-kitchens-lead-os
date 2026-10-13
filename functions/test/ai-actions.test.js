@@ -269,3 +269,14 @@ test('ERASURE: deleting a customer also deletes their proposals; other customers
   const r = await h.deleteCustomer(staff, { phone: PH, confirm: PH.slice(-4) }, { db, cfg, bucket });
   assert.ok(r); assert.equal((await db.doc('aiProposals/' + mine).get()).exists, false); assert.equal((await db.doc('aiProposals/ap_' + 'a'.repeat(24)).get()).exists, true);
 });
+
+test('HONESTY: a kind that is switched off is named to the model; a model that claims something is waiting for approval when no proposal was made is corrected', async () => {
+  await on({ actionKinds: { customerNote: true, projectUpdate: false } });
+  const m = fake([{ text: 'Prepared for your approval: tick doors ordered. Nothing is saved until you press Approve.' }]);
+  const r = await chat(m, { message: 'tick doors ordered' });
+  assert.match(m.calls[0].system, /NOT switched on, so you cannot prepare them: Project updates/); assert.deepEqual(m.calls[0].tools.map((t) => t.name).filter((n) => n.startsWith('propose_')), ['propose_customer_note']);
+  assert.deepEqual(r.proposals, []); assert.match(r.reply, /I could not prepare that change, so nothing is waiting for your approval/); assert.doesNotMatch(r.reply, /Prepared for your approval/);
+  const ok = await chat(fake([note('fine')]), { message: 'note' }, { uid: 'h2' });
+  assert.match(ok.reply, /^Prepared for your approval: Add a note to/); assert.equal(ok.proposals.length, 1);
+  await on(); const m2 = fake(); await chat(m2, { message: 'hi' }, { uid: 'h3' }); assert.doesNotMatch(m2.calls[0].system, /NOT switched on/);
+});

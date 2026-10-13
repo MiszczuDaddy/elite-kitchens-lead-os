@@ -311,6 +311,7 @@ async function chat({ db, model, owners }, actor, data, { uid, nowMs = Date.now(
   if (approved) contextNote = await T.describeContext(db, context);                                          // names only, read here (never trusted from the screen)
   const system = SYSTEM + '\n' + (approved ? (contextNote ? 'The person currently has this open in Elite OS: ' + contextNote + ' When they say "this customer", "her" or "him" they mean that one.' : '') : NO_DATA)
     + (proposeTools.length ? '\n' + ACTIONS_PROMPT : '')
+    + (proposeTools.length && A.offKinds(settings).length ? '\nThese kinds of change are NOT switched on, so you cannot prepare them: ' + A.offKinds(settings).join(', ') + '. If asked, say so plainly and that the owner can switch them on in Settings, AI actions. Never pretend to prepare them or say that you can.' : '')
     + `\nToday is ${new Intl.DateTimeFormat('en-IE', { timeZone: TZ, dateStyle: 'full' }).format(new Date(nowMs))}.`;
   const messages = [...history.map((t) => ({ role: t.role, text: t.text })), { role: 'user', text: data.message.trim() }];
   const feature = 'chat', modelName = MODELS[key].id, p = priceOf(settings, modelName), used = [], total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -362,6 +363,8 @@ async function chat({ db, model, owners }, actor, data, { uid, nowMs = Date.now(
     messages.push({ role: 'tool', results });
   }
   if (!finished) reply = 'I could not finish that in a few steps. Please ask in a simpler way.';
+  // A model must never claim something is waiting for approval when no proposal was made (it did once, when that kind of change was switched off): say what really happened.
+  if (!proposals.length && /prepared (?:this |that |these |it )?for your approval|waiting for your approval|nothing is saved until you press approve/i.test(reply)) reply = 'I could not prepare that change, so nothing is waiting for your approval. Check that this kind of change is switched on in Settings (AI actions), then ask again.';
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { reply, model: key, proposals, tools: used, costEur: Math.round(spent * 1e8) / 1e8, tokens: total, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
 }

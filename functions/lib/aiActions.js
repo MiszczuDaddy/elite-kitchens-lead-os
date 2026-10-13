@@ -46,7 +46,8 @@ const TOOLS = [
       notes: { type: 'object', properties: { mode: { type: 'string', enum: ['append', 'replace'] }, text: { type: 'string' } }, required: ['mode', 'text'], additionalProperties: false } },
     required: ['projectId'], additionalProperties: false } },
 ];
-const isProposeTool = (name) => TOOLS.some((t) => t.name === name);
+const offKinds = (settings) => { const a = available(settings); return Object.keys(KINDS).filter((k) => !a[k]).map((k) => KINDS[k]); };       // the kinds that are not switched on, by name
+const isProposeTool =(name) => TOOLS.some((t) => t.name === name);
 const toolsFor = (settings) => { const a = available(settings); return TOOLS.filter((t) => a[t.kind]).map(({ kind, ...t }) => t); };
 
 function only(input, allowed) {
@@ -199,4 +200,4 @@ async function decide({ db }, actor, uid, data, { nowMs = Date.now() } = {}, set
   return result;
 }
 
-module.exports = { KINDS, EXPIRY_MS, MAX_PENDING, NOTE_MAX, TOOLS, available, toolsFor, isProposeTool, propose, decide, STEP_LABEL };
+module.exports = { offKinds, KINDS, EXPIRY_MS, MAX_PENDING, NOTE_MAX, TOOLS, available, toolsFor, isProposeTool, propose, decide, STEP_LABEL };
