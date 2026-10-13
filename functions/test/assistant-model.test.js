@@ -128,3 +128,8 @@ test('AI actions box in Settings: owner only; explained for everyone else; needs
   assert.deepEqual([M.actionsGate({ ownerConfigured: true, canApproveData: false }).disabled, M.actionsGate({ ownerConfigured: false }).disabled, M.actionsGate(null).disabled], [true, true, true]);
   assert.match(M.actionsGate({ ownerConfigured: true, canApproveData: false }).hint, /Only the owner account/);
 });
+
+test('a proposal that is gone is explained, not shown as a mystery', () => {
+  const v = M.proposalView({ id: 'x', status: 'gone', title: 'This proposal no longer exists', preview: { rows: [] } }, 1);
+  assert.deepEqual([v.canDecide, v.label], [false, 'No longer available: ask again']);
+});

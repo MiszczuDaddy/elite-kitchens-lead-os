@@ -125,13 +125,23 @@ async function propose({ db, actor, uid, model, nowMs = Date.now() }, name, inpu
   if (!tool) throw new T.ToolError('Unknown tool.');
   if (!available(settings)[tool.kind]) throw new T.ToolError('This kind of change is not switched on.');
   const mine = await db.collection('aiProposals').where('createdByUid', '==', uid).get();
-  if (mine.docs.filter((d) => d.data().status === 'pending' && d.data().expiresAt.toMillis() > nowMs).length >= MAX_PENDING) throw new T.ToolError('There are already several proposals waiting for a decision. Approve or reject them first.');
+  const pending = mine.docs.map((d) => d.data()).filter((p) => p.status === 'pending' && p.expiresAt.toMillis() > nowMs);
   const built = name === 'propose_customer_note' ? await buildNote(db, input, nowMs) : await buildProject(db, input, nowMs);
+  const same = pending.find((p) => p.kind === built.kind && p.targetId === built.targetId && JSON.stringify(p.payload) === JSON.stringify(built.payload));
+  if (same) return { proposalId: same.id, title: same.title, reused: true };                       // the same change is already waiting: show that one, do not make a second
+  if (pending.length >= MAX_PENDING) throw new T.ToolError('There are already several proposals waiting for a decision. Approve or reject them first.');
   const id = 'ap_' + crypto.randomBytes(12).toString('hex');
   await db.doc('aiProposals/' + id).set({ id, kind: built.kind, status: 'pending', phone: built.phone, targetId: built.targetId, title: built.title, preview: built.preview, payload: built.payload, baseline: built.baseline,
     createdBy: actor.id, createdByUid: uid, model: model || null, createdAt: Timestamp.fromMillis(nowMs), expiresAt: Timestamp.fromMillis(nowMs + EXPIRY_MS) });
   await audit(db, { event: 'created', proposalId: id, kind: built.kind, targetId: built.targetId, by: actor.id, model: model || null, nowMs });
   return { proposalId: id, title: built.title };
+}
+
+// What is really waiting for this person right now (the truth, from the database; the model is told this each turn instead of trusting what it said earlier).
+async function waiting(db, uid, nowMs = Date.now()) {
+  const snap = await db.collection('aiProposals').where('createdByUid', '==', uid).get();
+  for (const d of snap.docs) if (d.data().status === 'pending' && d.data().expiresAt.toMillis() <= nowMs) await d.ref.update({ status: 'expired' });          // tidy: an unanswered proposal past its time is closed, so it never lingers as "waiting"
+  return snap.docs.map((d) => d.data()).filter((p) => p.status === 'pending' && p.expiresAt.toMillis() > nowMs).sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()).map((p) => ({ id: p.id, title: p.title, kind: p.kind }));
 }
 
 // ---- deciding ----
@@ -200,4 +210,4 @@ async function decide({ db }, actor, uid, data, { nowMs = Date.now() } = {}, set
   return result;
 }
 
-module.exports = { offKinds, KINDS, EXPIRY_MS, MAX_PENDING, NOTE_MAX, TOOLS, available, toolsFor, isProposeTool, propose, decide, STEP_LABEL };
+module.exports = { waiting, offKinds, KINDS, EXPIRY_MS, MAX_PENDING, NOTE_MAX, TOOLS, available, toolsFor, isProposeTool, propose, decide, STEP_LABEL };

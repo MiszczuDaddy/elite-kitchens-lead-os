@@ -280,3 +280,28 @@ test('HONESTY: a kind that is switched off is named to the model; a model that c
   assert.match(ok.reply, /^Prepared for your approval: Add a note to/); assert.equal(ok.proposals.length, 1);
   await on(); const m2 = fake(); await chat(m2, { message: 'hi' }, { uid: 'h3' }); assert.doesNotMatch(m2.calls[0].system, /NOT switched on/);
 });
+
+test('TRUTH: the model is told what is really waiting; an earlier claim in the chat is not believed when nothing waits; the same change twice shows the same proposal', async () => {
+  await on();
+  const claim = [{ role: 'user', text: 'tick doors' }, { role: 'assistant', text: 'Prepared for your approval: tick doors ordered. Nothing is saved until you press Approve.' }];
+  const none = fake(); await chat(none, { message: 'tick doors ordered please', history: claim }, { uid: 't1' });
+  assert.match(none.calls[0].system, /Nothing is waiting for approval right now/); assert.match(none.calls[0].system, /it is NOT waiting/);
+  assert.equal(none.calls[0].messages[1].text, '[An earlier answer said a change was prepared, but nothing is waiting for approval.]', 'the false claim is not passed on as if true');
+  assert.equal(none.calls[0].messages[0].text, 'tick doors');
+  const id = await proposeNote('Waiting one', 't2');
+  const some = fake(); await chat(some, { message: 'hi', history: claim }, { uid: 't2' });
+  assert.match(some.calls[0].system, /Waiting for this person's approval right now[^\n]*Add a note to Declan Doyle/); assert.doesNotMatch(some.calls[0].system, /Nothing is waiting/);
+  assert.equal(some.calls[0].messages[1].text, claim[1].text, 'a real waiting proposal keeps the conversation as it was');
+  const other = fake(); await chat(other, { message: 'hi' }, { uid: 't3' }); assert.match(other.calls[0].system, /Nothing is waiting/, 'someone else\'s proposals are not mine');
+  const again = await chat(fake([note('Waiting one')]), { message: 'again' }, { uid: 't2' });
+  assert.deepEqual(again.proposals.map((p) => p.id), [id]); assert.match(again.reply, /^Already waiting for your approval/); assert.equal((await db.collection('aiProposals').where('status', '==', 'pending').get()).size, 1);
+  const different = await chat(fake([note('A different note')]), { message: 'again' }, { uid: 't2' }); assert.notEqual(different.proposals[0].id, id); assert.match(different.reply, /^Prepared for your approval/);
+});
+
+test('TIDY: a waiting proposal past its time is closed as expired the next time the person asks, so it never lingers; a new one can then be made', async () => {
+  await on(); const id = await proposeNote('Old one', 'e1');
+  await db.doc('aiProposals/' + id).update({ expiresAt: ts(NOW - 1000) });
+  const m = fake(); await chat(m, { message: 'hi' }, { uid: 'e1' });
+  assert.match(m.calls[0].system, /Nothing is waiting/); assert.equal((await prop(id)).status, 'expired');
+  const fresh = await chat(fake([note('Old one')]), { message: 'again' }, { uid: 'e1' }); assert.notEqual(fresh.proposals[0].id, id); assert.equal((await prop(fresh.proposals[0].id)).status, 'pending');
+});

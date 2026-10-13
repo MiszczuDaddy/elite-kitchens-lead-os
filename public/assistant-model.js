@@ -88,7 +88,7 @@
     return { disabled: false, hint: '' };
   }
   // A proposal card: what the server stored, as the screen shows it. The words come from the server (built by code); this only decides which state to show.
-  const STATE_LABEL = { pending: 'Waiting for your approval', applying: 'Saving…', applied: 'Done', partial: 'Partly saved', stale: 'Out of date: nothing was changed', expired: 'Expired: nothing was changed', rejected: 'Rejected: nothing was changed', failed: 'Not saved' };
+  const STATE_LABEL = { pending: 'Waiting for your approval', applying: 'Saving…', applied: 'Done', partial: 'Partly saved', stale: 'Out of date: nothing was changed', expired: 'Expired: nothing was changed', rejected: 'Rejected: nothing was changed', failed: 'Not saved', gone: 'No longer available: ask again' };
   function proposalView(p, nowMs) {
     if (!p) return null;
     const exp = p.expiresAt && typeof p.expiresAt.toMillis === 'function' ? p.expiresAt.toMillis() : (typeof p.expiresAt === 'number' ? p.expiresAt : null);

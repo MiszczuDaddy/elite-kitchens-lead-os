@@ -1071,6 +1071,10 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .as-retry:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
 .as-models { margin: 4px 0 10px; } .as-models-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .as-models-list { list-style: none; margin: 0 0 6px; padding: 0; font-size: 13px; } .as-models-list li { padding: 3px 0; } .as-models-list .bad { color: var(--err); } .as-models-list .good { color: var(--ok); }
+.as-tray { max-width: 876px; width: 100%; margin: 0 auto; box-sizing: border-box; padding: 10px 28px 0; max-height: 42vh; overflow-y: auto; border-top: 1px solid var(--line); background: var(--bg); }
+.as-tray-head { font-size: 12px; font-weight: 650; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; }
+.as-tray .as-card { max-width: none; margin-bottom: 8px; }
+@media (max-width: 899px) { .as-tray { padding: 8px 14px 0; } }
 .as-card { align-self: flex-start; max-width: 88%; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 14px; }
 .as-card[data-state=pending] { border-color: var(--accent); }
 .as-card[data-state=applied] { border-color: var(--ok); }

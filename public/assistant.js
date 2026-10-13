@@ -49,10 +49,10 @@ window.ASSIST = (() => {
     A.active = true; setNav(true);
     if (!A.started) { A.started = true; restore(); }
     if (A.pending) { A.context = A.pending; A.pending = null; }
-    setView(); render(); loadStatus();
+    setView(); render(); loadStatus(); listenProposals();
     setTimeout(() => { if (A.active) { toBottom(); if (!$('as-input').disabled && window.matchMedia && !matchMedia('(max-width: 899px)').matches) $('as-input').focus(); } }, 0);
   }
-  function hide() { A.active = false; setNav(false); closeDialog($('as-dlg')); setView(); }
+  function hide() { A.active = false; unlistenProposals(); setNav(false); closeDialog($('as-dlg')); setView(); }
   function stop() { hide(); A.turns = []; A.context = {}; A.pending = null; A.status = null; A.statusLoaded = false; A.busy = false; A.started = false; cards.clear(); cardNote.clear(); cardBusy.clear(); $('as-input').value = ''; render(); }
   // Signing out forgets the conversation; a reload (which also passes through stop()) keeps it.
   function forget() { try { sessionStorage.removeItem(KEY); } catch (e) { /* nothing kept */ } }
@@ -101,7 +101,7 @@ window.ASSIST = (() => {
       }
       if (t.role === 'assistant' && !t.pending && !t.error) for (const pr of t.proposals || []) host.append(card(pr.id));
     });
-    toBottom();
+    renderTray(); toBottom();
   }
 
   // ---------- proposal cards (Phase 9.2a): an exact before/after preview with Approve and Reject. The words are the server's (built by code); nothing is saved until Approve. ----------
@@ -111,11 +111,12 @@ window.ASSIST = (() => {
     catch (e) { cards.set(id, { id, status: 'gone', title: 'Cannot load this proposal', preview: { rows: [] } }); }
     if (A.active) render();
   }
-  function card(id) {
+  function card(id, tray) {
     const p = cards.get(id), d = el('div', 'as-card');
     if (!p) { d.textContent = 'Loading the preview…'; loadCard(id); return d; }
     const v = M.proposalView(p, Date.now()), note = cardNote.get(id);
     d.dataset.state = v.status; d.append(el('div', 'as-card-title', v.title));
+    if (v.canDecide && !tray) { d.append(el('div', 'as-card-state', 'Waiting for your approval: use Approve or Reject in the box below.')); return d; }          // the buttons live in ONE place, the tray
     for (const r of v.rows) {
       const row = el('div', 'as-card-row'); row.append(el('div', 'as-card-label', r.label || ''));
       if (r.type === 'append') { if (r.existing) row.append(el('div', 'as-card-old', r.existing)); row.append(el('div', 'as-card-new', '+ ' + (r.added || ''))); }
@@ -135,6 +136,24 @@ window.ASSIST = (() => {
     if (note && v.canDecide) d.append(el('div', 'as-card-state', note));
     return d;
   }
+  // The tray: every proposal of this person that is still waiting, always on screen above the question box, read from the database (so it survives a refresh, a closed tab and a lost chat).
+  function renderTray() {
+    const box = $('as-tray'), now = Date.now(), me = uid();
+    const wait = [...cards.values()].filter((p) => p.createdByUid === me && M.proposalView(p, now).canDecide).sort((a, b) => ((b.createdAt && b.createdAt.toMillis && b.createdAt.toMillis()) || 0) - ((a.createdAt && a.createdAt.toMillis && a.createdAt.toMillis()) || 0));
+    box.hidden = !wait.length; box.replaceChildren();
+    if (!wait.length) return;
+    box.append(el('div', 'as-tray-head', 'Waiting for your approval (' + wait.length + ')'));
+    for (const p of wait) box.append(card(p.id, true));
+  }
+  function listenProposals() {
+    if (A.unsubProps || !uid()) return;
+    A.unsubProps = db.collection('aiProposals').where('createdByUid', '==', uid()).where('status', '==', 'pending').limit(100).onSnapshot((snap) => {
+      for (const ch of snap.docChanges()) { if (ch.type === 'removed') loadCard(ch.doc.id); else cards.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() }); }          // one that left 'pending' is re-read to show how it ended
+      if (A.active) render();
+    }, () => {});
+    A.tick = setInterval(() => { if (A.active) renderTray(); }, 30000);
+  }
+  function unlistenProposals() { if (A.unsubProps) { A.unsubProps(); A.unsubProps = null; } if (A.tick) { clearInterval(A.tick); A.tick = null; } }
   async function decideCard(id, decision) {
     if (cardBusy.has(id)) return;
     cardBusy.add(id); cardNote.delete(id); render();
