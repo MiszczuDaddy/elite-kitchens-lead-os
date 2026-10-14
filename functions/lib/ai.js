@@ -21,6 +21,7 @@ const TZ = 'Europe/Dublin';
 const DEADLINE_MS = 100000;                    // no new model call is started once a question has run this long (the function itself may run 240 s; one call is limited to 40 s, 3 tries)
 const MAX_STEPS = 6, MAX_TOOLS_PER_STEP = 4, MAX_MESSAGE = 2000, MAX_HISTORY = 12, MAX_HISTORY_CHARS = 12000, MAX_TURN_CHARS = 4000;
 const RATE_PER_MINUTE = 8, RATE_PER_HOUR = 60;
+const LEAD_INTENTS = ['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling'];        // R3: what the receptionist may treat as an ordinary enquiry
 const CUSTOMER_ID = /^\d{9,15}$/, QUOTE_ID = /^q_[0-9a-f]{24}$/, PROJECT_ID = /^[pm]_[0-9a-f]{24}$/;
 
 // ---- settings: everything that can stop or limit the AI. A missing document means OFF. ----
@@ -45,7 +46,7 @@ const num = (v, lo, hi, fallback) => (typeof v === 'number' && Number.isFinite(v
 async function loadSettings(db) {
   const s = await db.doc('aiSettings/current').get(), d = s.exists ? s.data() : {};
   return { ...DEFAULTS, enabled: d.enabled === true, customerDataApproved: d.customerDataApproved === true,
-    replyAssistant: d.replyAssistant === true, autoReply: d.autoReply === true, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
+    replyAssistant: d.replyAssistant === true, autoReply: d.autoReply === true, autoReplySince: d.autoReplySince && d.autoReplySince.toMillis ? d.autoReplySince.toMillis() : 0, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
     monthlyCapEur: num(d.monthlyCapEur, 0, 1000, DEFAULTS.monthlyCapEur), dailyCapEur: num(d.dailyCapEur, 0, 1000, DEFAULTS.dailyCapEur),
     defaultModel: modelKey(d.defaultModel) || DEFAULTS.defaultModel, replyModel: modelKey(d.replyModel) || 'sonnet',
     maxOutputTokens: num(d.maxOutputTokens, 64, 4096, DEFAULTS.maxOutputTokens), prices: { ...DEFAULTS.prices, ...(d.prices && typeof d.prices === 'object' ? d.prices : {}) },
@@ -93,7 +94,9 @@ async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.n
     if ('actionKinds' in data) patch.actionKinds = data.actionKinds;
   }
   if (!Object.keys(patch).length) throw bad('Nothing to save.');
-  const cur = await loadSettings(db), monthly = 'monthlyCapEur' in patch ? patch.monthlyCapEur : cur.monthlyCapEur, daily = 'dailyCapEur' in patch ? patch.dailyCapEur : cur.dailyCapEur;
+  const cur = await loadSettings(db);
+  if (patch.autoReply === true && !cur.autoReply) patch.autoReplySince = Timestamp.fromMillis(nowMs);          // R3: only Meta leads that arrive AFTER the switch goes on are ever handled automatically
+  const monthly = 'monthlyCapEur' in patch ? patch.monthlyCapEur : cur.monthlyCapEur, daily = 'dailyCapEur' in patch ? patch.dailyCapEur : cur.dailyCapEur;
   if (daily > monthly) throw bad('The daily cap cannot be higher than the monthly cap.');
   await db.doc('aiSettings/current').set({ ...patch, ...('customerDataApproved' in patch ? { dataApprovedBy: actor.id } : {}), updatedAt: Timestamp.fromMillis(nowMs), updatedBy: actor.id }, { merge: true });
   await db.collection('auditLog').add({ action: 'aiSettings', changed: Object.keys(patch), values: patch, by: actor.id, at: Timestamp.fromMillis(nowMs) });          // numbers and switches only: no personal content
@@ -402,7 +405,7 @@ async function chat({ db, model, owners }, actor, data, { uid, nowMs = Date.now(
 }
 
 // ---- R1: reply suggestions for a WhatsApp chat. One model call, nothing sent, nothing saved but a record WITHOUT the draft's words (so the owner can see how often drafts are used). ----
-async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = Date.now() } = {}) {
+async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = Date.now(), receptionist = false } = {}) {
   onlyKeys(data, ['phone', 'model']);
   const phone = normalizePhone(typeof data.phone === 'string' ? data.phone : '');
   if (!CUSTOMER_ID.test(phone)) throw bad('Missing customer.');
@@ -417,7 +420,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   await checkRate(db, uid || actor.id, nowMs);
   const sheet = await R.buildSheet(db, phone, nowMs);
   if (!sheet) throw new HttpsError('not-found', 'Customer not found.');
-  const system = R.SYSTEM, text = R.sheetText(sheet), modelName = MODELS[key].id, p = priceOf(settings, modelName);
+  const system = receptionist ? R.SYSTEM + '\n' + R.RECEPTIONIST_NOTE : R.SYSTEM, text = R.sheetText(sheet), modelName = MODELS[key].id, p = priceOf(settings, modelName);
   const worst = eur(settings, p, { input: roughTokens(system.length + text.length + JSON.stringify(R.TOOL).length) * 1.25, output: settings.maxOutputTokens, cacheWrite: 0 });
   await reserve(db, settings, worst, nowMs);
   const t0 = Date.now(); let res;
@@ -433,12 +436,14 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   const call = res.toolCalls.find((c) => c.name === R.TOOL.name);
   const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
   // Arranging a consultation is a fixed flow decided by code: the wording of every scheduling line is ours, the model only read the chat (see aiSchedule.js).
-  const plan = SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs });
+  // The automatic receptionist treats an ordinary enquiry from a Meta lead as interest in a consultation (the goal), unless the model says a person is needed.
+  if (receptionist && !asked.handover.needed && LEAD_INTENTS.includes(asked.intent)) asked.wantsConsultation = true;
+  const plan = SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs, natural: receptionist });
   const decision = plan.step === 'none' ? asked : { ...asked, reply: plan.reply, handover: plan.handover || asked.handover };
   const analysis = R.analyse(sheet, decision, plan);
   const draftId = 'ad_' + require('crypto').randomBytes(12).toString('hex');
   await db.doc('aiDrafts/' + draftId).set({ id: draftId, phone, createdBy: actor.id, createdByUid: uid || actor.id, createdAt: Timestamp.fromMillis(nowMs), model: key, intent: decision.intent, handover: decision.handover.needed, wantsConsultation: decision.wantsConsultation,
-    readiness: analysis.readiness.state, step: plan.step, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null });                 // no words of the draft or the chat
+    readiness: analysis.readiness.state, step: plan.step, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null, ...(receptionist ? { auto: true } : {}) });                 // no words of the draft or the chat
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,

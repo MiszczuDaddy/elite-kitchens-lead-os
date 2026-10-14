@@ -34,6 +34,13 @@ const SYSTEM = [
   'Call the tool reply_decision exactly once with your decision. Do not write anything else.',
 ].join('\n');
 
+// Added to the instructions ONLY when the automatic receptionist asks (nobody reads the reply before the customer does). The system still writes every line about days and times.
+const RECEPTIONIST_NOTE = [
+  'AUTOMATIC MODE: this reply is sent to the customer straight away and no member of staff reads it first. The customer came from our Meta kitchen enquiry form and is replying to our welcome message, so a home consultation is the natural next step unless they clearly say otherwise.',
+  'Write ONE short, natural sentence that acknowledges what the customer just said (for example "Thanks for the details, Aoife." or "Lovely, a shaker kitchen sounds great."). No question, nothing about days, times, prices or availability, no promises, no links. The system adds the question about a consultation itself.',
+  'Set intent honestly. If the customer asks about prices, discounts, delivery or fitting dates, process details, wardrobes or anything you cannot answer from the records, sends photos, voice notes or files, is upset, wants a person, or you are not sure, set handover.needed to true: it is far better to hand over than to guess.',
+].join('\n');
+
 const TOOL = {
   name: 'reply_decision', description: 'Your decision for this conversation: the draft reply and what you understood. Call it exactly once.',
   input_schema: { type: 'object', additionalProperties: false, required: ['reply', 'intent', 'wantsConsultation', 'handover'], properties: {
@@ -168,4 +175,4 @@ function analyse(sheet, d, plan) {
   return { known: sheet.known, fromChat: facts, missing, readiness: { state, label }, warnings, schedule: { step: plan.step, preference: plan.preference } };
 }
 
-module.exports = { SYSTEM, TOOL, INTENTS, REQUIRED, FIELD_LABEL, MESSAGES, knownFacts, leadAnswers, transcript, buildSheet, sheetText, cleanDecision, lint, askedFields, analyse };
+module.exports = { SYSTEM, RECEPTIONIST_NOTE, TOOL, INTENTS, REQUIRED, FIELD_LABEL, MESSAGES, knownFacts, leadAnswers, transcript, buildSheet, sheetText, cleanDecision, lint, askedFields, analyse };

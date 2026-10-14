@@ -218,7 +218,7 @@ exports.setReceptionist = onCall({}, (req) => h.setReceptionist(req.auth, req.da
 // R3: the receptionist's every-minute check (docs/AI.md). Not callable from outside. It answers only the chats the owner switched on, and only while every AI switch is on.
 const receptionist = require('./lib/aiReceptionist');
 exports.receptionistSweep = onSchedule({ schedule: 'every 1 minutes', timeZone: 'Europe/Dublin', secrets: [...SECRETS, ANTHROPIC_API_KEY], timeoutSeconds: 180, retryCount: 0 }, async () => {
-  const r = await receptionist.sweep({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook() });
+  const r = await receptionist.sweep({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook(), welcomeTemplate: TEMPLATE.value() });
   console.log(JSON.stringify({ level: 'info', msg: 'receptionist sweep', ...r }));
 });
 exports.aiCheckModels = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60 }, (req) => h.aiCheckModels(req.auth, req.data, aiDeps()));

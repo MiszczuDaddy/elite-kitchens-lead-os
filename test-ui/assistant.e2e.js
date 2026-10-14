@@ -319,6 +319,8 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await page.screenshot({ path: path.join(SHOTS, 'assistant-receptionist.png') });
   await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: on'); assert.equal((await recOf()).paused, null, 'switching it on again starts afresh');
   await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: off'); assert.equal((await recOf()).on, false);
+  await db.doc('conversations/' + ph.anna).update({ receptionist: { on: true, auto: true, paused: null, at: Timestamp.now(), by: 'auto' } }); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: on (automatic)');
+  await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: off'); assert.equal((await recOf()).on, false, 'the owner can pause an automatically switched-on chat');
   await db.doc('aiSettings/current').update({ autoReply: false }); await page.evaluate(() => { REPLY.checkedAt = 0; return REPLY.onSelect(REPLY.phone); }); await page.waitForFunction(() => document.getElementById('recep-btn').hidden);
   ok('Receptionist: master switch in Settings (owner), per-chat button (off / on / handed to you), automatic messages labelled, hidden when automatic replies are off, books nothing');
   await page.evaluate(() => { location.hash = '#assistant'; }); await page.waitForSelector('#assistant', { state: 'visible' });

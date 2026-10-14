@@ -23,7 +23,7 @@ function fake(script) {
   const m = { name: 'fake', calls: [], async complete(req) { m.calls.push(1); const s = script[Math.min(m.calls.length - 1, script.length - 1)], r = typeof s === 'function' ? await s(req) : s; return { text: '', toolCalls: [], stopReason: 'end_turn', usage: USAGE, ...r }; } };
   return m;
 }
-const decision = (over = {}) => ({ toolCalls: [{ id: 'd1', name: 'reply_decision', input: { reply: 'ignored', intent: 'wants_consultation', wantsConsultation: true, schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null }, ...over } }], stopReason: 'tool_use' });
+const decision = (over = {}) => ({ toolCalls: [{ id: 'd1', name: 'reply_decision', input: { reply: '', intent: 'wants_consultation', wantsConsultation: true, schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null }, ...over } }], stopReason: 'tool_use' });
 const PREF = { preference: { weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }, opener: '' };
 function fakeWa(fail) { const w = { sent: [], async sendText(to, body) { if (fail) throw fail; w.sent.push({ to, body }); return 'wamid.AUTO' + w.sent.length; } }; return w; }
 function fakePush() { const p = { events: [], async notify(ev) { p.events.push(ev); } }; return p; }
@@ -88,7 +88,7 @@ test('TIMING: not before 45 seconds after the customer\'s last message; not betw
 
 test('SCOPE: only chats the owner switched on are read; only messages after it was switched on are answered; off means off', async () => {
   await on(); await arm(); const m = fake([decision()]), w = fakeWa();
-  const r = await REC.sweep(deps(m, w, fakePush()), NOW); assert.equal(r.chats, 1, 'the other customer was never looked at'); assert.equal(m.calls.length, 1); assert.deepEqual(w.sent.map((x) => x.to), [PH]);
+  const r = await REC.sweep(deps(m, w, fakePush()), NOW); assert.equal(m.calls.length, 1, 'only the switched-on chat was answered'); assert.equal(await rec(PH2), undefined, 'the other customer was not touched'); assert.deepEqual(w.sent.map((x) => x.to), [PH]);
   assert.equal(await REC.processChat(deps(m, w, fakePush()), PH2, NOW), 'off');
   await ai.setReceptionist({ db, owners: OWNERS }, actor, { phone: PH2, on: true }, { nowMs: NOW }); assert.equal(await REC.processChat(deps(m, w, fakePush()), PH2, NOW + 3600e3), 'nothing_new', 'its older messages are not answered');
   await ai.setReceptionist({ db, owners: OWNERS }, actor, { phone: PH, on: false }, { nowMs: NOW }); await db.doc('conversations/' + PH).update({ lastInboundAt: ts(NOW + 100e3) }); assert.equal(await REC.processChat(deps(m, w, fakePush()), PH, NOW + 300e3), 'off');
@@ -114,7 +114,7 @@ test('PERSON TAKES OVER: anything a person sent since it was switched on stops i
 
 test('NOT A SIMPLE CASE: a complaint, a plain greeting or a question about prices is handed over with a push and NO reply', async () => {
   await on();
-  for (const [name, d] of [['complaint', decision({ intent: 'complaint', wantsConsultation: false, handover: { needed: true, reason: 'upset customer' }, reply: 'So sorry' })], ['greeting', decision({ intent: 'new_enquiry', wantsConsultation: false, reply: 'What kind of kitchen are you thinking of?' })], ['price', decision({ intent: 'pricing', wantsConsultation: false, handover: { needed: true, reason: 'asks about price' }, reply: 'It costs 5000 euro' })]]) {
+  for (const [name, d] of [['complaint', decision({ intent: 'complaint', wantsConsultation: false, handover: { needed: true, reason: 'upset customer' }, reply: 'So sorry' })], ['unclear', decision({ intent: 'other', wantsConsultation: false, reply: 'Hmm' })], ['price', decision({ intent: 'pricing', wantsConsultation: false, handover: { needed: true, reason: 'asks about price' }, reply: 'It costs 5000 euro' })]]) {
     await fresh(); await arm(); const m = fake([d]), w = fakeWa(), p = fakePush();
     assert.equal(await REC.processChat(deps(m, w, p), PH, NOW), 'handed_over', name); assert.equal(w.sent.length, 0, name + ': nothing sent'); assert.equal(p.events.length, 1, name + ': the owner is told'); assert.ok((await rec()).paused, name);
     const drafts = (await db.collection('aiDrafts').get()).docs.map((x) => x.data()); assert.ok(drafts.every((x) => x.outcome === 'discarded'), name + ': the draft is recorded as not used'); await db.recursiveDelete(db.collection('aiDrafts'));
@@ -142,7 +142,7 @@ test('LIMITS: at most 6 automatic messages a day; overlapping checks never both 
   await db.doc('conversations/' + PH).update({ 'receptionist.day': day, 'receptionist.count': 6 }); assert.equal(await REC.processChat(deps(fake([decision()]), w0, fakePush()), PH, NOW), 'daily_limit'); assert.equal(w0.sent.length, 0);
   await db.doc('conversations/' + PH).update({ 'receptionist.count': 0 });
   const m = fake([async () => { await new Promise((r) => setTimeout(r, 150)); return decision(); }]), w = fakeWa(); const both = await Promise.all([REC.processChat(deps(m, w, fakePush()), PH, NOW), REC.processChat(deps(m, w, fakePush()), PH, NOW)]);
-  assert.equal(w.sent.length, 1, 'one message only: ' + both.join(',')); assert.deepEqual(both.slice().sort(), ['busy', 'sent:ask_next_week']); assert.equal((await rec()).lockUntil, 0, 'the lock is released');
+  assert.equal(w.sent.length, 1, 'one message only: ' + both.join(',')); assert.equal(both.filter((x) => x === 'sent:ask_next_week').length, 1); assert.ok(both.some((x) => x === 'busy' || x === 'handled'), 'the other one stood aside: ' + both.join(',')); assert.equal((await rec()).lockUntil, 0, 'the lock is released');
   // a refused send: nothing recorded as sent, the owner is told
   await fresh(); await arm(NOW, 'Hello', PH); const refused = Object.assign(new Error('rejected'), { definite: true, code: 131047 }), wf = fakeWa(refused), p = fakePush();
   assert.equal(await REC.processChat(deps(fake([decision()]), wf, p), PH, NOW), 'send_failed'); assert.equal((await msgs()).filter((x) => x.auto).length, 0); assert.equal(p.events.length, 1); assert.equal((await rec()).paused, 'send failed');

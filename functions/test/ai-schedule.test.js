@@ -130,3 +130,15 @@ test('what is remembered once a person sent the suggested message: the flow move
   assert.equal(S.advance(null, 'none', null, 1), null); assert.equal(S.advance({ stage: 'asked_next_week', asks: 2 }, 'ask_next_week', null, 1).asks, 2, 'the count only goes up');
   assert.deepEqual(S.advance({ stage: 'preference_given', asks: 1 }, 'acknowledge', { text: 'Fri' }, 9).preference, { text: 'Fri' });
 });
+
+test('R3: the automatic receptionist puts a short checked acknowledgement before the FIRST question only; the staff flow and every other line stay exactly as they were', () => {
+  const d = (reply, o = {}) => dec({ reply, ...o });
+  const nat = (decision, extra = {}) => S.plan({ decision, consult: null, messages: [], booked: false, nowMs: TUE, natural: true, ...extra });
+  assert.equal(nat(d('Thanks for the details, Aoife.')).reply, 'Thanks for the details, Aoife. ' + S.LINES.ask_next_week);
+  const bare = { schedule: { preference: null, opener: '' } };
+  assert.equal(nat(d('Is that right?', bare)).reply, S.LINES.ask_next_week, 'a question in the acknowledgement: dropped'); assert.equal(nat(d('It costs 5000', bare)).reply, S.LINES.ask_next_week); assert.equal(nat(d('', bare)).reply, S.LINES.ask_next_week);
+  assert.equal(S.plan({ decision: d('Thanks for the details, Aoife.', bare), consult: null, messages: [], booked: false, nowMs: TUE }).reply, S.LINES.ask_next_week, 'the staff flow does not use it');
+  assert.equal(nat(d('Thanks for the details, Aoife.', bare), { consult: { stage: 'asked_next_week', asks: 1 } }).reply, S.LINES.ask_following_week, 'no acknowledgement in front of the second question');
+  assert.equal(nat(d('Thanks!', { schedule: { preference: S.cleanPreference({ days: ['friday'], text: 'Fri' }) } })).reply, S.LINES.acknowledge, 'the "I\'ll pass that on" line is never changed');
+  assert.equal(nat(d('Thanks for the details, Aoife.', { wantsConsultation: false })).step, 'none', 'the plan itself still needs a consultation request (the receptionist sets it for ordinary enquiries)');
+});

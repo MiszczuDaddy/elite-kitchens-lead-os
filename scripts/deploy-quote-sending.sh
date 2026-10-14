@@ -348,7 +348,7 @@ case "${1:-}" in
     [ -n "$(serving_revision setreceptionist)" ] || { echo "Deploy the AI backend first: $0 ai"; exit 1; }
     check_settings; check_access
     echo "Functions: $REC_FUNCS. receptionistSweep is NEW and runs every minute; it cannot be called from outside. pushReceipt only learns the new 'handover' notification."
-    echo "It answers NOBODY until the owner switches 'Automatic receptionist' on in Assistant > Settings AND switches the Receptionist on for a chat. It never runs between midnight and 7:00."
+    echo "It does NOTHING until the owner switches 'Automatic receptionist' on in Assistant > Settings (then it handles only NEW Meta leads that arrive after that moment, never existing chats). It never runs between midnight and 7:00."
     confirm "Deploy the receptionist check to the LIVE project?"
     install
     deploy_functions $REC_FUNCS

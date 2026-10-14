@@ -76,8 +76,8 @@ window.REPLY = (() => {
     const b = $('recep-btn'); if (!b) return;
     const c = R.phone && S.convs.find((x) => x.id === R.phone), rc = (c && c.receptionist) || {}, live = rc.on === true && !rc.paused;
     b.hidden = !R.auto || !R.phone; b.disabled = R.recepBusy === true; b.classList.toggle('on', live);
-    b.textContent = 'Receptionist: ' + (live ? 'on' : rc.on === true && rc.paused ? 'handed to you' : 'off');
-    b.title = live ? 'It answers new messages in this chat by itself. Press to switch it off.' : rc.on === true && rc.paused ? 'It passed this chat to you. Press to switch it on again.' : 'Let the receptionist answer new messages in this chat by itself. Press to switch it on.';
+    b.textContent = 'Receptionist: ' + (live ? (rc.auto ? 'on (automatic)' : 'on') : rc.on === true && rc.paused ? 'handed to you' : 'off');
+    b.title = live ? 'It answers new messages in this chat by itself' + (rc.auto ? ' (switched on automatically because this is a new Meta lead)' : '') + '. Press to pause it.' : rc.on === true && rc.paused ? 'It passed this chat to you. Press to switch it on again.' : 'Let the receptionist answer new messages in this chat by itself. Press to switch it on.';
   }
   $('recep-btn').onclick = async () => {
     const c = S.convs.find((x) => x.id === R.phone), rc = (c && c.receptionist) || {}, want = !(rc.on === true && !rc.paused);

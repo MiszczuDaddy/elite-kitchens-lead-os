@@ -68,6 +68,14 @@ function asksSoFar(consult, messages) {
   }
   return n;
 }
+// R3 (automatic receptionist): the model's one-sentence acknowledgement of what the customer said, put in front of the fixed first question ("Thanks for the details, Aoife. Would any day next week suit you
+// for a home consultation?"). Short, no question, no number, nothing about days, times, prices or promises. Anything else is dropped and only the fixed line is sent.
+const RISKY = /\b(book|booked|booking|confirm|confirmed|available|availability|slot|date|time|times|day|days|week|weeks|today|tomorrow|tonight|tuesday|monday|wednesday|thursday|friday|saturday|sunday|promise|guarantee|guaranteed|price|prices|cost|costs|quote|quoted|discount|free|cheap|cheaper|€|euro|euros|deposit|ai|bot|robot|assistant|automated)\b/i;
+function acknowledgement(text) {
+  const t = clip(text, 120);
+  if (!t || t.length > 110 || /[?]/.test(t) || /\d/.test(t) || RISKY.test(t) || /€|https?:|www\.|@/i.test(t)) return '';
+  return t;
+}
 // The model's opener: only for the first message we send in a chat, short, a greeting or thanks, no question, nothing about times or promises.
 function opener(text, hasOutbound) {
   const t = clip(text, 90);
@@ -79,7 +87,7 @@ function opener(text, hasOutbound) {
 // The plan for this message. Returns { step, reply, handover, preference }:
 //   step 'none'                       nothing about scheduling is said by the system (the model's own reply is used)
 //   step ask_next_week / ask_following_week / acknowledge / no_preference     a fixed line; the last two hand over
-function plan({ decision, consult, messages, booked, nowMs }) {
+function plan({ decision, consult, messages, booked, nowMs, natural = false }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   // A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself).
   if (decision.handover && decision.handover.needed && /asked if ai/i.test(decision.handover.reason || '')) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
@@ -95,7 +103,9 @@ function plan({ decision, consult, messages, booked, nowMs }) {
   if (consult && consult.stage === 'preference_given') return none;                       // already handed over; nothing new to ask
   const asks = asksSoFar(consult, messages), hasOutbound = (messages || []).some((m) => m.direction === 'out');
   if (asks >= MAX_ASKS) return { step: 'no_preference', reply: LINES.no_preference, handover: { needed: true, reason: 'no preference given after two questions' }, preference: null };
-  const step = asks === 0 ? 'ask_next_week' : 'ask_following_week', o = opener(decision.schedule && decision.schedule.opener, hasOutbound);
+  const step = asks === 0 ? 'ask_next_week' : 'ask_following_week';
+  // natural (the automatic receptionist, which nobody reads first): the first question is preceded by a short, safe acknowledgement of what the customer said, instead of the greeting.
+  const lead = natural && step === 'ask_next_week' ? acknowledgement(decision.reply) : '', o = lead || opener(decision.schedule && decision.schedule.opener, hasOutbound);
   return { step, reply: (o ? o + ' ' : '') + LINES[step], handover: null, preference: null };
 }
 
@@ -111,4 +121,4 @@ function advance(consult, step, preference, nowMs) {
   return null;
 }
 
-module.exports = { LINES, MAX_ASKS, WEEKDAYS, WEEKS, cleanPreference, reasonable, describe, weekOf, asksSoFar, opener, plan, advance };
+module.exports = { LINES, MAX_ASKS, WEEKDAYS, WEEKS, cleanPreference, reasonable, describe, weekOf, asksSoFar, opener, acknowledgement, plan, advance };
