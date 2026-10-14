@@ -14,6 +14,7 @@ const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const T = require('./aiTools');
 const A = require('./aiActions');
 const R = require('./aiReply');
+const SCH = require('./aiSchedule');
 const { normalizePhone } = require('./whatsapp');
 
 const TZ = 'Europe/Dublin';
@@ -226,8 +227,10 @@ function createDemoModel() {
     if ((tools || []).some((t) => t.name === 'reply_decision')) {          // demo only: a canned receptionist decision from the customer's last line
       const body = String(last.text || ''), line = body.split('\n').filter((l) => l.startsWith('[customer')).pop() || '';
       const wants = /consultation|visit|measure|come out|appointment/i.test(line), angry = /complaint|angry|terrible|solicitor/i.test(line), timing = /(?:monday|tuesday|wednesday|thursday|friday|saturday|morning|afternoon|evening)[a-z ]*/i.exec(line), known = /- Eircode:/.test(body);
-      const input = { reply: angry ? '' : wants ? (known ? 'Thanks, that works for us. We will check availability and come back to you with some times.' : 'Lovely, we would be glad to call out. Could you send me your Eircode so we can check availability?') : 'Thanks for your enquiry. What kind of kitchen are you thinking of?',
-        intent: angry ? 'complaint' : wants ? 'wants_consultation' : 'new_enquiry', wantsConsultation: wants, preferredTiming: timing ? timing[0].trim() : null, newFacts: timing ? [{ field: 'timing', value: timing[0].trim() }] : [], handover: { needed: angry, reason: angry ? 'upset customer' : null } };
+      const day = (timing && /(monday|tuesday|wednesday|thursday|friday|saturday)/i.exec(timing[0])) || null;
+      const input = { reply: wants || angry ? '' : 'Thanks for your enquiry. What kind of kitchen are you thinking of?', intent: angry ? 'complaint' : wants ? 'wants_consultation' : 'new_enquiry', wantsConsultation: wants,
+        schedule: { preference: timing ? { weeks: 'next', days: day ? [day[1].toLowerCase()] : [], times: /afternoon|morning|evening/i.test(timing[0]) ? (/afternoon|morning|evening/i.exec(timing[0])[0].toLowerCase() + 's') : undefined, text: timing[0].trim() } : undefined, opener: known ? '' : 'Hi, thanks for getting in touch.' },
+        newFacts: [], handover: { needed: angry, reason: angry ? 'upset customer' : null } };
       return { text: '', toolCalls: [{ id: 'tu_demo_reply', name: 'reply_decision', input }], stopReason: 'tool_use', usage: used(body) };
     }
     if (last.role === 'tool') {
@@ -422,15 +425,18 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   await settle(db, { worstEur: worst, actualEur: cost, feature: 'reply', model: modelName, usage: res.usage, ok: true, ms: Date.now() - t0, nowMs });
   log('info', 'ai reply suggestion', { model: modelName, in: res.usage.input, out: res.usage.output, ms: Date.now() - t0 });
   const call = res.toolCalls.find((c) => c.name === R.TOOL.name);
-  const decision = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
-  const analysis = R.analyse(sheet, decision);
+  const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
+  // Arranging a consultation is a fixed flow decided by code: the wording of every scheduling line is ours, the model only read the chat (see aiSchedule.js).
+  const plan = SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs });
+  const decision = plan.step === 'none' ? asked : { ...asked, reply: plan.reply, handover: plan.handover || asked.handover };
+  const analysis = R.analyse(sheet, decision, plan);
   const draftId = 'ad_' + require('crypto').randomBytes(12).toString('hex');
   await db.doc('aiDrafts/' + draftId).set({ id: draftId, phone, createdBy: actor.id, createdByUid: uid || actor.id, createdAt: Timestamp.fromMillis(nowMs), model: key, intent: decision.intent, handover: decision.handover.needed, wantsConsultation: decision.wantsConsultation,
-    readiness: analysis.readiness.state, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null });                 // no words of the draft or the chat
+    readiness: analysis.readiness.state, step: plan.step, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null });                 // no words of the draft or the chat
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,
-    window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
+    schedule: { step: plan.step, preference: plan.preference }, window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
 }
 // How a draft ended, reported by the screen: used as it was, used after editing, or not used. Only the person who asked for it can say; it is recorded once. No text is sent.
 async function draftOutcome({ db }, actor, data, { uid } = {}) {
@@ -443,7 +449,10 @@ async function draftOutcome({ db }, actor, data, { uid } = {}) {
     if (!s.exists) throw new HttpsError('not-found', 'This draft no longer exists.');
     if (s.data().createdByUid !== (uid || actor.id)) throw new HttpsError('permission-denied', 'Only the person who asked for this draft can report on it.');
     if (s.data().outcome) return { ok: true, repeat: true };
+    const d = s.data(), cRef = db.doc('conversations/' + d.phone), used = data.outcome !== 'discarded' && d.step && d.step !== 'none', cs = used ? await tx.get(cRef) : null;
     tx.update(ref, { outcome: data.outcome, outcomeAt: Timestamp.now() });
+    // A suggested scheduling message that a person actually sent moves the consultation flow on (so the next question is the right one, and nothing is asked twice).
+    if (used && cs.exists) { const next = SCH.advance(cs.data().consult, d.step, d.pref, Date.now()); if (next) tx.set(cRef, { consult: next }, { merge: true }); }
     return { ok: true };
   });
 }

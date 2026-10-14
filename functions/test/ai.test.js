@@ -481,7 +481,7 @@ test('read-only by construction: the tools file has no way to write, and the mod
 test('the assistant writes only its own records: ai* collections and one audit line, never customers, quotes, messages or WhatsApp', () => {
   const src = fs.readFileSync(path.join(__dirname, '../lib/ai.js'), 'utf8').replace(/\/\/.*$/gm, '');
   const touched = new Set([...src.matchAll(/(?:doc|collection)\(\s*['"`]([A-Za-z]+)/g)].map((m) => m[1]));
-  assert.deepEqual([...touched].sort(), ['aiDrafts', 'aiLog', 'aiRate', 'aiSettings', 'aiUsage', 'auditLog']);       // aiDrafts: R1 records of suggested replies (no words); the lookup tools themselves still cannot write
+  assert.deepEqual([...touched].sort(), ['aiDrafts', 'aiLog', 'aiRate', 'aiSettings', 'aiUsage', 'auditLog', 'conversations']);       // aiDrafts: R1 records of suggested replies (no words); the lookup tools themselves still cannot write
   assert.equal(/wa\.|sendText|getStorage|bucket/.test(src), false);
   const idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
   assert.match(idx, /FUNCTIONS_EMULATOR === 'true' && process\.env\.AI_FAKE_MODEL === 'on'/, 'the fake model must only exist in the emulator');

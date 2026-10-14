@@ -37,7 +37,8 @@ window.REPLY = (() => {
     head.append(el('strong', '', 'Suggested reply'), el('span', 'reply-state reply-' + v.readiness.tone, v.readiness.label));
     const meta = [v.modelLabel, v.cost].filter(Boolean).join(' · '); if (meta) head.append(el('span', 'reply-meta', meta));
     head.append(close); panel.append(head);
-    if (v.handover) panel.append(el('p', 'reply-handover', 'Hand over to you' + (v.handoverReason ? ': ' + v.handoverReason : '') + '. The AI should not answer this one.'));
+    if (v.handover) panel.append(el('p', 'reply-handover', 'Hand over to you' + (v.handoverReason ? ': ' + v.handoverReason : '') + '.' + (v.draft ? ' Send the reply below if you like, then take it from here.' : ' No reply is drafted.')));
+    if (v.preference) { const b = el('div', 'reply-pref'); b.append(el('div', 'reply-label', 'Preferred days and times'), el('div', 'reply-pref-text', v.preference.text)); if (v.preference.customerWords) b.append(el('div', 'reply-meta', 'Their words: "' + v.preference.customerWords + '"')); panel.append(b); }
     if (!v.structured) panel.append(el('p', 'reply-warn', 'The assistant did not return its analysis. Check the draft carefully.'));
     if (v.draft) {
       panel.append(el('div', 'reply-draft', v.draft));

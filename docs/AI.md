@@ -60,6 +60,19 @@ Later stages (not built): appointments (9.2b), quote changes with the quote engi
 * **Not in R1:** booking (R2), automatic replies and hand-over notifications (push, Inbox badge: R2/R3), email drafts.
 * **Template for confirmations outside the 24-hour window:** `docs/WHATSAPP_APPOINTMENT_TEMPLATE.md` (to submit to Meta; needed for R2).
 
+## R2a: the consultation-arrangement flow (fixed, decided by code)
+**Branch `phase-9-r2a-scheduling`: not merged, not deployed.** The AI does **not** pick slots, book anything or promise availability. It collects the customer's preference and hands over to you; you confirm the exact appointment and book it through Elite OS as usual.
+1. The customer is interested in a home consultation and has not said when suits: **"Would any day next week suit you for a home consultation?"**
+2. If next week does not work: **"No problem. Would the following week suit you? Do you have any particular days or times that work best?"** (asked once).
+3. As soon as there is any reasonable preference (a week, days, "any day", a time of day): **"Perfect, I'll pass that on to the team and we'll confirm a time shortly."**, the preference is recorded, the AI **stops asking about scheduling** and hands over.
+4. **At most two scheduling questions.** If the customer still gives nothing: "No problem, I'll pass this on to the team and we'll be in touch to arrange a time." and a hand-over with "no preference given".
+5. If the customer already said when they are free, **nothing is asked**: straight to step 3. If a consultation is already booked, or the customer is being handed over for another reason, the flow says nothing about scheduling.
+* **The wording is written by code** (`functions/lib/aiSchedule.js`), never by the model, so it cannot promise or confirm anything; Haiku and Sonnet give identical lines. The model only reads the chat: it says whether the customer wants a consultation, extracts what they said about days and times, and may add a short greeting ("Hi Anna, thanks for getting in touch.") to **the first message of a conversation only** (checked: no question, no times, no promises). Anything else it writes about times is discarded.
+* **What you see** in the Suggest reply panel: the scheduling step (asking about next week / the following week / preference received / no preference), a **"Preferred days and times"** box with the real dates ("Next week (Mon 19 Oct to Sun 25 Oct) · Tuesday 20 Oct, Wednesday 21 Oct · afternoons") and the customer's own words, the hand-over reason, and the usual Known / Still needed lists.
+* **Memory:** you still send the messages. When you send a suggested scheduling message (used as it was or edited), the conversation records the step (`conversations/{phone}.consult`: stage, number of questions asked, the preference), so the next suggestion is the right one and nothing is asked twice. A discarded draft changes nothing; the flow never moves backwards. Messages you type yourself are recognised from the chat ("any day next week", "following week").
+* **Data:** `aiDrafts` now also holds the preference the customer gave (their words and the summary), and `conversations/{phone}.consult` holds the flow state; both are erased with the customer.
+* **Not in R2a:** the "consultation request" card and Inbox badge, the "Book appointment" shortcut, hand-over push notifications (R2b / R3). The WhatsApp confirmation template (`docs/WHATSAPP_APPOINTMENT_TEMPLATE.md`) is not needed for this flow because you confirm manually.
+
 ## Safety rules (each one has a test)
 | Rule | How |
 |---|---|
@@ -119,6 +132,7 @@ Order, one command at a time from Cloud Shell, each verified from outside:
 * `functions/test/assistant-model.test.js` (9): history, context, markdown, spending bar, notices.
 * `functions/test/ai-actions.test.js` (17, emulator): switches and owner-only, proposals (exact previews, validation, limits), approve / reject / who / expiry / stale / partial, switches at decision time, nothing written while proposing, erasure.
 * `functions/test/ai-reply.test.js` (14, emulator) and `functions/test/reply-model.test.js` (2): R1 rules, sheet, suggestions for Haiku and Sonnet, switches, owner rule, limits, outcome records, erasure, read-only checks.
+* `functions/test/ai-schedule.test.js` (8, pure): the fixed lines, weeks and dates, what counts as a preference, the summary, counting questions, the opener, the full flow, remembering. `functions/test/ai-reply.test.js` also runs the whole flow end to end (ask, ask again, acknowledge, discarded drafts, Haiku = Sonnet).
 * `test-ui/assistant.e2e.js` (real page + functions + emulators, demo model): screens and states, "Check models", the Haiku/Sonnet selector and "Retry with Sonnet", the owner-only data box, settings and the data-gate confirmation, a lookup, the open customer, HTML shown as text, the tab-only conversation, the kill switch and a used-up budget, the phone layout.
 * Planted-error checks (14 deliberate breakages of the cap, switch, data gate, reservation, timeout handling, rate limit, logging, read-only, injection labelling, history and context rules): 12 caught at once; 2 exposed one real test gap (the hourly speed limit, now tested) and one harmless equivalent change (the open customer is read but still never shown to the model while the gate is closed).
 

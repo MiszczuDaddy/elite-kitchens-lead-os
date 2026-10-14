@@ -1,0 +1,103 @@
+// Phase 9 R2a: the consultation-arrangement flow (functions/lib/aiSchedule.js). Pure functions, no database. The wording of every scheduling line is written by code; the flow asks at most
+// two questions, stops as soon as there is a reasonable preference, never confirms or promises anything, and records a clear summary with the real dates.
+const { test } = require('node:test');
+const assert = require('node:assert');
+const S = require('../lib/aiSchedule');
+
+const TUE = Date.UTC(2026, 9, 13, 10, 0);          // Tuesday 13 Oct 2026
+const dec = (o = {}) => ({ wantsConsultation: true, handover: { needed: false }, schedule: { preference: null, opener: 'Hi Anna, thanks for getting in touch.' }, ...o });
+const withPref = (p, opener = '') => dec({ schedule: { preference: S.cleanPreference(p), opener } });
+const out = (text) => ({ direction: 'out', body: text }), inn = (text) => ({ direction: 'in', body: text });
+
+test('the scheduling lines are fixed and contain no promise, no date, no availability', () => {
+  assert.deepEqual(S.LINES, {
+    ask_next_week: 'Would any day next week suit you for a home consultation?',
+    ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
+    acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+    no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.' });
+  assert.equal(S.MAX_ASKS, 2);
+  for (const l of Object.values(S.LINES)) assert.doesNotMatch(l, /\b(booked|confirmed|available|availability|\d)\b/i);
+});
+
+test('weeks run Monday to Sunday in Irish time, counted from today', () => {
+  assert.equal(S.weekOf(TUE, 'this').label, 'Mon 12 Oct to Sun 18 Oct'); assert.equal(S.weekOf(TUE, 'next').label, 'Mon 19 Oct to Sun 25 Oct'); assert.equal(S.weekOf(TUE, 'following').label, 'Mon 26 Oct to Sun 1 Nov');
+  assert.equal(S.weekOf(Date.UTC(2026, 9, 18, 12, 0), 'next').label, 'Mon 19 Oct to Sun 25 Oct', 'on a Sunday, next week starts tomorrow');
+  assert.equal(S.weekOf(Date.UTC(2026, 9, 12, 8, 0), 'this').label, 'Mon 12 Oct to Sun 18 Oct', 'on a Monday, this week starts today');
+  assert.equal(S.weekOf(Date.UTC(2026, 11, 29, 12, 0), 'next').label, 'Mon 4 Jan to Sun 10 Jan', 'across the new year');
+  assert.equal(S.weekOf(Date.UTC(2026, 9, 18, 23, 30), 'this').label, 'Mon 19 Oct to Sun 25 Oct', 'just after midnight in Ireland (23:30 UTC is 00:30 on Monday)');
+  assert.equal(S.weekOf(Date.UTC(2026, 9, 22, 12, 0), 'next').days[0].d, 26); assert.equal(S.weekOf(Date.UTC(2026, 9, 22, 12, 0), 'next').days[6].label, undefined);
+});
+
+test('what counts as a reasonable preference: a week, days, "any day" or a time of day; "not sure" and silence do not', () => {
+  const ok = [{ weeks: 'next' }, { days: ['tuesday'] }, { anyDay: true }, { times: 'mornings' }, { weeks: 'other', text: 'the 28th' }, { days: ['monday', 'friday'], times: 'after 5pm' }];
+  for (const p of ok) assert.equal(S.reasonable(S.cleanPreference(p)), true, JSON.stringify(p));
+  for (const p of [null, undefined, {}, { text: 'not sure yet, I will let you know' }, { days: [] }, { days: ['funday'] }, { weeks: 'someday' }, { anyDay: 'yes' }, 'tuesday', { times: '   ' }]) assert.equal(S.reasonable(S.cleanPreference(p)), false, JSON.stringify(p));
+  const c = S.cleanPreference({ weeks: 'next', days: ['Tuesday', 'tuesday', 'WEDNESDAY', 'x'], times: ' afternoons ', text: 'y'.repeat(400) });
+  assert.deepEqual([c.weeks, c.days, c.times, c.text.length <= 160], ['next', ['tuesday', 'wednesday'], 'afternoons', true]);
+});
+
+test('the summary for the person who books it: the real dates, the days, the time of day, the customer\'s own words', () => {
+  const d = (p) => S.describe(S.cleanPreference(p), TUE);
+  assert.equal(d({ weeks: 'next', days: ['tuesday', 'wednesday'], times: 'afternoons', text: 'Tue or Wed pm' }).text, 'Next week (Mon 19 Oct to Sun 25 Oct) · Tuesday 20 Oct, Wednesday 21 Oct · afternoons');
+  assert.deepEqual(d({ weeks: 'next', days: ['tuesday', 'wednesday'], times: 'afternoons', text: 'Tue or Wed pm' }).dayLabels, ['Tuesday 20 Oct', 'Wednesday 21 Oct']);
+  assert.equal(d({ weeks: 'following', anyDay: true }).text, 'The week after next (Mon 26 Oct to Sun 1 Nov) · any day'); assert.equal(d({ weeks: 'this', days: ['friday'] }).text, 'This week (Mon 12 Oct to Sun 18 Oct) · Friday 16 Oct');
+  assert.equal(d({ anyDay: true }).text, 'any day'); assert.equal(d({ times: 'mornings' }).text, 'mornings'); assert.equal(d({ days: ['monday'] }).text, 'Monday', 'no week known: no invented date');
+  assert.equal(d({ weeks: 'other', text: 'sometime in November' }).text, ''); assert.equal(d({ weeks: 'other', times: 'evenings', text: 'sometime in November' }).customerWords, 'sometime in November');
+  assert.equal(S.describe(null, TUE), null); assert.equal(S.describe(S.cleanPreference({ text: 'maybe' }), TUE), null);
+});
+
+test('how many scheduling questions were already asked: from what a person sent, and from our own earlier messages in the chat; never more than two', () => {
+  assert.equal(S.asksSoFar(null, []), 0); assert.equal(S.asksSoFar({ asks: 1 }, []), 1); assert.equal(S.asksSoFar({ asks: 9 }, []), 2); assert.equal(S.asksSoFar({ asks: -3 }, []), 0); assert.equal(S.asksSoFar({ asks: 'x' }, []), 0);
+  assert.equal(S.asksSoFar(null, [out('Hi Anna. Would any day next week suit you for a home consultation?'), inn('hello')]), 1, 'typed or sent by the draft: the same');
+  assert.equal(S.asksSoFar(null, [out('Do you think next week suits you?')]), 1);
+  assert.equal(S.asksSoFar(null, [out('Would any day next week suit you?'), out('No problem. Would the following week suit you?')]), 2);
+  assert.equal(S.asksSoFar({ asks: 1 }, [out('what about the following week?')]), 2); assert.equal(S.asksSoFar(null, [inn('Would any day next week suit you?')]), 0, 'only OUR messages count');
+});
+
+test('the opener: only the first message of a conversation, a short greeting or thanks, never a question or anything about times, promises or prices', () => {
+  assert.equal(S.opener('Hi Anna, thanks for getting in touch.', false), 'Hi Anna, thanks for getting in touch.'); assert.equal(S.opener('Hello Anna!', false), 'Hello Anna!'); assert.equal(S.opener('Thank you for your enquiry.', false), 'Thank you for your enquiry.');
+  for (const bad of ['Hi Anna, thanks for getting in touch.']) assert.equal(S.opener(bad, true), '', 'an ongoing chat has no opener');
+  for (const bad of ['Hi Anna, what kind of kitchen?', 'Hi, see you on 5th', 'Hi, we are available any day', 'Hi, your visit is confirmed', 'Hi, I promise', 'Hi, kitchens cost €5k', 'Great idea!', '', null, 'Hi ' + 'x'.repeat(100), 'Hi, thanks for choosing us for your kitchen week'])
+    assert.equal(S.opener(bad, false), '', String(bad));
+});
+
+test('THE FLOW: ask next week, then the following week, stop at any reasonable preference, never more than two questions, no promise', () => {
+  const plan = (decision, o = {}) => S.plan({ decision, consult: null, messages: [], booked: false, nowMs: TUE, ...o });
+  // first contact: the opener plus ask 1
+  const first = plan(dec());
+  assert.deepEqual([first.step, first.reply, first.handover], ['ask_next_week', 'Hi Anna, thanks for getting in touch. Would any day next week suit you for a home consultation?', null]);
+  // an ongoing chat: no opener
+  assert.equal(plan(dec(), { messages: [out('Hi Anna, thanks!'), inn('yes please')] }).reply, 'Would any day next week suit you for a home consultation?');
+  // next week did not work: ask 2, once
+  const second = plan(dec(), { consult: { stage: 'asked_next_week', asks: 1 }, messages: [out('Would any day next week suit you?'), inn('not next week sorry')] });
+  assert.deepEqual([second.step, second.reply, second.handover], ['ask_following_week', S.LINES.ask_following_week, null]);
+  // a reasonable preference: acknowledge + hand over, with the summary
+  const given = plan(withPref({ weeks: 'following', days: ['wednesday'], times: 'mornings', text: 'Wednesday morning the week after' }), { consult: { stage: 'asked_following_week', asks: 2 } });
+  assert.equal(given.step, 'acknowledge'); assert.equal(given.reply, S.LINES.acknowledge); assert.deepEqual(given.handover, { needed: true, reason: 'consultation preference received: over to you to book' });
+  assert.equal(given.preference.text, 'The week after next (Mon 26 Oct to Sun 1 Nov) · Wednesday 28 Oct · mornings');
+  // already stated availability: nothing is asked
+  const already = plan(withPref({ days: ['thursday'] }), { messages: [inn('Hi, I want a kitchen, Thursday suits me for a visit')] }); assert.equal(already.step, 'acknowledge'); assert.equal(already.reply, S.LINES.acknowledge);
+  // after two questions and still nothing: hand over
+  const none = plan(dec(), { consult: { stage: 'asked_following_week', asks: 2 } }); assert.deepEqual([none.step, none.reply, none.handover], ['no_preference', S.LINES.no_preference, { needed: true, reason: 'no preference given after two questions' }]);
+  assert.equal(plan(dec(), { messages: [out('Would any day next week suit you?'), out('Would the following week suit you?')] }).step, 'no_preference', 'two questions typed by a person count too');
+  // "not sure" is not a preference
+  assert.equal(plan(withPref({ text: 'not sure yet' })).step, 'ask_next_week');
+  // already handed over, nothing new: say nothing about scheduling
+  assert.equal(plan(dec(), { consult: { stage: 'preference_given', asks: 1 } }).step, 'none'); assert.equal(plan(withPref({ days: ['friday'] }), { consult: { stage: 'preference_given', asks: 1 } }).step, 'acknowledge', 'an updated preference is acknowledged again');
+  // not about a consultation, already booked, or handed over for another reason: nothing about scheduling
+  for (const [d, o] of [[dec({ wantsConsultation: false }), {}], [dec(), { booked: true }], [dec({ handover: { needed: true, reason: 'upset' } }), {}]]) assert.deepEqual(plan(d, o), { step: 'none', reply: null, handover: null, preference: null });
+  // the model's own wording about times is never used
+  const sneaky = plan(dec({ reply: 'We are free Tuesday at 10, see you then!', schedule: { preference: null, opener: 'Hi, we can do Tuesday at 3.' } }));
+  assert.equal(sneaky.reply, S.LINES.ask_next_week); assert.doesNotMatch(sneaky.reply, /Tuesday|\d/);
+  for (const p of [first, second, given, none]) assert.doesNotMatch(p.reply, /\b(booked|confirmed for|see you|available on)\b/i);
+});
+
+test('what is remembered once a person sent the suggested message: the flow moves on, never back, and a discarded draft changes nothing', () => {
+  assert.deepEqual(S.advance(null, 'ask_next_week', null, 5), { stage: 'asked_next_week', asks: 1 });
+  assert.deepEqual(S.advance({ stage: 'asked_next_week', asks: 1 }, 'ask_following_week', null, 5), { stage: 'asked_following_week', asks: 2 });
+  assert.deepEqual(S.advance({ stage: 'asked_following_week', asks: 2 }, 'no_preference', null, 5), { stage: 'no_preference', asks: 2, at: 5 });
+  assert.deepEqual(S.advance({ stage: 'asked_next_week', asks: 1 }, 'acknowledge', { text: 'Tue' }, 7), { stage: 'preference_given', asks: 1, preference: { text: 'Tue' }, at: 7 });
+  assert.equal(S.advance({ stage: 'preference_given', asks: 1 }, 'ask_next_week', null, 9), null, 'never move back once handed over');
+  assert.equal(S.advance(null, 'none', null, 1), null); assert.equal(S.advance({ stage: 'asked_next_week', asks: 2 }, 'ask_next_week', null, 1).asks, 2, 'the count only goes up');
+  assert.deepEqual(S.advance({ stage: 'preference_given', asks: 1 }, 'acknowledge', { text: 'Fri' }, 9).preference, { text: 'Fri' });
+});

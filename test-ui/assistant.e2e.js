@@ -232,16 +232,22 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   const msgCount = async () => (await db.collection(`conversations/${ph.anna}/messages`).get()).size, sentBefore = await msgCount();
   await page.click('#reply-btn'); await page.waitForSelector('#reply-panel:not([hidden]) .reply-draft');
   const panel = await page.locator('#reply-panel').innerText();
-  assert.match(panel, /Suggested reply/); assert.match(panel, /Wants a consultation: details still needed/); assert.match(panel, /Could you send me your Eircode/); assert.match(panel, /Sonnet/, 'replies use Sonnet by default');
-  assert.match(panel, /Known[\s\S]*Name: Anna Apple/); assert.match(panel, /From the chat \(not saved yet\)[\s\S]*Preferred time: Tuesday afternoon/); assert.match(panel, /Still needed[\s\S]*Project[\s\S]*Home address or Eircode/); assert.doesNotMatch(panel, /already in the records/, 'asking for the Eircode is right: it is not recorded');
+  assert.match(panel, /Suggested reply/); assert.match(panel, /Preference received: over to you to book/); assert.match(panel, /Perfect, I'll pass that on to the team and we'll confirm a time shortly\./); assert.match(panel, /Sonnet/, 'replies use Sonnet by default');
+  assert.match(panel, /Hand over to you: consultation preference received[\s\S]*Send the reply below/); assert.match(panel, /Preferred days and times\nNext week \(Mon \d+ \w+ to Sun \d+ \w+\) · Tuesday \d+ \w+ · afternoons\nTheir words: "Tuesday afternoon would suit me"/);
+  assert.match(panel, /Known[\s\S]*Name: Anna Apple/); assert.match(panel, /From the chat \(not saved yet\)[\s\S]*Preferred time: Next week/); assert.match(panel, /Still needed[\s\S]*Project[\s\S]*Home address or Eircode/, 'what the person still needs is listed even though the preference is in');
   assert.equal(await page.inputValue('#text'), '', 'the draft is not put in the message box until you choose');
-  await page.click('#reply-panel >> text=Use this reply'); assert.match(await page.inputValue('#text'), /^Lovely, we would be glad to call out/);
+  await page.click('#reply-panel >> text=Use this reply'); assert.match(await page.inputValue('#text'), /^Perfect, I'll pass that on to the team/);
   assert.equal(await msgCount(), sentBefore, 'nothing was sent');
   await page.screenshot({ path: path.join(SHOTS, 'assistant-reply-suggestion.png') });
   await page.click('#reply-panel >> text=Try Haiku'); await page.waitForFunction(() => /Haiku/.test(document.getElementById('reply-panel').innerText));
-  let drafts = []; for (let i = 0; i < 40; i++) { drafts = (await db.collection('aiDrafts').get()).docs.map((d) => d.data()); if (drafts.length === 2 && drafts.some((d) => d.outcome === 'discarded')) break; await page.waitForTimeout(150); }
+  let drafts = []; for (let i = 0; i < 40; i++) { drafts = (await db.collection('aiDrafts').get()).docs.map((d) => d.data()); if (drafts.length === 2 && drafts.find((d) => d.model === 'sonnet') && drafts.find((d) => d.model === 'sonnet').outcome) break; await page.waitForTimeout(150); }
   assert.equal(drafts.length, 2); assert.deepEqual(drafts.map((d) => d.model).sort(), ['haiku', 'sonnet']);
-  assert.equal(drafts.find((d) => d.model === 'sonnet').outcome, 'discarded', 'the first draft was replaced without being sent'); assert.equal(JSON.stringify(drafts).includes('Eircode'), false, 'no words are stored');
+  assert.equal(drafts.find((d) => d.model === 'sonnet').outcome, 'discarded', 'the first draft was replaced without being sent: ' + JSON.stringify(drafts.map((d) => [d.model, d.outcome, d.step]))); assert.equal(JSON.stringify(drafts).includes('pass that on'), false, 'the words of the draft are not stored');
+  // the question flow: interest in a visit, no day given yet -> the fixed first question (and the greeting, because we have not written to this customer yet)
+  await db.collection('conversations/' + ph.anna + '/messages').get().then(async (s) => { for (const d of s.docs) if (d.data().body && /Tuesday afternoon/.test(d.data().body)) await d.ref.delete(); });
+  await say('I would like a visit to measure up for a new kitchen.'); await db.doc('conversations/' + ph.anna).update({ lastInboundAt: Timestamp.now() });
+  await page.click('#reply-panel .reply-x'); await page.click('#reply-btn'); await page.waitForSelector('#reply-panel .reply-draft');
+  assert.equal(await page.locator('#reply-panel .reply-draft').innerText(), 'Hi, thanks for getting in touch. Would any day next week suit you for a home consultation?'); assert.match(await page.locator('#reply-panel').innerText(), /Wants a consultation: asking about next week/); assert.equal(await page.locator('#reply-panel .reply-pref').count(), 0);
   await say('This is a complaint, I am angry about the last visit.'); await db.doc('conversations/' + ph.anna).update({ lastInboundAt: Timestamp.now() });
   await page.click('#reply-panel .reply-x'); await page.click('#reply-btn'); await page.waitForSelector('#reply-panel .reply-handover');
   assert.match(await page.locator('#reply-panel').innerText(), /Hand over to you[\s\S]*Hand over to you: upset customer/); assert.equal(await page.locator('#reply-panel .reply-draft').count(), 0, 'no reply is drafted for a complaint');

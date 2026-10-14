@@ -1085,6 +1085,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .reply-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 0; } .reply-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 2px; }
 .reply-chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--hover); overflow-wrap: anywhere; } .reply-chip.new { background: #e9efdf; } .reply-chip.miss { background: #f6eedd; }
 .reply-warns { margin: 6px 0 0; padding-left: 18px; color: #8a6d1f; font-size: 12.5px; } p.reply-warn, p.reply-handover, p.reply-err { margin: 0 0 8px; font-size: 13px; } p.reply-handover { color: var(--err); font-weight: 600; } p.reply-err { color: var(--err); } p.reply-warn { color: #8a6d1f; }
+.reply-pref { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: #e9efdf; } .reply-pref-text { font-weight: 650; overflow-wrap: anywhere; }
 .reply-btn { margin-right: 4px; flex: none; }
 @media (max-width: 899px) { .reply-panel { margin: 0 8px 8px; } .reply-btn { min-height: 44px; } }
 .as-card { align-self: flex-start; max-width: 88%; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 14px; }

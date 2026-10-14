@@ -5,7 +5,7 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(); else root.ReplyModel = factory();
 })(this, function () {
-  const TONE = { ready: 'good', almost: 'warn', not_yet: 'muted', handover: 'bad', booked: 'info' };
+  const TONE = { ready: 'good', preference: 'good', almost: 'warn', not_yet: 'muted', handover: 'bad', booked: 'info' };
   const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
   // The person pressed Send: was it the draft exactly (ignoring spacing), or an edit of it?
   const outcomeOf = (draft, finalText) => (norm(draft) && norm(draft) === norm(finalText) ? 'used_unchanged' : 'used_edited');
@@ -21,6 +21,7 @@
       readiness: { state: state || 'not_yet', label: (r.readiness && r.readiness.label) || '', tone: TONE[state] || 'muted' },
       known: list(r.known).map((k) => ({ label: String(k.label || ''), value: String(k.value || '') })), fromChat: list(r.fromChat).map((k) => ({ label: String(k.label || ''), value: String(k.value || '') })),
       missing: list(r.missing).map((m) => String(m.label || '')), warnings: list(r.warnings).map(String),
+      step: (r.schedule && r.schedule.step) || 'none', preference: r.schedule && r.schedule.preference ? { text: String(r.schedule.preference.text || ''), customerWords: String(r.schedule.preference.customerWords || '') } : null,
       handover: !!(r.handover && r.handover.needed), handoverReason: (r.handover && r.handover.reason) || '', otherModel: r.model === 'haiku' ? 'sonnet' : 'haiku', otherLabel: r.model === 'haiku' ? 'Sonnet' : 'Haiku',
     };
   }
