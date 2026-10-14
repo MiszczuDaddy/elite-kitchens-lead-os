@@ -213,6 +213,7 @@ exports.setAiSettings = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.setA
 exports.aiDecide = onCall({}, (req) => h.aiDecide(req.auth, req.data, quoteDeps()));
 exports.aiSuggestReply = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 120 }, (req) => h.aiSuggestReply(req.auth, req.data, aiDeps()));
 exports.aiDraftOutcome = onCall({}, (req) => h.aiDraftOutcome(req.auth, req.data, quoteDeps()));
+exports.aiDismissConsult = onCall({}, (req) => h.aiDismissConsult(req.auth, req.data, quoteDeps()));
 exports.aiCheckModels = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60 }, (req) => h.aiCheckModels(req.auth, req.data, aiDeps()));
 
 exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { res.sendStatus(await h.pushReceipt(req, { db: getFirestore() })); });

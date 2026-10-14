@@ -73,6 +73,18 @@ Later stages (not built): appointments (9.2b), quote changes with the quote engi
 * **Data:** `aiDrafts` now also holds the preference the customer gave (their words and the summary), and `conversations/{phone}.consult` holds the flow state; both are erased with the customer.
 * **Not in R2a:** the "consultation request" card and Inbox badge, the "Book appointment" shortcut, hand-over push notifications (R2b / R3). The WhatsApp confirmation template (`docs/WHATSAPP_APPOINTMENT_TEMPLATE.md`) is not needed for this flow because you confirm manually.
 
+## R2b: consultation requests waiting for you (card, Inbox count, Book appointment)
+**Branch `phase-9-r2b-consult-card`: not merged, not deployed.** Booking and confirming stay entirely with you. Nothing here books, sends or confirms anything.
+* **When a customer is "waiting for you to book":** the consultation flow has handed them over (you sent the "I'll pass that on" or "no preference" message), `conversations/{phone}.consult.needsBooking` is true, they have **no appointment still to come**, and nobody pressed "Not needed". It clears by itself when an appointment exists.
+* **The card** (top of that customer's chat): preferred days and times with the real dates and the customer's own words, project and place, the latest four messages (folded), and two buttons. It says plainly that nothing is booked or confirmed.
+* **Inbox:** a **"Needs booking (N)" bar above the list** (works on a phone; it filters to the waiting customers whatever their stage), a "Needs booking" tag on their rows, and a second coloured badge on the Inbox item on wide screens. It is separate from the unread count.
+* **Book appointment** opens the existing booking form with the customer selected, type Consultation, their location filled in, and the **date set to the first day they named** (the Monday of the week they named if they named only a week; never in the past; otherwise the form's normal default). You choose the time and press Book as usual.
+* **Clash line in the booking form** (also when rescheduling): under the date and time, "Already booked that day: 10:00-11:00 Name" or, if the chosen time overlaps, "Clashes with: ...". Only a warning: it never stops you.
+* **"Not needed"** (callable `aiDismissConsult`, staff only, no model, no secret) clears the waiting flag and keeps the record of what they asked for. A later hand-over raises it again.
+* **Data:** `consult.needsBooking` / `dismissedAt` / `dismissedBy` and `consult.preference.firstDate` on the conversation; all erased with the customer. The screen reads upcoming appointments with one extra listener (a plain range on `start`, no new index); until it answers no card is shown.
+* **Deploy:** backend = the `ai` stage (8 functions now; `aiDismissConsult` is new, nothing existing changes), then `live`.
+* Tests: `functions/test/consult-model.test.js` (5, pure), the schedule and reply tests (R2b flag, "Not needed", input checks, no sending), `test-ui/assistant.e2e.js` (card, count, filter, Book appointment on the right customer and day, clash line, auto-clear, "Not needed", phone layout).
+
 ## Safety rules (each one has a test)
 | Rule | How |
 |---|---|

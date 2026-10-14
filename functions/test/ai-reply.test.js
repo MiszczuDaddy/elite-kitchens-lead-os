@@ -296,6 +296,36 @@ test('R2a: Haiku and Sonnet cannot differ on the scheduling lines, the summary o
   assert.deepEqual(strip(h2), strip(s2)); assert.equal(h2.schedule.preference.text, 'Next week (Mon 19 Oct to Sun 25 Oct) · any day');
 });
 
+// ======================================================= R2b: waiting for a booking, and "Not needed" =====================================================
+test('R2b: a hand-over that a person SENT leaves the customer waiting for a booking; "Not needed" clears it; a new hand-over raises it again; nothing is sent', async () => {
+  await on();
+  const cv = async () => (await db.doc('conversations/' + PH).get()).data();
+  const noPref = decision({ schedule: { preference: null } });
+  const q = await suggest(fake([noPref]), { phone: PH }, { uid: 'w1' }); await ai.draftOutcome({ db }, actor, { draftId: q.draftId, outcome: 'used_unchanged' }, { uid: 'w1' });
+  assert.equal((await cv()).consult.needsBooking, undefined, 'only asking: not waiting for a booking yet');
+  const got = await suggest(fake([decision({ schedule: { preference: { weeks: 'next', days: ['tuesday'], text: 'Tuesday' } } })]), { phone: PH }, { uid: 'w2' });
+  await ai.draftOutcome({ db }, actor, { draftId: got.draftId, outcome: 'discarded' }, { uid: 'w2' }); assert.equal((await cv()).consult.needsBooking, undefined, 'a draft nobody sent changes nothing');
+  await ai.draftOutcome({ db }, actor, { draftId: (await suggest(fake([decision({ schedule: { preference: { weeks: 'next', days: ['tuesday'], text: 'Tuesday' } } })]), { phone: PH }, { uid: 'w3' })).draftId, outcome: 'used_edited' }, { uid: 'w3' });
+  let c = (await cv()).consult; assert.deepEqual([c.stage, c.needsBooking, c.preference.firstDate], ['preference_given', true, got.schedule.preference.firstDate]); assert.match(c.preference.firstDate, /^\d{4}-\d{2}-\d{2}$/);
+  const before = await db.collection('conversations/' + PH + '/messages').get(), apptsBefore = (await db.collection('appointments').get()).size;
+  assert.deepEqual(await ai.dismissConsult({ db }, actor, { phone: PH }), { ok: true });
+  c = (await cv()).consult; assert.deepEqual([c.needsBooking, c.stage, c.preference.summary.length > 0, !!c.dismissedAt, c.dismissedBy], [false, 'preference_given', true, true, actor.id], 'cleared, the record of what they asked is kept');
+  assert.deepEqual(await ai.dismissConsult({ db }, actor, { phone: PH }), { ok: true, repeat: true });
+  assert.equal((await db.collection('conversations/' + PH + '/messages').get()).size, before.size, 'nothing was sent'); assert.equal((await db.collection('appointments').get()).size, apptsBefore, 'nothing was booked');
+  const again = await suggest(fake([decision({ schedule: { preference: { weeks: 'following', anyDay: true, text: 'any day the week after' } } })]), { phone: PH }, { uid: 'w4' });
+  await ai.draftOutcome({ db }, actor, { draftId: again.draftId, outcome: 'used_unchanged' }, { uid: 'w4' });
+  assert.equal((await cv()).consult.needsBooking, true, 'a new hand-over raises the request again');
+});
+
+test('R2b: "Not needed" checks its input and only touches the waiting flag', async () => {
+  await on();
+  await rejects(ai.dismissConsult({ db }, actor, { phone: 'abc' }), 'invalid-argument'); await rejects(ai.dismissConsult({ db }, actor, {}), 'invalid-argument'); await rejects(ai.dismissConsult({ db }, actor, { phone: PH, extra: 1 }), 'invalid-argument');
+  await rejects(ai.dismissConsult({ db }, actor, { phone: '353800000000' }), 'not-found');
+  assert.deepEqual(await ai.dismissConsult({ db }, actor, { phone: PH }), { ok: true, repeat: true }, 'nothing waiting: nothing to clear');
+  const src = fs.readFileSync(path.join(__dirname, '../lib/ai.js'), 'utf8'), fn = src.slice(src.indexOf('async function dismissConsult('), src.indexOf('// The Approve / Reject buttons.'));
+  assert.equal(/sendText|sendReply|sendTemplate|wa\.|appointments|complete\(|model/.test(fn), false, 'no message, no booking, no model');
+});
+
 test('R2a: the flow state is erased with the customer, and recording an outcome never sends anything', async () => {
   await on(); const r = await suggest(fake([decision()]));
   await ai.draftOutcome({ db }, actor, { draftId: r.draftId, outcome: 'used_unchanged' }, { uid: 'u1' });

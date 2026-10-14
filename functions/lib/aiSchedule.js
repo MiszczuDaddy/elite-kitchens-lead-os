@@ -48,7 +48,11 @@ function describe(pref, nowMs) {
   const weekLabel = week ? `${{ this: 'This week', next: 'Next week', following: 'The week after next' }[pref.weeks]} (${week.label})` : null;
   const days = pref.days.map((d) => { const i = WEEKDAYS.indexOf(d), cap = d[0].toUpperCase() + d.slice(1); return week ? `${cap} ${week.days[i].d} ${MONTHS[week.days[i].m - 1]}` : cap; });
   const parts = [weekLabel, pref.anyDay ? 'any day' : null, days.length ? days.join(', ') : null, pref.times].filter(Boolean);
-  return { weeks: pref.weeks, days: pref.days, anyDay: pref.anyDay, times: pref.times, customerWords: pref.text, weekLabel, dayLabels: days, text: parts.join(' · ') };
+  // The date the booking form opens on: the first day they named, else the first day of the week they named (the screen never opens it in the past).
+  const iso = (x) => `${x.y}-${String(x.m).padStart(2, '0')}-${String(x.d).padStart(2, '0')}`;
+  const firstIdx = pref.days.length ? Math.min(...pref.days.map((d) => WEEKDAYS.indexOf(d))) : -1;
+  const firstDate = week ? iso(firstIdx >= 0 ? week.days[firstIdx] : week.monday) : null;
+  return { weeks: pref.weeks, days: pref.days, anyDay: pref.anyDay, times: pref.times, customerWords: pref.text, weekLabel, dayLabels: days, text: parts.join(' · '), firstDate };
 }
 
 // ---- how many scheduling questions have already been asked ----
@@ -91,8 +95,9 @@ function advance(consult, step, preference, nowMs) {
   if (cur.stage === 'preference_given' && step !== 'acknowledge') return null;            // never move back
   if (step === 'ask_next_week') return { stage: 'asked_next_week', asks: Math.max(1, cur.asks || 0) };
   if (step === 'ask_following_week') return { stage: 'asked_following_week', asks: 2 };
-  if (step === 'acknowledge') return { stage: 'preference_given', asks: cur.asks || 0, preference: preference || null, at: nowMs };
-  if (step === 'no_preference') return { stage: 'no_preference', asks: 2, at: nowMs };
+  // R2b: from here the consultation is waiting for a person to book it (needsBooking), until an appointment exists or the person says it is not needed.
+  if (step === 'acknowledge') return { stage: 'preference_given', asks: cur.asks || 0, preference: preference || null, at: nowMs, needsBooking: true };
+  if (step === 'no_preference') return { stage: 'no_preference', asks: 2, at: nowMs, needsBooking: true };
   return null;
 }
 

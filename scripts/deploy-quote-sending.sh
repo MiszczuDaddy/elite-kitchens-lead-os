@@ -29,7 +29,7 @@
 #                                                Needs the one-time Firebase web app first (docs/PUSH.md). This one DOES redeploy the live WhatsApp webhook: ask the owner first.
 #   ./scripts/deploy-quote-sending.sh projects   Phase 7 (Projects) backend: acceptQuote and reopenQuote (they now keep the quote's project), deleteCustomer (it now also erases
 #                                                projects and renders) and the 7 new project functions. Run it BEFORE "live" (the screen); screens that do not know projects keep working.
-#   ./scripts/deploy-quote-sending.sh ai         Phase 9 (AI assistant) backend: the assistant functions (aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome). Needs the ANTHROPIC_API_KEY secret first; asks for the owner account (the only one that may switch real customer data on). Switched OFF until the owner
+#   ./scripts/deploy-quote-sending.sh ai         Phase 9 (AI assistant) backend: the assistant functions (aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult). Needs the ANTHROPIC_API_KEY secret first; asks for the owner account (the only one that may switch real customer data on). Switched OFF until the owner
 #                                                switches it on in the screen. Run it BEFORE "live". No existing function is touched.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
@@ -61,7 +61,7 @@ PROJECT_FUNCS="$PROJECT_NEW $PROJECT_CHANGED"
 PUSH_NEW="registerPushDevice unregisterPushDevice sendTestPush pushReceipt"                                                  # Phase 8: new; pushReceipt is reached through a Hosting rewrite
 PUSH_CHANGED="webhook leadIntake"                                                                                           # Phase 8: they now send a push (never allowed to break or hold up the message / lead)
 PUSH_FUNCS="$PUSH_NEW $PUSH_CHANGED"
-AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
+AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
 AI_FUNCS="$AI_NEW"
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
@@ -338,7 +338,7 @@ case "${1:-}" in
       gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
     done
     check_reachable "$AI_FUNCS"
-    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome --region $REGION --project $PROJECT (nothing else depends on them)."
+    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult --region $REGION --project $PROJECT (nothing else depends on them)."
     ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }

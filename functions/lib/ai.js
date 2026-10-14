@@ -432,7 +432,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   const analysis = R.analyse(sheet, decision, plan);
   const draftId = 'ad_' + require('crypto').randomBytes(12).toString('hex');
   await db.doc('aiDrafts/' + draftId).set({ id: draftId, phone, createdBy: actor.id, createdByUid: uid || actor.id, createdAt: Timestamp.fromMillis(nowMs), model: key, intent: decision.intent, handover: decision.handover.needed, wantsConsultation: decision.wantsConsultation,
-    readiness: analysis.readiness.state, step: plan.step, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null });                 // no words of the draft or the chat
+    readiness: analysis.readiness.state, step: plan.step, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null });                 // no words of the draft or the chat
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,
@@ -457,9 +457,25 @@ async function draftOutcome({ db }, actor, data, { uid } = {}) {
   });
 }
 
+// R2b: "Not needed" on a consultation request card (the customer went quiet, booked another way, changed their mind). Clears the waiting flag only; nothing is sent, no model is used.
+async function dismissConsult({ db }, actor, data) {
+  onlyKeys(data, ['phone']);
+  const phone = normalizePhone(data.phone);
+  if (!CUSTOMER_ID.test(phone)) throw bad('Missing customer.');
+  const ref = db.doc('conversations/' + phone);
+  return db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'Customer not found.');
+    const cur = s.data().consult;
+    if (!cur || cur.needsBooking !== true) return { ok: true, repeat: true };
+    tx.set(ref, { consult: { needsBooking: false, dismissedAt: Timestamp.now(), dismissedBy: actor.id } }, { merge: true });
+    return { ok: true };
+  });
+}
+
 // The Approve / Reject buttons. No model is involved: aiActions decides everything; this only loads the switches.
 async function decideProposal({ db }, actor, data, { uid, nowMs = Date.now() } = {}) {
   return A.decide({ db }, actor, uid || actor.id, data, { nowMs }, await loadSettings(db));
 }
 
-module.exports = { suggestReply, draftOutcome, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };
+module.exports = { suggestReply, draftOutcome, dismissConsult, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };

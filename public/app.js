@@ -174,6 +174,7 @@ auth.onAuthStateChanged(async (user) => {
   $('login').hidden = true; $('app').hidden = false;
   startAccessRenewal();
   watchList();
+  if (window.CONSULT) CONSULT.start();                // Phase 9 R2b: consultation requests waiting for a booking
   routeFromHash();
   if (window.PUSH) PUSH.start();                    // Phase 8: keeps this device's notification address fresh; opens the chat a clicked notification was about
 });
@@ -192,6 +193,7 @@ function stopListening() {
   if (window.PROJ) PROJ.stop();
   if (window.ASSIST) ASSIST.stop();
   if (window.REPLY) REPLY.stop();
+  if (window.CONSULT) CONSULT.stop();
   if (window.PUSH) PUSH.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
@@ -226,7 +228,8 @@ function renderList() {
   const stage = INBOX_STATUSES[S.statusFilter];
   const list = $('list');
   const keep = list.scrollTop;
-  const shown = S.convs.filter((c) => q ? matchesQuery(c, q) : inboxStatus(c) === S.statusFilter);
+  const consultOnly = !!(window.CONSULT && CONSULT.filter && CONSULT.count());       // Phase 9 R2b: only the customers waiting for you to book a consultation
+  const shown = S.convs.filter((c) => consultOnly ? CONSULT.has(c) && (!q || matchesQuery(c, q)) : q ? matchesQuery(c, q) : inboxStatus(c) === S.statusFilter);
   list.replaceChildren(...shown.map(convItem));
   list.scrollTop = keep;
 
@@ -239,6 +242,7 @@ function renderList() {
   const n = S.convs.filter(isUnread).length;
   $('total-unread').hidden = !n; $('total-unread').textContent = n;
   $('rail-badge').hidden = !n; $('rail-badge').textContent = n > 9 ? '9+' : n;
+  if (window.CONSULT) CONSULT.render();
   document.title = (n ? `(${n}) ` : '') + 'Inbox · Elite Kitchens';
   for (const button of $('status-filters').querySelectorAll('button')) {
     const status = button.dataset.status;
@@ -262,6 +266,7 @@ function convItem(c) {
   body.append(top);
   const tag = [S.query.trim() ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
   if (tag) body.append(el('div', 'conv-sub', tag));
+  if (window.CONSULT && CONSULT.has(c)) body.append(el('div', 'conv-consult', 'Needs booking'));
   const prev = el('div', 'conv-prev');
   prev.append(el('span', 't', previewOf(c) || ' '));
   if (unread) {
@@ -406,6 +411,7 @@ function openConversation(id, fromHash) {
     S.snapSeq++;
     S.pending = S.pending.filter((p) => !p.done);
     renderMessages();
+    if (window.CONSULT) CONSULT.render();            // the card's latest-messages excerpt follows the chat
     renderAssets();
     updateComposer();               // a Reopen template's delivery status arrives as a message update
     maybeMarkRead();

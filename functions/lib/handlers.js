@@ -399,6 +399,7 @@ const aiCheckModels = aiAction(ai.checkModels);
 // R1: a suggested reply for a WhatsApp chat (staff read, edit and send it themselves), and how that draft ended.
 const aiSuggestReply = aiAction(ai.suggestReply);
 const aiDraftOutcome = aiAction(ai.draftOutcome);
+const aiDismissConsult = aiAction(ai.dismissConsult);            // R2b: "Not needed" on a consultation request card
 // Phase 9.2a: Approve / Reject on a proposal. Staff only; only the person who asked can decide; no model, no secret.
 const aiDecide = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return ai.decideProposal({ db: deps.db }, actorOf(auth), data, { uid: auth.uid }); };
 
@@ -426,6 +427,6 @@ async function quoteChannels(auth, data, deps) {
 
 module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
-  registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome,
+  registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

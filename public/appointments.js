@@ -713,8 +713,24 @@ window.APPT = (() => {
     $('appt-title').textContent = title; $('appt-who').textContent = who;
     $('a-move-from').hidden = true; $('a-move-from').textContent = '';
     $('a-go').textContent = go; $('a-go').disabled = false; $('a-cancel').disabled = false; $('a-err').textContent = '';
-    setDateBounds(); showDialog($('appt-dlg')); $('a-date').focus();
+    setDateBounds(); showDialog($('appt-dlg')); $('a-date').focus(); dayNote();
   }
+  // Phase 9 R2b: under the date and time, what is already booked that day, and a warning when the chosen time overlaps it. Only a warning: it never stops you booking.
+  let noteSeq = 0;
+  async function dayNote() {
+    const p = $('a-day-note'), seq = ++noteSeq, date = $('a-date').value;
+    if (!window.ConsultModel || !date || !A.dlg) { p.hidden = true; return; }
+    const from = CRM.rangeFor('custom', 0, { from: date, to: date }), [h, m] = ($('a-time').value || '00:00').split(':').map(Number), start = from.from + (h * 60 + m) * 60000, end = start + (Number($('a-duration').value) || 60) * 60000;
+    try {
+      const T = firebase.firestore.Timestamp;
+      const snap = await db.collection('appointments').where('start', '>=', T.fromMillis(from.from - 8 * 60 * 60000)).where('start', '<', T.fromMillis(from.to)).orderBy('start').limit(100).get();
+      if (seq !== noteSeq || !A.dlg) return;
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((a) => ts(a.end) > from.from);           // today's, including one that started the evening before and runs past midnight
+      const note = ConsultModel.dayNote(list, start, end, A.dlg.appt && A.dlg.appt.id);
+      p.textContent = note.text; p.classList.toggle('clash', note.clash); p.hidden = false;
+    } catch (e) { if (seq === noteSeq) p.hidden = true; }                      // no warning is better than a wrong one
+  }
+  for (const id of ['a-date', 'a-time', 'a-duration']) $(id).addEventListener('change', dayNote);
   function openBook(phone, date, time) {
     const c = convOf(phone) || {}, contact = (S.selected === phone && S.contact) || {};
     A.dlg = { mode: 'create', phone, requestId: newRequestId() };          // one id per booking: a double click or retry books it once
@@ -834,5 +850,5 @@ window.APPT = (() => {
   $('nav-appointments').addEventListener('click', (e) => { if (A.active) e.preventDefault(); });   // already here
   $('d-appt-new').onclick = () => { if (A.customer) openBook(A.customer); };
 
-  return Object.assign(A, { show, hide, stop, watchCustomer });
+  return Object.assign(A, { show, hide, stop, watchCustomer, openBook });
 })();

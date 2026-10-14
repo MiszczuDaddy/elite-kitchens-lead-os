@@ -1112,3 +1112,25 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
   .as-msg { max-width: 94%; } .as-row textarea { font-size: 16px; } .as-meter { flex-basis: 80px; }
   .assistant-pane .quotes-head .btn-sm { min-height: 44px; }
 }
+
+/* Phase 9 R2b: consultation requests waiting for a person to book them (docs/AI.md) */
+:root { --consult: #9a6412; --consult-bg: #f8efdc; }
+.rail-badge.consult-badge { margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--consult); color: #fff; font-weight: 600; }
+.consult-bar { padding: 0 10px 8px; flex: none; }
+.consult-bar button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 7px 12px; border: 1px solid #e3cf9f; border-radius: 8px; background: var(--consult-bg); color: #5f3f08; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.consult-bar button[aria-pressed=true] { background: var(--consult); border-color: var(--consult); color: #fff; }
+.consult-count { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--consult); color: #fff; font-size: 12px; text-align: center; }
+.consult-bar button[aria-pressed=true] .consult-count { background: #fff; color: var(--consult); }
+.conv-consult { display: inline-block; margin: 2px 0 0; padding: 1px 7px; border-radius: 9px; background: var(--consult-bg); color: #5f3f08; font-size: 11.5px; font-weight: 600; }
+.consult-card { margin: 8px 14px 0; padding: 10px 12px; border: 1px solid #e3cf9f; border-radius: 10px; background: var(--consult-bg); font-size: 13.5px; max-height: 42vh; overflow-y: auto; flex: none; }
+.consult-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 6px; }
+.consult-state { color: #5f3f08; font-weight: 650; font-size: 12.5px; }
+.consult-meta { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.consult-pref { margin: 6px 0; } .consult-pref-text { font-weight: 650; overflow-wrap: anywhere; }
+.consult-msgs { margin: 6px 0; font-size: 13px; } .consult-msgs summary { cursor: pointer; color: var(--accent); font-size: 12.5px; }
+.consult-msg { margin: 4px 0 0; padding: 4px 8px; border-radius: 6px; background: #fff; overflow-wrap: anywhere; } .consult-msg.mine { background: #eef2f5; }
+.consult-note { margin: 6px 0 8px; color: var(--muted); font-size: 12.5px; }
+.consult-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.a-day-note { margin: 4px 0 0; } .a-day-note.clash { color: var(--err); font-weight: 600; }
+@media (max-width: 899px) { .consult-card { margin: 8px 8px 0; } .consult-actions .btn { min-height: 44px; } .consult-bar { padding: 0 16px 8px; } }
+@media (min-width: 900px) and (max-width: 1279px) { .rail-badge.consult-badge { right: auto; left: 3px; margin-left: 0; } }

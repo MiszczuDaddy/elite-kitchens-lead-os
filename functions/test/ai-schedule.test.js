@@ -46,6 +46,18 @@ test('the summary for the person who books it: the real dates, the days, the tim
   assert.equal(S.describe(null, TUE), null); assert.equal(S.describe(S.cleanPreference({ text: 'maybe' }), TUE), null);
 });
 
+test('R2b: the date the booking form opens on is the first day they named; with only a week it is the Monday of that week; with no week it is nothing', () => {
+  const d = (p) => S.describe(S.cleanPreference(p), TUE);
+  assert.equal(d({ weeks: 'next', days: ['wednesday', 'tuesday'] }).firstDate, '2026-10-20'); assert.equal(d({ weeks: 'following', days: ['thursday'] }).firstDate, '2026-10-29');
+  assert.equal(d({ weeks: 'next', anyDay: true }).firstDate, '2026-10-19'); assert.equal(d({ weeks: 'next', times: 'mornings' }).firstDate, '2026-10-19');
+  assert.equal(d({ days: ['monday'] }).firstDate, null, 'no week known: no invented date'); assert.equal(d({ anyDay: true }).firstDate, null);
+});
+
+test('R2b: only the two hand-over steps leave the customer waiting for a person to book; asking questions does not', () => {
+  assert.equal(S.advance(null, 'ask_next_week', null, 1).needsBooking, undefined); assert.equal(S.advance({ asks: 1 }, 'ask_following_week', null, 1).needsBooking, undefined);
+  assert.equal(S.advance({ asks: 2 }, 'acknowledge', { text: 'x' }, 1).needsBooking, true); assert.equal(S.advance({ asks: 2 }, 'no_preference', null, 1).needsBooking, true);
+});
+
 test('how many scheduling questions were already asked: from what a person sent, and from our own earlier messages in the chat; never more than two', () => {
   assert.equal(S.asksSoFar(null, []), 0); assert.equal(S.asksSoFar({ asks: 1 }, []), 1); assert.equal(S.asksSoFar({ asks: 9 }, []), 2); assert.equal(S.asksSoFar({ asks: -3 }, []), 0); assert.equal(S.asksSoFar({ asks: 'x' }, []), 0);
   assert.equal(S.asksSoFar(null, [out('Hi Anna. Would any day next week suit you for a home consultation?'), inn('hello')]), 1, 'typed or sent by the draft: the same');
@@ -95,8 +107,8 @@ test('THE FLOW: ask next week, then the following week, stop at any reasonable p
 test('what is remembered once a person sent the suggested message: the flow moves on, never back, and a discarded draft changes nothing', () => {
   assert.deepEqual(S.advance(null, 'ask_next_week', null, 5), { stage: 'asked_next_week', asks: 1 });
   assert.deepEqual(S.advance({ stage: 'asked_next_week', asks: 1 }, 'ask_following_week', null, 5), { stage: 'asked_following_week', asks: 2 });
-  assert.deepEqual(S.advance({ stage: 'asked_following_week', asks: 2 }, 'no_preference', null, 5), { stage: 'no_preference', asks: 2, at: 5 });
-  assert.deepEqual(S.advance({ stage: 'asked_next_week', asks: 1 }, 'acknowledge', { text: 'Tue' }, 7), { stage: 'preference_given', asks: 1, preference: { text: 'Tue' }, at: 7 });
+  assert.deepEqual(S.advance({ stage: 'asked_following_week', asks: 2 }, 'no_preference', null, 5), { stage: 'no_preference', asks: 2, at: 5, needsBooking: true });
+  assert.deepEqual(S.advance({ stage: 'asked_next_week', asks: 1 }, 'acknowledge', { text: 'Tue' }, 7), { stage: 'preference_given', asks: 1, preference: { text: 'Tue' }, at: 7, needsBooking: true });
   assert.equal(S.advance({ stage: 'preference_given', asks: 1 }, 'ask_next_week', null, 9), null, 'never move back once handed over');
   assert.equal(S.advance(null, 'none', null, 1), null); assert.equal(S.advance({ stage: 'asked_next_week', asks: 2 }, 'ask_next_week', null, 1).asks, 2, 'the count only goes up');
   assert.deepEqual(S.advance({ stage: 'preference_given', asks: 1 }, 'acknowledge', { text: 'Fri' }, 9).preference, { text: 'Fri' });
