@@ -135,7 +135,9 @@ async function processChat(deps, phone, nowMs = Date.now()) {
 // The every-minute check. Returns a count of what happened, for the log (no names, no words).
 async function sweep(deps, nowMs = Date.now()) {
   const s = await ai.loadSettings(deps.db);
-  if (!s.enabled || !s.customerDataApproved || !s.replyAssistant || !s.autoReply) return { skipped: 'off' };
+  // The master switch (autoReply) controls the AUTOMATIC handling of new Meta leads. A chat the owner switched on himself with its Receptionist button (for testing) works without it; the AI kill switch,
+  // real customer data and reply suggestions must all be on for either.
+  if (!s.enabled || !s.customerDataApproved || !s.replyAssistant) return { skipped: 'off' };
   if (!deps.model) return { skipped: 'no key' };
   if (quiet(nowMs)) return { skipped: 'quiet hours' };
   // The chats the customer has written in during the last 24 hours (the only ones that can be answered): one query, newest first.
@@ -143,9 +145,9 @@ async function sweep(deps, nowMs = Date.now()) {
   const out = { chats: chats.size };
   for (const d of chats.docs) {
     let activated = false;
-    try { activated = await activateIfNewLead(deps, d, s.autoReplySince); if (activated) out.activated = (out.activated || 0) + 1; } catch (e) { log('error', 'receptionist activation failed', { code: String((e && e.code) || 'unknown').slice(0, 60) }); continue; }
+    try { activated = s.autoReply && await activateIfNewLead(deps, d, s.autoReplySince); if (activated) out.activated = (out.activated || 0) + 1; } catch (e) { log('error', 'receptionist activation failed', { code: String((e && e.code) || 'unknown').slice(0, 60) }); continue; }
     const rec = d.data().receptionist;
-    if (!activated && !(rec && rec.on === true)) continue;                                  // not switched on (or not a Meta lead): never looked at any further
+    if (!activated && !(rec && rec.on === true && (s.autoReply || !rec.auto))) continue;     // not switched on (or not a Meta lead): never looked at any further; automatic chats need the master switch
     const why = await processChat(deps, d.id, nowMs); out[why] = (out[why] || 0) + 1;
   }
   return out;

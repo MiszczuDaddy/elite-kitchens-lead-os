@@ -17,7 +17,7 @@ window.REPLY = (() => {
     try {
       const s = (await call('aiStatus')()).data, d = (s.models || []).find((m) => m.key === (s.replyModel || s.defaultModel));
       R.enabled = !!(s.enabled && s.keyConfigured && s.customerDataApproved && s.replyAssistant && d && d.ready);
-      R.auto = !!(R.enabled && s.autoReply && s.canApproveData);                      // Phase 9 R3: only the owner sees the Receptionist button, and only while automatic replies are switched on
+      R.auto = !!(R.enabled && s.canApproveData);                      // Phase 9 R3: only the owner sees the Receptionist button (it works for a single chat even while the master switch is off)
     } catch (e) { R.enabled = false; R.auto = false; }
     return R.enabled;
   }

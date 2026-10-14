@@ -104,7 +104,7 @@ test('ONLY NEW META LEADS: existing conversations, customers who are not Meta le
 test('MASTER SWITCH: off means nothing happens; switching it on records the start time, so leads that arrived before are never touched; one switch is all there is', async () => {
   await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, replyAssistant: true, autoReply: false });
   await newLead(PH, { receivedAt: NOW - 3 * H }); await says(PH, 'Hi, interested', NOW - 120e3); const w = waFake(), m = fake([decision()]);
-  assert.deepEqual(await REC.sweep(deps(m, w, pushFake()), NOW), { skipped: 'off' });
+  const r0 = await REC.sweep(deps(m, w, pushFake()), NOW); assert.equal(r0.activated, undefined); assert.equal(m.calls.length + w.sent.length, 0, 'master off: no lead is switched on and nothing is sent'); assert.equal((await conv()).receptionist, undefined);
   const st = await ai.saveSettings({ db, model: null, owners: OWNERS }, owner, { autoReply: true }, { nowMs: NOW + 60e3 }); assert.equal(st.autoReply, true);
   assert.equal((await ai.loadSettings(db)).autoReplySince, NOW + 60e3, 'the start time is the moment the switch went on');
   const r = await REC.sweep(deps(m, w, pushFake()), NOW + 120e3); assert.equal(r.activated, undefined, 'the lead that arrived before the switch is not handled'); assert.equal(w.sent.length, 0);

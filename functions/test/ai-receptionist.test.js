@@ -53,12 +53,18 @@ beforeEach(async () => {
 
 test('SWITCHES: the check does nothing unless the AI, real customer data, reply suggestions AND automatic replies are all on; it reads no chat otherwise', async () => {
   await arm();
-  for (const extra of [{ enabled: false }, { customerDataApproved: false }, { replyAssistant: false }, { autoReply: false }]) {
+  for (const extra of [{ enabled: false }, { customerDataApproved: false }, { replyAssistant: false }]) {
     await on(extra); const m = fake([decision()]), w = fakeWa(); const r = await REC.sweep(deps(m, w, fakePush()), NOW);
     assert.deepEqual(r, { skipped: 'off' }, JSON.stringify(extra)); assert.equal(m.calls.length + w.sent.length, 0);
   }
   await db.doc('aiSettings/current').delete(); assert.deepEqual(await REC.sweep(deps(fake([decision()]), fakeWa(), fakePush()), NOW), { skipped: 'off' }, 'no settings at all means off');
   await on(); assert.deepEqual(await REC.sweep(deps(null, fakeWa(), fakePush()), NOW), { skipped: 'no key' });
+});
+
+test('MASTER SWITCH OFF: a chat the owner switched on himself (testing one chat) is still answered, an automatically switched-on chat is not, and nothing new is switched on', async () => {
+  await on({ autoReply: false }); await arm(); await arm(NOW, 'Hi there', PH2); await db.doc('conversations/' + PH2).update({ 'receptionist.auto': true });
+  const m = fake([decision()]), w = fakeWa(); const r = await REC.sweep(deps(m, w, fakePush()), NOW);
+  assert.deepEqual(w.sent.map((x) => x.to), [PH], 'only the chat the owner switched on'); assert.equal(r['sent:ask_next_week'], 1); assert.equal(r.activated, undefined);
 });
 
 test('SEND: the first question goes out once, in the fixed words, marked as automatic; the consultation flow moves on; nothing else is touched', async () => {
