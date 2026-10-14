@@ -191,6 +191,7 @@ function stopListening() {
   if (window.QUOTES) QUOTES.stop();
   if (window.PROJ) PROJ.stop();
   if (window.ASSIST) ASSIST.stop();
+  if (window.REPLY) REPLY.stop();
   if (window.PUSH) PUSH.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
@@ -365,6 +366,7 @@ function closeConversation(fromHash) {
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
   S.selected = null; S.msgs = []; S.pending = [];
+  if (window.REPLY) REPLY.onSelect(null);
   watchContact(null);
   $('thread').hidden = true; $('thread-empty').hidden = false;
   if (!fromHash && location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -389,6 +391,7 @@ function openConversation(id, fromHash) {
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
   S.selected = id; S.msgs = []; S.pending = []; banner('');
+  if (window.REPLY) REPLY.onSelect(id);                // Phase 9 R1: the Suggest reply button follows the open chat
   $('text').value = messageDrafts.get(id) || ''; $('text').style.height = 'auto';
   if (!fromHash) history.replaceState(null, '', '#c/' + id);
   $('thread').hidden = false; $('thread-empty').hidden = true;

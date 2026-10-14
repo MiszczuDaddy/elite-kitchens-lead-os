@@ -13,6 +13,8 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const T = require('./aiTools');
 const A = require('./aiActions');
+const R = require('./aiReply');
+const { normalizePhone } = require('./whatsapp');
 
 const TZ = 'Europe/Dublin';
 const DEADLINE_MS = 100000;                    // no new model call is started once a question has run this long (the function itself may run 240 s; one call is limited to 40 s, 3 tries)
@@ -42,7 +44,7 @@ const num = (v, lo, hi, fallback) => (typeof v === 'number' && Number.isFinite(v
 async function loadSettings(db) {
   const s = await db.doc('aiSettings/current').get(), d = s.exists ? s.data() : {};
   return { ...DEFAULTS, enabled: d.enabled === true, customerDataApproved: d.customerDataApproved === true,
-    actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
+    replyAssistant: d.replyAssistant === true, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
     monthlyCapEur: num(d.monthlyCapEur, 0, 1000, DEFAULTS.monthlyCapEur), dailyCapEur: num(d.dailyCapEur, 0, 1000, DEFAULTS.dailyCapEur),
     defaultModel: modelKey(d.defaultModel) || DEFAULTS.defaultModel,
     maxOutputTokens: num(d.maxOutputTokens, 64, 4096, DEFAULTS.maxOutputTokens), prices: { ...DEFAULTS.prices, ...(d.prices && typeof d.prices === 'object' ? d.prices : {}) },
@@ -57,7 +59,7 @@ function onlyKeys(data, allowed) {
 }
 // Staff change the switch and the caps from the screen. The data gate needs an explicit confirmation that the provider's data terms were checked.
 async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.now() } = {}) {
-  onlyKeys(data, ['enabled', 'monthlyCapEur', 'dailyCapEur', 'customerDataApproved', 'confirmDataTerms', 'actionsEnabled', 'actionKinds']);
+  onlyKeys(data, ['enabled', 'monthlyCapEur', 'dailyCapEur', 'customerDataApproved', 'confirmDataTerms', 'actionsEnabled', 'actionKinds', 'replyAssistant']);
   const patch = {};
   if ('enabled' in data) { if (typeof data.enabled !== 'boolean') throw bad('Switch must be on or off.'); patch.enabled = data.enabled; }
   for (const k of ['monthlyCapEur', 'dailyCapEur']) if (k in data) { if (typeof data[k] !== 'number' || !Number.isFinite(data[k]) || data[k] < 0 || data[k] > 200) throw bad('A spending cap must be between 0 and 200 euro.'); patch[k] = Math.round(data[k] * 100) / 100; }
@@ -66,6 +68,11 @@ async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.n
     if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can change real customer data access.');
     if (data.customerDataApproved && data.confirmDataTerms !== true) throw bad('Confirm that the provider\'s data terms were checked before real customer data is switched on.');
     patch.customerDataApproved = data.customerDataApproved;
+  }
+  if ('replyAssistant' in data) {
+    if (typeof data.replyAssistant !== 'boolean') throw bad('Reply suggestions must be on or off.');
+    if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can change reply suggestions.');
+    patch.replyAssistant = data.replyAssistant;
   }
   if ('actionsEnabled' in data || 'actionKinds' in data) {
     if ('actionsEnabled' in data && typeof data.actionsEnabled !== 'boolean') throw bad('AI actions must be on or off.');
@@ -139,7 +146,7 @@ async function status({ db, model, owners }, actor, data, { nowMs = Date.now() }
   return { enabled: s.enabled, customerDataApproved: s.customerDataApproved, monthlyCapEur: s.monthlyCapEur, dailyCapEur: s.dailyCapEur, monthSpentEur: Math.round((mm.costEur || 0) * 100) / 100, daySpentEur: Math.round((dd.costEur || 0) * 100) / 100,
     monthCalls: mm.calls || 0, keyConfigured: !!model, month: monthId(nowMs), defaultModel: s.defaultModel,
     models: Object.entries(MODELS).map(([key, m]) => ({ key, label: m.label, id: m.id, ready: modelReady(check, key), reason: (check[key] && check[key].ok === false && check[key].reason) || null, checkedAt: check[key] && check[key].at && check[key].at.toMillis ? check[key].at.toMillis() : null })),
-    actions: { enabled: s.actionsEnabled, kinds: s.actionKinds, labels: A.KINDS }, canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
+    replyAssistant: s.replyAssistant, actions: { enabled: s.actionsEnabled, kinds: s.actionKinds, labels: A.KINDS }, canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
 }
 
 // ---- the model interface: complete({ model, system, messages, tools, maxTokens }) -> { text, toolCalls, stopReason, usage } ----
@@ -214,8 +221,15 @@ function anthropicModel({ apiKey, fetchImpl = fetch, baseUrl = 'https://api.anth
 // A tiny deterministic "model" for the tests and the emulator (never used in production: see index.js). It looks people up and reads the answer back, so the whole chain can be tested without a real model.
 function createDemoModel() {
   const jsonOf = (r) => { try { return JSON.parse(r.content); } catch (e) { return null; } };
-  return { name: 'demo', async verify(id) { return { ok: true, name: 'Demo ' + id, lifecycle: 'active' }; }, async complete({ messages, system }) {
+  return { name: 'demo', async verify(id) { return { ok: true, name: 'Demo ' + id, lifecycle: 'active' }; }, async complete({ messages, system, tools }) {
     const last = messages[messages.length - 1], used = (t) => ({ input: Math.ceil(t.length / 4), output: Math.ceil(t.length / 4), cacheRead: 0, cacheWrite: 0 });
+    if ((tools || []).some((t) => t.name === 'reply_decision')) {          // demo only: a canned receptionist decision from the customer's last line
+      const body = String(last.text || ''), line = body.split('\n').filter((l) => l.startsWith('[customer')).pop() || '';
+      const wants = /consultation|visit|measure|come out|appointment/i.test(line), angry = /complaint|angry|terrible|solicitor/i.test(line), timing = /(?:monday|tuesday|wednesday|thursday|friday|saturday|morning|afternoon|evening)[a-z ]*/i.exec(line), known = /- Eircode:/.test(body);
+      const input = { reply: angry ? '' : wants ? (known ? 'Thanks, that works for us. We will check availability and come back to you with some times.' : 'Lovely, we would be glad to call out. Could you send me your Eircode so we can check availability?') : 'Thanks for your enquiry. What kind of kitchen are you thinking of?',
+        intent: angry ? 'complaint' : wants ? 'wants_consultation' : 'new_enquiry', wantsConsultation: wants, preferredTiming: timing ? timing[0].trim() : null, newFacts: timing ? [{ field: 'timing', value: timing[0].trim() }] : [], handover: { needed: angry, reason: angry ? 'upset customer' : null } };
+      return { text: '', toolCalls: [{ id: 'tu_demo_reply', name: 'reply_decision', input }], stopReason: 'tool_use', usage: used(body) };
+    }
     if (last.role === 'tool') {
       const r = last.results[0], j = jsonOf(r) || {};
       let text;
@@ -378,9 +392,65 @@ async function chat({ db, model, owners }, actor, data, { uid, nowMs = Date.now(
   return { reply, model: key, proposals, tools: used, costEur: Math.round(spent * 1e8) / 1e8, tokens: total, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
 }
 
+// ---- R1: reply suggestions for a WhatsApp chat. One model call, nothing sent, nothing saved but a record WITHOUT the draft's words (so the owner can see how often drafts are used). ----
+async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = Date.now() } = {}) {
+  onlyKeys(data, ['phone', 'model']);
+  const phone = normalizePhone(typeof data.phone === 'string' ? data.phone : '');
+  if (!CUSTOMER_ID.test(phone)) throw bad('Missing customer.');
+  if (data.model != null && !modelKey(data.model)) throw bad('Unknown model.');
+  const settings = await loadSettings(db);
+  if (!settings.enabled) throw refused('The AI assistant is switched off.');
+  if (!model) throw refused('The AI assistant is not set up yet (no key).');
+  if (!settings.customerDataApproved) throw refused('Real customer data is not switched on, so replies cannot be suggested.');
+  if (!settings.replyAssistant) throw refused('Reply suggestions are switched off. The owner can switch them on in Assistant settings.');
+  const key = modelKey(data.model) || settings.defaultModel;
+  if (!modelReady(await loadModelCheck(db), key)) throw refused(`The ${MODELS[key].label} model has not been checked yet. Open Settings and press "Check models".`);
+  await checkRate(db, uid || actor.id, nowMs);
+  const sheet = await R.buildSheet(db, phone, nowMs);
+  if (!sheet) throw new HttpsError('not-found', 'Customer not found.');
+  const system = R.SYSTEM, text = R.sheetText(sheet), modelName = MODELS[key].id, p = priceOf(settings, modelName);
+  const worst = eur(settings, p, { input: roughTokens(system.length + text.length + JSON.stringify(R.TOOL).length) * 1.25, output: settings.maxOutputTokens, cacheWrite: 0 });
+  await reserve(db, settings, worst, nowMs);
+  const t0 = Date.now(); let res;
+  try { res = await model.complete({ model: modelName, system, messages: [{ role: 'user', text }], tools: [R.TOOL], maxTokens: settings.maxOutputTokens }); }
+  catch (e) {
+    await settle(db, { worstEur: worst, actualEur: 0, feature: 'reply', model: modelName, usage: null, ok: false, ms: Date.now() - t0, nowMs, keep: !!(e && e.timeout) }).catch(() => {});
+    log('error', 'ai call failed', { feature: 'reply', model: modelName, status: (e && e.status) || 0, timeout: !!(e && e.timeout) });
+    throw new HttpsError('unavailable', 'The assistant is not available right now. Try again in a moment.');
+  }
+  const cost = eur(settings, p, res.usage);
+  await settle(db, { worstEur: worst, actualEur: cost, feature: 'reply', model: modelName, usage: res.usage, ok: true, ms: Date.now() - t0, nowMs });
+  log('info', 'ai reply suggestion', { model: modelName, in: res.usage.input, out: res.usage.output, ms: Date.now() - t0 });
+  const call = res.toolCalls.find((c) => c.name === R.TOOL.name);
+  const decision = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
+  const analysis = R.analyse(sheet, decision);
+  const draftId = 'ad_' + require('crypto').randomBytes(12).toString('hex');
+  await db.doc('aiDrafts/' + draftId).set({ id: draftId, phone, createdBy: actor.id, createdByUid: uid || actor.id, createdAt: Timestamp.fromMillis(nowMs), model: key, intent: decision.intent, handover: decision.handover.needed, wantsConsultation: decision.wantsConsultation,
+    readiness: analysis.readiness.state, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null });                 // no words of the draft or the chat
+  const st = await status({ db, model, owners }, actor, {}, { nowMs });
+  return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
+    known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,
+    window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
+}
+// How a draft ended, reported by the screen: used as it was, used after editing, or not used. Only the person who asked for it can say; it is recorded once. No text is sent.
+async function draftOutcome({ db }, actor, data, { uid } = {}) {
+  onlyKeys(data, ['draftId', 'outcome']);
+  if (typeof data.draftId !== 'string' || !/^ad_[0-9a-f]{24}$/.test(data.draftId)) throw bad('Missing draft.');
+  if (!['used_unchanged', 'used_edited', 'discarded'].includes(data.outcome)) throw bad('Unknown outcome.');
+  const ref = db.doc('aiDrafts/' + data.draftId);
+  return db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'This draft no longer exists.');
+    if (s.data().createdByUid !== (uid || actor.id)) throw new HttpsError('permission-denied', 'Only the person who asked for this draft can report on it.');
+    if (s.data().outcome) return { ok: true, repeat: true };
+    tx.update(ref, { outcome: data.outcome, outcomeAt: Timestamp.now() });
+    return { ok: true };
+  });
+}
+
 // The Approve / Reject buttons. No model is involved: aiActions decides everything; this only loads the switches.
 async function decideProposal({ db }, actor, data, { uid, nowMs = Date.now() } = {}) {
   return A.decide({ db }, actor, uid || actor.id, data, { nowMs }, await loadSettings(db));
 }
 
-module.exports = { decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };
+module.exports = { suggestReply, draftOutcome, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };

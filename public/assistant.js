@@ -206,6 +206,7 @@ window.ASSIST = (() => {
     $('as-set-data').checked = !!s.customerDataApproved; $('as-set-terms').checked = false; $('as-set-terms').closest('label').hidden = !!s.customerDataApproved || !$('as-set-data').checked;
     $('as-set-spent').textContent = M.eur(s.monthSpentEur || 0) + ' this month, ' + M.eur(s.daySpentEur || 0) + ' today';
     const ag = M.actionsGate(s), act = s.actions || {};
+    $('as-set-reply').checked = !!s.replyAssistant; $('as-set-reply').disabled = ag.disabled;
     $('as-set-actions').checked = !!act.enabled; $('as-set-actions').disabled = ag.disabled;
     for (const cb of $('as-set-kinds').querySelectorAll('input')) { cb.checked = !!(act.kinds && act.kinds[cb.dataset.kind]); cb.disabled = ag.disabled; }
     if (ag.hint) $('as-set-actions-hint').textContent = ag.hint;
@@ -236,13 +237,14 @@ window.ASSIST = (() => {
     }
     const act = s.actions || {}, kinds = {};
     for (const cb of $('as-set-kinds').querySelectorAll('input')) kinds[cb.dataset.kind] = cb.checked;
+    if (!$('as-set-reply').disabled && $('as-set-reply').checked !== !!s.replyAssistant) patch.replyAssistant = $('as-set-reply').checked;
     if (!$('as-set-actions').disabled) {
       if ($('as-set-actions').checked !== !!act.enabled) patch.actionsEnabled = $('as-set-actions').checked;
       if (Object.keys(kinds).some((k) => kinds[k] !== !!(act.kinds && act.kinds[k]))) patch.actionKinds = kinds;
     }
     if (!Object.keys(patch).length) { closeDialog($('as-dlg')); return; }
     const b = $('as-set-save'); b.disabled = true; $('as-set-err').textContent = '';
-    try { A.status = (await call('setAiSettings')(patch)).data; closeDialog($('as-dlg')); render(); }
+    try { A.status = (await call('setAiSettings')(patch)).data; if (window.REPLY) REPLY.checkedAt = 0; closeDialog($('as-dlg')); render(); }
     catch (err) { $('as-set-err').textContent = M.friendlyError(err); }
     b.disabled = false;
   });

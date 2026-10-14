@@ -1075,6 +1075,18 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .as-tray-head { font-size: 12px; font-weight: 650; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; }
 .as-tray .as-card { max-width: none; margin-bottom: 8px; }
 @media (max-width: 899px) { .as-tray { padding: 8px 14px 0; } }
+.reply-panel { margin: 0 14px 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 13.5px; max-height: 46vh; overflow-y: auto; }
+.reply-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; } .reply-head .reply-x { margin-left: auto; width: 32px; height: 32px; font-size: 20px; }
+.reply-state { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: var(--hover); }
+.reply-good { background: #e9efdf; color: #3b5532; } .reply-warn.reply-state, .reply-state.reply-warn { background: #f6eedd; } .reply-bad { background: #f9eae6; color: var(--err); } .reply-info { background: var(--selected); }
+.reply-meta { font-size: 12px; color: var(--muted); }
+.reply-draft { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 10px; border-radius: 8px; background: #eef3f8; margin: 0 0 8px; font-size: 14.5px; }
+.reply-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.reply-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 0; } .reply-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 2px; }
+.reply-chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--hover); overflow-wrap: anywhere; } .reply-chip.new { background: #e9efdf; } .reply-chip.miss { background: #f6eedd; }
+.reply-warns { margin: 6px 0 0; padding-left: 18px; color: #8a6d1f; font-size: 12.5px; } p.reply-warn, p.reply-handover, p.reply-err { margin: 0 0 8px; font-size: 13px; } p.reply-handover { color: var(--err); font-weight: 600; } p.reply-err { color: var(--err); } p.reply-warn { color: #8a6d1f; }
+.reply-btn { margin-right: 4px; flex: none; }
+@media (max-width: 899px) { .reply-panel { margin: 0 8px 8px; } .reply-btn { min-height: 44px; } }
 .as-card { align-self: flex-start; max-width: 88%; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 14px; }
 .as-card[data-state=pending] { border-color: var(--accent); }
 .as-card[data-state=applied] { border-color: var(--ok); }

@@ -272,11 +272,13 @@
         <div class="attach-info"><div id="attach-name" class="attach-name"></div><div id="attach-sub" class="attach-sub"></div></div>
         <button id="attach-x" type="button" class="icon-btn" aria-label="Remove attachment"><svg class="close-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       </div>
+      <div id="reply-panel" class="reply-panel" aria-live="polite" hidden></div>
       <form id="composer" class="composer" autocomplete="off">
         <button id="attach-btn" type="button" class="icon-btn attach-btn" aria-label="Attach a photo or file" title="Attach a photo or file">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
         </button>
         <input id="file" type="file" hidden accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
+        <button id="reply-btn" type="button" class="btn btn-ghost btn-sm reply-btn" hidden title="An AI draft you can edit. Nothing is sent until you press Send.">Suggest reply</button>
         <textarea id="text" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>
         <button id="send" class="btn btn-primary" type="submit">Send</button>
       </form>
@@ -484,6 +486,7 @@
     <p id="as-set-data-hint" class="hint" hidden></p>
     <label class="as-check as-check-sub"><input id="as-set-terms" type="checkbox"> <span>I have checked the AI provider's data terms (retention, training, eligibility) and accept them for customer data.</span></label>
     <div class="as-actions">
+      <label class="as-check"><input id="as-set-reply" type="checkbox"> <span>Reply suggestions: a "Suggest reply" button in WhatsApp chats (you read, edit and send)</span></label>
       <label class="as-check"><input id="as-set-actions" type="checkbox"> <span>AI actions: let the assistant PREPARE changes for my approval</span></label>
       <div id="as-set-kinds" class="as-kinds"><label class="as-check as-check-sub"><input id="as-set-kind-customerNote" data-kind="customerNote" type="checkbox"> <span>Customer notes</span></label><label class="as-check as-check-sub"><input id="as-set-kind-projectUpdate" data-kind="projectUpdate" type="checkbox"> <span>Project updates (checklist, installation date, notes)</span></label></div>
       <p id="as-set-actions-hint" class="hint">Nothing is saved until you press Approve on the preview it shows. Only the person who asked can approve.</p>
@@ -675,5 +678,7 @@
 <script src="/push.js"></script>
 <script src="/assistant-model.js"></script>
 <script src="/assistant.js"></script>
+<script src="/reply-model.js"></script>
+<script src="/reply-assist.js"></script>
 </body>
 </html>

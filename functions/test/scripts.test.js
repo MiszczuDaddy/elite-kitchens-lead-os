@@ -655,11 +655,12 @@ test('Phase 7: the projects stage names exactly the seven new project functions 
 test('Phase 9: the ai stage names exactly the three new callables (each bound to the Anthropic secret), checks the key before asking, touches no existing function, and the screen waits for them', () => {
   const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
   const m = /^AI_NEW="([^"]*)"/m.exec(s); assert.ok(m); const fresh = m[1].trim().split(/\s+/);
-  assert.deepEqual([...fresh].sort(), ['aiChat', 'aiCheckModels', 'aiDecide', 'aiStatus', 'setAiSettings']);
+  assert.deepEqual([...fresh].sort(), ['aiChat', 'aiCheckModels', 'aiDecide', 'aiDraftOutcome', 'aiStatus', 'aiSuggestReply', 'setAiSettings']);
   assert.match(s, /^AI_FUNCS="\$AI_NEW"/m);
   const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
   assert.match(idx, /^exports\.aiDecide\s*=\s*onCall\(\{\}/m, 'aiDecide applies approved changes and needs no model key');
-  for (const f of fresh.filter((x) => x !== 'aiDecide')) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\]', 'm'), f + ' is not a callable bound to the Anthropic secret in functions/index.js');
+  assert.match(idx, /^exports\.aiDraftOutcome\s*=\s*onCall\(\{\}/m, 'aiDraftOutcome only records an outcome and needs no model key');
+  for (const f of fresh.filter((x) => x !== 'aiDecide' && x !== 'aiDraftOutcome')) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\]', 'm'), f + ' is not a callable bound to the Anthropic secret in functions/index.js');
   const i = s.indexOf('\n  ai)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));
   assert.match(stage, /deploy_functions \$AI_FUNCS/); assert.match(stage, /for f in \$AI_NEW; do[\s\S]*add-iam-policy-binding[\s\S]*done/); assert.match(stage, /check_reachable "\$AI_FUNCS"/);
   assert.ok(stage.indexOf('ANTHROPIC_API_KEY is not set yet') < stage.indexOf('confirm "') && stage.indexOf('check_routing') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'key and checks first, then the question, then the deploy');

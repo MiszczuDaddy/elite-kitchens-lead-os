@@ -219,6 +219,38 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   ok('a waiting proposal survives a refresh, a cleared chat and leaving the Assistant; a repeat shows the same card; expired or missing ones are explained and a new one can be made');
   await resetRate();
 
+  // ------------------------------------------------------------------ R1: "Suggest reply" in a WhatsApp chat: off until the owner switches it on; a draft with what is known and missing; nothing is sent
+  await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.waitForSelector('#thread:not([hidden])');
+  assert.equal(await page.locator('#reply-btn').isVisible(), false, 'no button while reply suggestions are off');
+  await page.evaluate(() => { location.hash = '#assistant'; }); await page.waitForSelector('#assistant', { state: 'visible' });
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent));
+  assert.equal(await page.locator('#as-set-reply').isDisabled(), false); await page.check('#as-set-reply'); await page.click('#as-set-save'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
+  assert.equal((await settingsDoc().get()).data().replyAssistant, true);
+  const say = (body, dir = 'in') => db.collection(`conversations/${ph.anna}/messages`).add({ direction: dir, type: 'text', body, createdAt: Timestamp.now() });
+  await say("Hi, I'd like a consultation for a new kitchen. Tuesday afternoon would suit me."); await db.doc('conversations/' + ph.anna).update({ lastInboundAt: Timestamp.now(), lastMessageDirection: 'in' });
+  await page.evaluate((id) => { REPLY.checkedAt = 0; location.hash = '#c/' + id; }, ph.anna); await page.waitForSelector('#reply-btn', { state: 'visible' });
+  const msgCount = async () => (await db.collection(`conversations/${ph.anna}/messages`).get()).size, sentBefore = await msgCount();
+  await page.click('#reply-btn'); await page.waitForSelector('#reply-panel:not([hidden]) .reply-draft');
+  const panel = await page.locator('#reply-panel').innerText();
+  assert.match(panel, /Suggested reply/); assert.match(panel, /Wants a consultation: details still needed/); assert.match(panel, /Could you send me your Eircode/); assert.match(panel, /Haiku/);
+  assert.match(panel, /Known[\s\S]*Name: Anna Apple/); assert.match(panel, /From the chat \(not saved yet\)[\s\S]*Preferred time: Tuesday afternoon/); assert.match(panel, /Still needed[\s\S]*Project[\s\S]*Home address or Eircode/); assert.doesNotMatch(panel, /already in the records/, 'asking for the Eircode is right: it is not recorded');
+  assert.equal(await page.inputValue('#text'), '', 'the draft is not put in the message box until you choose');
+  await page.click('#reply-panel >> text=Use this reply'); assert.match(await page.inputValue('#text'), /^Lovely, we would be glad to call out/);
+  assert.equal(await msgCount(), sentBefore, 'nothing was sent');
+  await page.screenshot({ path: path.join(SHOTS, 'assistant-reply-suggestion.png') });
+  await page.click('#reply-panel >> text=Try Sonnet'); await page.waitForFunction(() => /Sonnet/.test(document.getElementById('reply-panel').innerText));
+  let drafts = []; for (let i = 0; i < 40; i++) { drafts = (await db.collection('aiDrafts').get()).docs.map((d) => d.data()); if (drafts.length === 2 && drafts.some((d) => d.outcome === 'discarded')) break; await page.waitForTimeout(150); }
+  assert.equal(drafts.length, 2); assert.deepEqual(drafts.map((d) => d.model).sort(), ['haiku', 'sonnet']);
+  assert.equal(drafts.find((d) => d.model === 'haiku').outcome, 'discarded', 'the first draft was replaced without being sent'); assert.equal(JSON.stringify(drafts).includes('Eircode'), false, 'no words are stored');
+  await say('This is a complaint, I am angry about the last visit.'); await db.doc('conversations/' + ph.anna).update({ lastInboundAt: Timestamp.now() });
+  await page.click('#reply-panel .reply-x'); await page.click('#reply-btn'); await page.waitForSelector('#reply-panel .reply-handover');
+  assert.match(await page.locator('#reply-panel').innerText(), /Hand over to you[\s\S]*Hand over to you: upset customer/); assert.equal(await page.locator('#reply-panel .reply-draft').count(), 0, 'no reply is drafted for a complaint');
+  await page.click('#reply-panel .reply-x'); assert.equal(await page.locator('#reply-panel').isVisible(), false);
+  assert.equal(await msgCount(), sentBefore + 1, 'only the customer\'s new message was added: the assistant sent nothing');
+  ok('Reply suggestions: hidden until the owner switches them on; a draft with what is known, what is missing and readiness; nothing sent; "Try Sonnet"; a complaint is handed over; outcomes recorded without words');
+  await page.evaluate(() => { location.hash = '#assistant'; }); await page.waitForSelector('#assistant', { state: 'visible' });
+  for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
+
   // ------------------------------------------------------------------ 4. answers are text, never a page
   await ask('find zed');
   const reply = await answers().last().innerText();
