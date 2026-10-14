@@ -50,6 +50,7 @@ test('LINT: drafts get warnings for links, money, phone numbers, promises, AI wo
   assert.deepEqual(R.lint('', known, new Set()), []);
   assert.deepEqual(R.lint('Thanks for getting in touch. We will check and come back to you.', known, new Set()), []);
   assert.deepEqual(R.lint('See www.elitekitchens.ie or https://x.com/a', known, new Set()), ['contains a link']);
+  assert.deepEqual(R.lint('No problem, would any day next week suit you better?', known, new Set()), []); assert.deepEqual(R.lint('We can come tomorrow.', known, new Set()), ['mentions today or tomorrow: consultations are arranged for next week']);
   assert.deepEqual(R.lint('Kitchens from €15,000', known, new Set()), ['mentions money or prices']); assert.deepEqual(R.lint('The price depends', known, new Set()), ['mentions money or prices']);
   assert.deepEqual(R.lint('Ring 0871234567 any time', known, new Set()), ['contains a phone number']); assert.deepEqual(R.lint('We guarantee it', known, new Set()), ['makes a promise']);
   assert.deepEqual(R.lint('As an AI I cannot', known, new Set()), ['mentions AI']); assert.deepEqual(R.lint('x'.repeat(241), known, new Set()), ['is long for WhatsApp: shorten it']); assert.deepEqual(R.lint('x'.repeat(240), known, new Set()), []);
@@ -238,7 +239,7 @@ test('TONE: the instructions ask for short, simple, natural replies, one questio
 test('TONE 2: replies are short, never open with "thanks for getting back" in an ongoing chat, and a request to change a booked consultation is handed over with one short line; replies use Sonnet unless Haiku is asked for', async () => {
   const s = R.SYSTEM;
   assert.match(s, /Usually under 20 words/); assert.match(s, /only in the FIRST message of a conversation/); assert.match(s, /thanks for getting back/); assert.match(s, /Do not repeat details the customer already knows/);
-  assert.match(s, /change or cancel a consultation that is already booked[\s\S]*which day would suit you better[\s\S]*handover\.needed to true[\s\S]*wants to change booking[\s\S]*do not mention dates, times or availability/);
+  assert.match(s, /change or cancel a consultation that is already booked[\s\S]*would any day next week suit you better[\s\S]*never say or accept today, tomorrow[\s\S]*handover\.needed to true[\s\S]*wants to change booking[\s\S]*do not mention dates, times or availability/);
   await on(); const m = fake([decision()]);
   const def = await suggest(m); assert.equal(def.model, 'sonnet'); assert.equal(m.calls[0].model, 'claude-sonnet-5-5');
   const cheap = fake([decision()]); assert.equal((await suggest(cheap, { phone: PH, model: 'haiku' }, { uid: 'ch1' })).model, 'haiku'); assert.equal(cheap.calls[0].model, 'claude-haiku-5-5');
