@@ -13,6 +13,7 @@ const LINES = {
   ask_next_week: 'Would any day next week suit you for a home consultation?',
   ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
   acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+  change_ask: 'No problem, would any day next week suit you better?',
   no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.',
 };
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
@@ -79,6 +80,12 @@ function opener(text, hasOutbound) {
 //   step ask_next_week / ask_following_week / acknowledge / no_preference     a fixed line; the last two hand over
 function plan({ decision, consult, messages, booked, nowMs }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
+  // A customer who already has a consultation booked and wants it changed: a person moves the booking. We ask about next week once; if they already said when (or we already asked), we only pass it on.
+  if (booked && decision.handover && decision.handover.needed && /change booking/i.test(decision.handover.reason || '')) {
+    const given = describe(decision.schedule && decision.schedule.preference, nowMs), asked = (messages || []).some((m) => m.direction === 'out' && /any day next week suit you better/i.test(m.body || ''));
+    if (given) return { step: 'change_given', reply: LINES.acknowledge, handover: { needed: true, reason: 'wants to change booking: preference received' }, preference: given };
+    return asked ? { step: 'change_pass_on', reply: LINES.no_preference, handover: { needed: true, reason: 'wants to change booking' }, preference: null } : { step: 'change_ask', reply: LINES.change_ask, handover: { needed: true, reason: 'wants to change booking' }, preference: null };
+  }
   if (!decision.wantsConsultation || booked || (decision.handover && decision.handover.needed)) return none;
   const pref = describe(decision.schedule && decision.schedule.preference, nowMs);
   if (pref) return { step: 'acknowledge', reply: LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received: over to you to book' }, preference: pref };

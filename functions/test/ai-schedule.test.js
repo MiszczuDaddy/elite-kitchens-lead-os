@@ -14,6 +14,7 @@ test('the scheduling lines are fixed and contain no promise, no date, no availab
     ask_next_week: 'Would any day next week suit you for a home consultation?',
     ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
     acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+    change_ask: 'No problem, would any day next week suit you better?',
     no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.' });
   assert.equal(S.MAX_ASKS, 2);
   for (const l of Object.values(S.LINES)) assert.doesNotMatch(l, /\b(booked|confirmed|available|availability|\d)\b/i);
@@ -44,6 +45,16 @@ test('the summary for the person who books it: the real dates, the days, the tim
   assert.equal(d({ anyDay: true }).text, 'any day'); assert.equal(d({ times: 'mornings' }).text, 'mornings'); assert.equal(d({ days: ['monday'] }).text, 'Monday', 'no week known: no invented date');
   assert.equal(d({ weeks: 'other', text: 'sometime in November' }).text, ''); assert.equal(d({ weeks: 'other', times: 'evenings', text: 'sometime in November' }).customerWords, 'sometime in November');
   assert.equal(S.describe(null, TUE), null); assert.equal(S.describe(S.cleanPreference({ text: 'maybe' }), TUE), null);
+});
+
+test('changing a booked consultation: ask about next week once; if they already said when, or we already asked, only pass it on; never today or tomorrow', () => {
+  const change = (o = {}, extra = {}) => S.plan({ decision: dec({ wantsConsultation: false, handover: { needed: true, reason: 'wants to change booking' }, ...o }), consult: null, messages: [], booked: true, nowMs: TUE, ...extra });
+  const a = change(); assert.deepEqual([a.step, a.reply, a.handover.needed, a.handover.reason], ['change_ask', 'No problem, would any day next week suit you better?', true, 'wants to change booking']); assert.doesNotMatch(a.reply, /today|tomorrow|\d/);
+  const g = change({ schedule: { preference: { weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon please' } } }); assert.deepEqual([g.step, g.reply, g.preference.firstDate], ['change_given', S.LINES.acknowledge, '2026-10-20']);
+  const asked = change({}, { messages: [{ direction: 'out', body: 'No problem, would any day next week suit you better?' }] }); assert.deepEqual([asked.step, asked.reply], ['change_pass_on', S.LINES.no_preference], 'never asked twice');
+  assert.equal(S.plan({ decision: dec({ wantsConsultation: false, handover: { needed: true, reason: 'upset customer' } }), consult: null, messages: [], booked: true, nowMs: TUE }).step, 'none', 'other hand-overs are left alone');
+  assert.equal(S.plan({ decision: dec({ handover: { needed: true, reason: 'wants to change booking' } }), consult: null, messages: [], booked: false, nowMs: TUE }).step, 'none', 'not booked: not a change');
+  assert.equal(S.advance(null, 'change_ask', null, 1), null); assert.equal(S.advance(null, 'change_given', { text: 'x' }, 1), null, 'a change of a booked consultation leaves no request to book');
 });
 
 test('R2b: the date the booking form opens on is the first day they named; with only a week it is the Monday of that week; with no week it is nothing', () => {
