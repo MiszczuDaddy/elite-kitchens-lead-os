@@ -15,7 +15,7 @@ window.REPLY = (() => {
     if (Date.now() - R.checkedAt < 60000) return R.enabled;
     R.checkedAt = Date.now();
     try {
-      const s = (await call('aiStatus')()).data, d = (s.models || []).find((m) => m.key === s.defaultModel);
+      const s = (await call('aiStatus')()).data, d = (s.models || []).find((m) => m.key === (s.replyModel || s.defaultModel));
       R.enabled = !!(s.enabled && s.keyConfigured && s.customerDataApproved && s.replyAssistant && d && d.ready);
     } catch (e) { R.enabled = false; }
     return R.enabled;
@@ -42,7 +42,7 @@ window.REPLY = (() => {
     if (v.draft) {
       panel.append(el('div', 'reply-draft', v.draft));
       const bar = el('div', 'reply-actions'), use = el('button', 'btn btn-primary btn-sm', 'Use this reply'); use.type = 'button'; use.onclick = useDraft; bar.append(use);
-      if (v.canTrySonnet) { const t = el('button', 'btn btn-ghost btn-sm', 'Try Sonnet'); t.type = 'button'; t.disabled = R.busy; t.onclick = () => suggest('sonnet'); bar.append(t); }
+      { const t = el('button', 'btn btn-ghost btn-sm', 'Try ' + v.otherLabel); t.type = 'button'; t.disabled = R.busy; t.onclick = () => suggest(v.otherModel); bar.append(t); }
       panel.append(bar);
     } else if (!v.handover) panel.append(el('p', 'reply-warn', 'No reply was drafted.'));
     if (v.warnings.length) { const w = el('ul', 'reply-warns'); for (const x of v.warnings) w.append(el('li', '', 'Check: ' + x)); panel.append(w); }

@@ -46,7 +46,7 @@ async function loadSettings(db) {
   return { ...DEFAULTS, enabled: d.enabled === true, customerDataApproved: d.customerDataApproved === true,
     replyAssistant: d.replyAssistant === true, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
     monthlyCapEur: num(d.monthlyCapEur, 0, 1000, DEFAULTS.monthlyCapEur), dailyCapEur: num(d.dailyCapEur, 0, 1000, DEFAULTS.dailyCapEur),
-    defaultModel: modelKey(d.defaultModel) || DEFAULTS.defaultModel,
+    defaultModel: modelKey(d.defaultModel) || DEFAULTS.defaultModel, replyModel: modelKey(d.replyModel) || 'sonnet',
     maxOutputTokens: num(d.maxOutputTokens, 64, 4096, DEFAULTS.maxOutputTokens), prices: { ...DEFAULTS.prices, ...(d.prices && typeof d.prices === 'object' ? d.prices : {}) },
     eurPerUsd: num(d.eurPerUsd, 0.1, 10, DEFAULTS.eurPerUsd), margin: num(d.margin, 1, 5, DEFAULTS.margin) };
 }
@@ -144,7 +144,7 @@ async function status({ db, model, owners }, actor, data, { nowMs = Date.now() }
   const s = await loadSettings(db), check = await loadModelCheck(db), [m, d] = await Promise.all([db.doc('aiUsage/' + monthId(nowMs)).get(), db.doc('aiUsage/' + dayId(nowMs)).get()]);
   const mm = m.exists ? m.data() : {}, dd = d.exists ? d.data() : {};
   return { enabled: s.enabled, customerDataApproved: s.customerDataApproved, monthlyCapEur: s.monthlyCapEur, dailyCapEur: s.dailyCapEur, monthSpentEur: Math.round((mm.costEur || 0) * 100) / 100, daySpentEur: Math.round((dd.costEur || 0) * 100) / 100,
-    monthCalls: mm.calls || 0, keyConfigured: !!model, month: monthId(nowMs), defaultModel: s.defaultModel,
+    monthCalls: mm.calls || 0, keyConfigured: !!model, month: monthId(nowMs), defaultModel: s.defaultModel, replyModel: s.replyModel,
     models: Object.entries(MODELS).map(([key, m]) => ({ key, label: m.label, id: m.id, ready: modelReady(check, key), reason: (check[key] && check[key].ok === false && check[key].reason) || null, checkedAt: check[key] && check[key].at && check[key].at.toMillis ? check[key].at.toMillis() : null })),
     replyAssistant: s.replyAssistant, actions: { enabled: s.actionsEnabled, kinds: s.actionKinds, labels: A.KINDS }, canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
 }
@@ -403,7 +403,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   if (!model) throw refused('The AI assistant is not set up yet (no key).');
   if (!settings.customerDataApproved) throw refused('Real customer data is not switched on, so replies cannot be suggested.');
   if (!settings.replyAssistant) throw refused('Reply suggestions are switched off. The owner can switch them on in Assistant settings.');
-  const key = modelKey(data.model) || settings.defaultModel;
+  const key = modelKey(data.model) || settings.replyModel;                     // replies go to customers: the better model by default (about 1 cent), Haiku on request
   if (!modelReady(await loadModelCheck(db), key)) throw refused(`The ${MODELS[key].label} model has not been checked yet. Open Settings and press "Check models".`);
   await checkRate(db, uid || actor.id, nowMs);
   const sheet = await R.buildSheet(db, phone, nowMs);

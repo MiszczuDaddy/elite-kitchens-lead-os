@@ -21,7 +21,7 @@
       readiness: { state: state || 'not_yet', label: (r.readiness && r.readiness.label) || '', tone: TONE[state] || 'muted' },
       known: list(r.known).map((k) => ({ label: String(k.label || ''), value: String(k.value || '') })), fromChat: list(r.fromChat).map((k) => ({ label: String(k.label || ''), value: String(k.value || '') })),
       missing: list(r.missing).map((m) => String(m.label || '')), warnings: list(r.warnings).map(String),
-      handover: !!(r.handover && r.handover.needed), handoverReason: (r.handover && r.handover.reason) || '', canTrySonnet: r.model === 'haiku',
+      handover: !!(r.handover && r.handover.needed), handoverReason: (r.handover && r.handover.reason) || '', otherModel: r.model === 'haiku' ? 'sonnet' : 'haiku', otherLabel: r.model === 'haiku' ? 'Sonnet' : 'Haiku',
     };
   }
   return { TONE, norm, outcomeOf, costText, viewOf };

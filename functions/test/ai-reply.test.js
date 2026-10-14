@@ -51,7 +51,7 @@ test('LINT: drafts get warnings for links, money, phone numbers, promises, AI wo
   assert.deepEqual(R.lint('See www.elitekitchens.ie or https://x.com/a', known, new Set()), ['contains a link']);
   assert.deepEqual(R.lint('Kitchens from €15,000', known, new Set()), ['mentions money or prices']); assert.deepEqual(R.lint('The price depends', known, new Set()), ['mentions money or prices']);
   assert.deepEqual(R.lint('Ring 0871234567 any time', known, new Set()), ['contains a phone number']); assert.deepEqual(R.lint('We guarantee it', known, new Set()), ['makes a promise']);
-  assert.deepEqual(R.lint('As an AI I cannot', known, new Set()), ['mentions AI']); assert.deepEqual(R.lint('x'.repeat(501), known, new Set()), ['is long for WhatsApp']);
+  assert.deepEqual(R.lint('As an AI I cannot', known, new Set()), ['mentions AI']); assert.deepEqual(R.lint('x'.repeat(241), known, new Set()), ['is long for WhatsApp: shorten it']); assert.deepEqual(R.lint('x'.repeat(240), known, new Set()), []);
   assert.deepEqual(R.lint('Could you send your Eircode?', known, new Set()), ['asks for home address, which is already in the records']);
   assert.deepEqual(R.lint('Could you send your Eircode?', [], new Set(['address'])), ['asks for home address again (it was asked earlier)']);
   assert.deepEqual(R.lint('Could you send your Eircode?', [], new Set()), []);
@@ -104,7 +104,7 @@ test('SHEET: known facts come from the records by fixed rules (including the lea
 test('SUGGEST: one model call with ONE customer and no lookup tools; the same scripted decision gives the same answer for Haiku and Sonnet; the record has no words', async () => {
   await on();
   const haiku = fake([decision()]), sonnet = fake([decision()]);
-  const a = await suggest(haiku), b = await suggest(sonnet, { phone: PH, model: 'sonnet' }, { uid: 'u1b' });
+  const a = await suggest(haiku, { phone: PH, model: 'haiku' }), b = await suggest(sonnet, { phone: PH }, { uid: 'u1b' });                    // Haiku on request; Sonnet is the default for replies
   assert.equal(haiku.calls.length, 1); assert.equal(sonnet.calls.length, 1);
   assert.deepEqual(haiku.calls[0].tools.map((t) => t.name), ['reply_decision'], 'the only tool is the decision: no lookups, no actions'); assert.equal(haiku.calls[0].system, R.SYSTEM); assert.equal(haiku.calls[0].system, sonnet.calls[0].system);
   assert.equal(haiku.calls[0].model, 'claude-haiku-5-5'); assert.equal(sonnet.calls[0].model, 'claude-sonnet-5-5'); assert.deepEqual(haiku.calls[0].messages, sonnet.calls[0].messages);
@@ -225,4 +225,18 @@ test('TONE: the instructions ask for short, simple, natural replies, one questio
   assert.match(s, /CONSULTATION ALREADY BOOKED shows a date, do not arrange another one/);
   assert.doesNotMatch(s, /come back with suggested times/, 'the old "we will check availability and come back with times" wording is gone');
   assert.doesNotMatch(s, /Aoife|K67|Kavanagh/, 'no customer data in the instructions');
+});
+
+test('TONE 2: replies are short, never open with "thanks for getting back" in an ongoing chat, and a request to change a booked consultation is handed over with one short line; replies use Sonnet unless Haiku is asked for', async () => {
+  const s = R.SYSTEM;
+  assert.match(s, /Usually under 20 words/); assert.match(s, /only in the FIRST message of a conversation/); assert.match(s, /thanks for getting back/); assert.match(s, /Do not repeat details the customer already knows/);
+  assert.match(s, /change or cancel a consultation that is already booked[\s\S]*which day would suit you better[\s\S]*handover\.needed to true[\s\S]*wants to change booking[\s\S]*do not mention dates, times or availability/);
+  await on(); const m = fake([decision()]);
+  const def = await suggest(m); assert.equal(def.model, 'sonnet'); assert.equal(m.calls[0].model, 'claude-sonnet-5-5');
+  const cheap = fake([decision()]); assert.equal((await suggest(cheap, { phone: PH, model: 'haiku' }, { uid: 'ch1' })).model, 'haiku'); assert.equal(cheap.calls[0].model, 'claude-haiku-5-5');
+  await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, replyAssistant: true, replyModel: 'haiku' });
+  assert.equal((await suggest(fake([decision()]), { phone: PH }, { uid: 'ch2' })).model, 'haiku', 'the reply model can be changed in the settings document');
+  await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, replyAssistant: true, replyModel: 'claude-opus-5-5' });
+  assert.equal((await suggest(fake([decision()]), { phone: PH }, { uid: 'ch3' })).model, 'sonnet', 'an unknown value falls back to Sonnet');
+  assert.equal((await ai.status({ db, owners: OWNERS }, actor, {}, { nowMs: NOW })).replyModel, 'sonnet');
 });
