@@ -280,6 +280,7 @@
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
         </button>
         <input id="file" type="file" hidden accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
+        <button id="recep-btn" type="button" class="btn btn-ghost btn-sm reply-btn recep-btn" hidden>Receptionist: off</button>
         <button id="reply-btn" type="button" class="btn btn-ghost btn-sm reply-btn" hidden title="An AI draft you can edit. Nothing is sent until you press Send.">Suggest reply</button>
         <textarea id="text" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>
         <button id="send" class="btn btn-primary" type="submit">Send</button>
@@ -490,6 +491,7 @@
     <label class="as-check as-check-sub"><input id="as-set-terms" type="checkbox"> <span>I have checked the AI provider's data terms (retention, training, eligibility) and accept them for customer data.</span></label>
     <div class="as-actions">
       <label class="as-check"><input id="as-set-reply" type="checkbox"> <span>Reply suggestions: a "Suggest reply" button in WhatsApp chats (you read, edit and send)</span></label>
+      <label class="as-check"><input id="as-set-auto" type="checkbox"> <span>Automatic receptionist: answers by itself, but ONLY in chats you switch it on for (a "Receptionist" button in the chat). Never between midnight and 7:00. Only for the fixed consultation messages; anything else is handed to you.</span></label>
       <label class="as-check"><input id="as-set-actions" type="checkbox"> <span>AI actions: let the assistant PREPARE changes for my approval</span></label>
       <div id="as-set-kinds" class="as-kinds"><label class="as-check as-check-sub"><input id="as-set-kind-customerNote" data-kind="customerNote" type="checkbox"> <span>Customer notes</span></label><label class="as-check as-check-sub"><input id="as-set-kind-projectUpdate" data-kind="projectUpdate" type="checkbox"> <span>Project updates (checklist, installation date, notes)</span></label></div>
       <p id="as-set-actions-hint" class="hint">Nothing is saved until you press Approve on the preview it shows. Only the person who asked can approve.</p>

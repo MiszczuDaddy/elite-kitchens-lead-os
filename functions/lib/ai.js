@@ -45,7 +45,7 @@ const num = (v, lo, hi, fallback) => (typeof v === 'number' && Number.isFinite(v
 async function loadSettings(db) {
   const s = await db.doc('aiSettings/current').get(), d = s.exists ? s.data() : {};
   return { ...DEFAULTS, enabled: d.enabled === true, customerDataApproved: d.customerDataApproved === true,
-    replyAssistant: d.replyAssistant === true, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
+    replyAssistant: d.replyAssistant === true, autoReply: d.autoReply === true, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
     monthlyCapEur: num(d.monthlyCapEur, 0, 1000, DEFAULTS.monthlyCapEur), dailyCapEur: num(d.dailyCapEur, 0, 1000, DEFAULTS.dailyCapEur),
     defaultModel: modelKey(d.defaultModel) || DEFAULTS.defaultModel, replyModel: modelKey(d.replyModel) || 'sonnet',
     maxOutputTokens: num(d.maxOutputTokens, 64, 4096, DEFAULTS.maxOutputTokens), prices: { ...DEFAULTS.prices, ...(d.prices && typeof d.prices === 'object' ? d.prices : {}) },
@@ -60,7 +60,7 @@ function onlyKeys(data, allowed) {
 }
 // Staff change the switch and the caps from the screen. The data gate needs an explicit confirmation that the provider's data terms were checked.
 async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.now() } = {}) {
-  onlyKeys(data, ['enabled', 'monthlyCapEur', 'dailyCapEur', 'customerDataApproved', 'confirmDataTerms', 'actionsEnabled', 'actionKinds', 'replyAssistant']);
+  onlyKeys(data, ['enabled', 'monthlyCapEur', 'dailyCapEur', 'customerDataApproved', 'confirmDataTerms', 'actionsEnabled', 'actionKinds', 'replyAssistant', 'autoReply']);
   const patch = {};
   if ('enabled' in data) { if (typeof data.enabled !== 'boolean') throw bad('Switch must be on or off.'); patch.enabled = data.enabled; }
   for (const k of ['monthlyCapEur', 'dailyCapEur']) if (k in data) { if (typeof data[k] !== 'number' || !Number.isFinite(data[k]) || data[k] < 0 || data[k] > 200) throw bad('A spending cap must be between 0 and 200 euro.'); patch[k] = Math.round(data[k] * 100) / 100; }
@@ -74,6 +74,12 @@ async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.n
     if (typeof data.replyAssistant !== 'boolean') throw bad('Reply suggestions must be on or off.');
     if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can change reply suggestions.');
     patch.replyAssistant = data.replyAssistant;
+  }
+  // R3: the receptionist's master switch. On its own it replies to nobody: each chat also has to be switched on (setReceptionist). Owner only.
+  if ('autoReply' in data) {
+    if (typeof data.autoReply !== 'boolean') throw bad('Automatic replies must be on or off.');
+    if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can change automatic replies.');
+    patch.autoReply = data.autoReply;
   }
   if ('actionsEnabled' in data || 'actionKinds' in data) {
     if ('actionsEnabled' in data && typeof data.actionsEnabled !== 'boolean') throw bad('AI actions must be on or off.');
@@ -147,7 +153,7 @@ async function status({ db, model, owners }, actor, data, { nowMs = Date.now() }
   return { enabled: s.enabled, customerDataApproved: s.customerDataApproved, monthlyCapEur: s.monthlyCapEur, dailyCapEur: s.dailyCapEur, monthSpentEur: Math.round((mm.costEur || 0) * 100) / 100, daySpentEur: Math.round((dd.costEur || 0) * 100) / 100,
     monthCalls: mm.calls || 0, keyConfigured: !!model, month: monthId(nowMs), defaultModel: s.defaultModel, replyModel: s.replyModel,
     models: Object.entries(MODELS).map(([key, m]) => ({ key, label: m.label, id: m.id, ready: modelReady(check, key), reason: (check[key] && check[key].ok === false && check[key].reason) || null, checkedAt: check[key] && check[key].at && check[key].at.toMillis ? check[key].at.toMillis() : null })),
-    replyAssistant: s.replyAssistant, actions: { enabled: s.actionsEnabled, kinds: s.actionKinds, labels: A.KINDS }, canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
+    replyAssistant: s.replyAssistant, autoReply: s.autoReply, actions: { enabled: s.actionsEnabled, kinds: s.actionKinds, labels: A.KINDS }, canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
 }
 
 // ---- the model interface: complete({ model, system, messages, tools, maxTokens }) -> { text, toolCalls, stopReason, usage } ----
@@ -473,9 +479,29 @@ async function dismissConsult({ db }, actor, data) {
   });
 }
 
+// R3: switch the receptionist on or off for ONE chat (the owner picks a test customer this way). Owner only; no model, nothing sent. Switching it on starts a fresh page: only messages the customer
+// sends AFTER this moment are ever answered, and any earlier hand-over or pause is cleared. Switching it off keeps the record of what it did.
+async function setReceptionist({ db, owners }, actor, data, { nowMs = Date.now() } = {}) {
+  onlyKeys(data, ['phone', 'on']);
+  const phone = normalizePhone(typeof data.phone === 'string' ? data.phone : '');
+  if (!CUSTOMER_ID.test(phone)) throw bad('Missing customer.');
+  if (typeof data.on !== 'boolean') throw bad('Say whether the receptionist is on or off.');
+  if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can switch the receptionist on or off for a customer.');
+  const ref = db.doc('conversations/' + phone);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'Customer not found.');
+    tx.update(ref, data.on
+      ? { receptionist: { on: true, at: Timestamp.fromMillis(nowMs), by: actor.id, paused: null, handledMs: 0, count: 0, day: null } }
+      : { 'receptionist.on': false, 'receptionist.offAt': Timestamp.fromMillis(nowMs), 'receptionist.offBy': actor.id });
+  });
+  await db.collection('auditLog').add({ action: 'receptionist', on: data.on, by: actor.id, at: Timestamp.fromMillis(nowMs), phoneTail: phone.slice(-4) });
+  return { ok: true, on: data.on };
+}
+
 // The Approve / Reject buttons. No model is involved: aiActions decides everything; this only loads the switches.
 async function decideProposal({ db }, actor, data, { uid, nowMs = Date.now() } = {}) {
   return A.decide({ db }, actor, uid || actor.id, data, { nowMs }, await loadSettings(db));
 }
 
-module.exports = { suggestReply, draftOutcome, dismissConsult, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };
+module.exports = { suggestReply, draftOutcome, dismissConsult, setReceptionist, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };

@@ -88,7 +88,7 @@ window.PUSH = (() => {
       (e) => { $('notif-summary').textContent = 'Cannot load the measurements: ' + errText(e); });
   }
   function unlistenEvents() { if (P.unsubEvents) { P.unsubEvents(); P.unsubEvents = null; } P.events = []; }
-  const KIND = { message: 'WhatsApp', lead: 'Lead', test: 'Test' }, PLAT = { windows: 'Windows', android: 'Android', other: 'Other' };
+  const KIND = { message: 'WhatsApp', lead: 'Lead', test: 'Test', handover: 'Handover' }, PLAT = { windows: 'Windows', android: 'Android', other: 'Other' };
   const clock = (ms) => (ms ? new Intl.DateTimeFormat('en-IE', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', day: 'numeric', month: 'short' }).format(new Date(ms)) : '');
   function renderSpeed() {
     const rows = M.rowsOfAll(P.events), sums = M.summarize(rows), box = $('notif-summary');

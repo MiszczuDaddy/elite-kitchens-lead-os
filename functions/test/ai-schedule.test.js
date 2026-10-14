@@ -14,6 +14,7 @@ test('the scheduling lines are fixed and contain no promise, no date, no availab
     ask_next_week: 'Would any day next week suit you for a home consultation?',
     ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
     acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+    asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
     change_ask: 'No problem, would any day next week suit you better?',
     no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.' });
   assert.equal(S.MAX_ASKS, 2);
@@ -45,6 +46,11 @@ test('the summary for the person who books it: the real dates, the days, the tim
   assert.equal(d({ anyDay: true }).text, 'any day'); assert.equal(d({ times: 'mornings' }).text, 'mornings'); assert.equal(d({ days: ['monday'] }).text, 'Monday', 'no week known: no invented date');
   assert.equal(d({ weeks: 'other', text: 'sometime in November' }).text, ''); assert.equal(d({ weeks: 'other', times: 'evenings', text: 'sometime in November' }).customerWords, 'sometime in November');
   assert.equal(S.describe(null, TUE), null); assert.equal(S.describe(S.cleanPreference({ text: 'maybe' }), TUE), null);
+});
+
+test('asked whether it is a person or an AI: one honest line (written by code, never by the model), handed over, whether or not a consultation is booked', () => {
+  for (const booked of [false, true]) { const p = S.plan({ decision: dec({ wantsConsultation: false, handover: { needed: true, reason: 'asked if AI' }, reply: 'No, I am Sean' }), consult: null, messages: [], booked, nowMs: TUE }); assert.deepEqual([p.step, p.reply, p.handover.needed, p.handover.reason], ['asked_ai', S.LINES.asked_ai, true, 'asked if AI']); assert.match(p.reply, /automated assistant/); assert.doesNotMatch(p.reply, /Sean/); }
+  assert.equal(S.advance(null, 'asked_ai', null, 1), null);
 });
 
 test('changing a booked consultation: ask about next week once; if they already said when, or we already asked, only pass it on; never today or tomorrow', () => {

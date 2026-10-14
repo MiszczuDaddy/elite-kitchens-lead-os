@@ -86,6 +86,20 @@ Later stages (not built): appointments (9.2b), quote changes with the quote engi
 * **Deploy:** backend = the `ai` stage (8 functions now; `aiDismissConsult` is new, nothing existing changes), then `live`.
 * Tests: `functions/test/consult-model.test.js` (5, pure), the schedule and reply tests (R2b flag, "Not needed", input checks, no sending), `test-ui/assistant.e2e.js` (card, count, filter, Book appointment on the right customer and day, clash line, auto-clear, "Not needed", phone layout).
 
+## R3: the automatic receptionist (test stage: only chats the owner switches on)
+**Branch `phase-9-r3-receptionist`: not merged, not deployed.** The owner picks a test customer in the Inbox and switches the receptionist on for that chat; everyone else is untouched. "Everyone" mode is NOT built (it will need its own approval).
+* **Off unless all of these are on:** the AI, real customer data, reply suggestions, **Automatic receptionist** (Assistant > Settings, owner only) AND the chat's own **Receptionist** button (owner only, in the chat next to "Suggest reply": off / on / handed to you).
+* **An every-minute check** (`receptionistSweep`, a scheduled job; not callable from outside; the WhatsApp webhook is untouched) reads ONLY the chats switched on (`conversations.receptionist.on`). It asks the same reply suggestion staff get (same switches, budget, checks) and sends the answer only if every rule holds:
+  * only customer messages sent AFTER the chat was switched on; at least 45 seconds after the last one (a burst is answered once); never between **midnight and 7:00 Irish time** (it waits and answers after 7:00); WhatsApp's 24-hour window open;
+  * never after a person sent anything in the chat since it was switched on (the chat then stays the owner's until he switches it on again), never after a hand-over, at most **6 automatic messages a customer a day**, never twice for one customer message (claim first, as for staff sends; a short per-chat lock stops overlapping checks);
+  * only the **fixed lines** written by code: ask about next week, ask about the following week, "I'll pass that on" (leaves the consultation request for the owner), "no preference", the **honest line** when the customer asks if they are talking to an AI ("I'm an automated assistant for Elite Kitchens, but I'll pass this on to the team and they'll be in touch."), and the "would any day next week suit you better?" question for a customer changing a booked consultation. The model never writes any of these;
+  * anything else (complaint, price, a plain "hi", a draft with any warning, a refused or failed AI call, a failed send) is **not answered**: the chat is handed over and the owner gets a push ("A chat is waiting for you", new notification kind `handover`: no name, no words). A failing AI call is tried 3 times first.
+* **Labelled:** automatic messages show a "Receptionist" tag in the chat (`auto: true` on the message).
+* **Never:** books, edits, cancels, sends templates or media, changes customers, quotes or projects. The owner books and confirms himself (request card, Inbox count and Book appointment as in R2b).
+* **Stopping it:** the chat button, the master switch, or the AI kill switch: within a minute. Disclosure: the receptionist does not introduce itself as an AI (the owner's choice, see above); it tells the truth when asked.
+* **Deploy:** `ai` stage (adds `setReceptionist`), then the new `receptionist` stage (`receptionistSweep` + `pushReceipt`), then `live`.
+* Tests: `functions/test/ai-receptionist.test.js` (12), the schedule tests, `test-ui/assistant.e2e.js` (button, label, master switch).
+
 ## Safety rules (each one has a test)
 | Rule | How |
 |---|---|

@@ -22,6 +22,7 @@ self.addEventListener('activate', (event) => {
 const WORDS = {
   message: ['New WhatsApp message', 'Open Elite OS to read it.'],
   lead: ['New lead', 'Open Elite OS to see the details.'],
+  handover: ['A chat is waiting for you', 'The receptionist passed a chat to you. Open Elite OS.'],
   test: ['Test notification', 'If you can read this, notifications work on this device.'],
 };
 // Tell the server the moment this device woke up (and when the notification was clicked), so the real delivery time can be measured. The server's own clock at the moment the report

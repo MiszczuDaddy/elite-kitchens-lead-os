@@ -655,13 +655,13 @@ test('Phase 7: the projects stage names exactly the seven new project functions 
 test('Phase 9: the ai stage names exactly the three new callables (each bound to the Anthropic secret), checks the key before asking, touches no existing function, and the screen waits for them', () => {
   const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
   const m = /^AI_NEW="([^"]*)"/m.exec(s); assert.ok(m); const fresh = m[1].trim().split(/\s+/);
-  assert.deepEqual([...fresh].sort(), ['aiChat', 'aiCheckModels', 'aiDecide', 'aiDismissConsult', 'aiDraftOutcome', 'aiStatus', 'aiSuggestReply', 'setAiSettings']);
+  assert.deepEqual([...fresh].sort(), ['aiChat', 'aiCheckModels', 'aiDecide', 'aiDismissConsult', 'aiDraftOutcome', 'aiStatus', 'aiSuggestReply', 'setAiSettings', 'setReceptionist']);
   assert.match(s, /^AI_FUNCS="\$AI_NEW"/m);
   const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
   assert.match(idx, /^exports\.aiDecide\s*=\s*onCall\(\{\}/m, 'aiDecide applies approved changes and needs no model key');
   assert.match(idx, /^exports\.aiDraftOutcome\s*=\s*onCall\(\{\}/m, 'aiDraftOutcome only records an outcome and needs no model key');
   assert.match(idx, /^exports\.aiDismissConsult\s*=\s*onCall\(\{\}/m, 'aiDismissConsult only clears a waiting flag and needs no model key');
-  for (const f of fresh.filter((x) => !['aiDecide', 'aiDraftOutcome', 'aiDismissConsult'].includes(x))) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\]', 'm'), f + ' is not a callable bound to the Anthropic secret in functions/index.js');
+  for (const f of fresh.filter((x) => !['aiDecide', 'aiDraftOutcome', 'aiDismissConsult', 'setReceptionist'].includes(x))) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\(\\{ secrets: \\[ANTHROPIC_API_KEY\\]', 'm'), f + ' is not a callable bound to the Anthropic secret in functions/index.js');
   const i = s.indexOf('\n  ai)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));
   assert.match(stage, /deploy_functions \$AI_FUNCS/); assert.match(stage, /for f in \$AI_NEW; do[\s\S]*add-iam-policy-binding[\s\S]*done/); assert.match(stage, /check_reachable "\$AI_FUNCS"/);
   assert.ok(stage.indexOf('ANTHROPIC_API_KEY is not set yet') < stage.indexOf('confirm "') && stage.indexOf('check_routing') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'key and checks first, then the question, then the deploy');
@@ -670,6 +670,18 @@ test('Phase 9: the ai stage names exactly the three new callables (each bound to
   assert.ok(stage.indexOf('confirm "') < stage.indexOf('setting "$ENVF" AI_OWNER_EMAILS') && stage.indexOf('setting "$ENVF" AI_OWNER_EMAILS') < stage.indexOf('deploy_functions'), 'nothing is written before the yes');
   const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j));
   assert.match(live, /serving_revision aichat[\s\S]*Deploy the AI assistant backend first/); assert.ok(live.indexOf('aichat') < live.indexOf('confirm "'));
+});
+
+test('Phase 9 R3: the receptionist stage deploys only the every-minute check and pushReceipt, needs the AI backend first, asks before deploying, never makes the check public, and the screen waits for it', () => {
+  const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(s, /^REC_FUNCS="receptionistSweep pushReceipt"/m);
+  const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
+  assert.match(idx, /^exports\.receptionistSweep\s*=\s*onSchedule\(/m, 'the check is a scheduled job, not a callable'); assert.match(idx, /^exports\.setReceptionist\s*=\s*onCall\(\{\}/m);
+  const i = s.indexOf('\n  receptionist)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));
+  assert.match(stage, /serving_revision setreceptionist[\s\S]*Deploy the AI backend first/); assert.match(stage, /deploy_functions \$REC_FUNCS/);
+  assert.equal(/add-iam-policy-binding/.test(stage), false, 'a scheduled job is never opened to the public'); assert.ok(stage.indexOf('serving_revision') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'checks first, then the question, then the deploy');
+  const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j)); assert.match(live, /serving_revision receptionistsweep[\s\S]*Deploy the receptionist backend first/); assert.ok(live.indexOf('receptionistsweep') < live.indexOf('confirm "'));
+  assert.match(idx, /receptionistSweep[\s\S]{0,200}secrets: \[\.\.\.SECRETS, ANTHROPIC_API_KEY\]/, 'it holds the WhatsApp and Anthropic secrets');
 });
 
 test('the "mail off" stage stops on a pinned function before it asks anything, and asks as usual when nothing is pinned', () => {

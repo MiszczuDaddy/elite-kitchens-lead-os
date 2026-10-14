@@ -207,6 +207,7 @@ window.ASSIST = (() => {
     $('as-set-spent').textContent = M.eur(s.monthSpentEur || 0) + ' this month, ' + M.eur(s.daySpentEur || 0) + ' today';
     const ag = M.actionsGate(s), act = s.actions || {};
     $('as-set-reply').checked = !!s.replyAssistant; $('as-set-reply').disabled = ag.disabled;
+    $('as-set-auto').checked = !!s.autoReply; $('as-set-auto').disabled = ag.disabled;
     $('as-set-actions').checked = !!act.enabled; $('as-set-actions').disabled = ag.disabled;
     for (const cb of $('as-set-kinds').querySelectorAll('input')) { cb.checked = !!(act.kinds && act.kinds[cb.dataset.kind]); cb.disabled = ag.disabled; }
     if (ag.hint) $('as-set-actions-hint').textContent = ag.hint;
@@ -238,6 +239,7 @@ window.ASSIST = (() => {
     const act = s.actions || {}, kinds = {};
     for (const cb of $('as-set-kinds').querySelectorAll('input')) kinds[cb.dataset.kind] = cb.checked;
     if (!$('as-set-reply').disabled && $('as-set-reply').checked !== !!s.replyAssistant) patch.replyAssistant = $('as-set-reply').checked;
+    if (!$('as-set-auto').disabled && $('as-set-auto').checked !== !!s.autoReply) patch.autoReply = $('as-set-auto').checked;
     if (!$('as-set-actions').disabled) {
       if ($('as-set-actions').checked !== !!act.enabled) patch.actionsEnabled = $('as-set-actions').checked;
       if (Object.keys(kinds).some((k) => kinds[k] !== !!(act.kinds && act.kinds[k]))) patch.actionKinds = kinds;

@@ -13,6 +13,7 @@ const LINES = {
   ask_next_week: 'Would any day next week suit you for a home consultation?',
   ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
   acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+  asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
   change_ask: 'No problem, would any day next week suit you better?',
   no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.',
 };
@@ -80,6 +81,8 @@ function opener(text, hasOutbound) {
 //   step ask_next_week / ask_following_week / acknowledge / no_preference     a fixed line; the last two hand over
 function plan({ decision, consult, messages, booked, nowMs }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
+  // A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself).
+  if (decision.handover && decision.handover.needed && /asked if ai/i.test(decision.handover.reason || '')) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
   // A customer who already has a consultation booked and wants it changed: a person moves the booking. We ask about next week once; if they already said when (or we already asked), we only pass it on.
   if (booked && decision.handover && decision.handover.needed && /change booking/i.test(decision.handover.reason || '')) {
     const given = describe(decision.schedule && decision.schedule.preference, nowMs), asked = (messages || []).some((m) => m.direction === 'out' && /any day next week suit you better/i.test(m.body || ''));

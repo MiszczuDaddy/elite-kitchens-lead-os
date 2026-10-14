@@ -31,6 +31,8 @@
 #                                                projects and renders) and the 7 new project functions. Run it BEFORE "live" (the screen); screens that do not know projects keep working.
 #   ./scripts/deploy-quote-sending.sh ai         Phase 9 (AI assistant) backend: the assistant functions (aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult). Needs the ANTHROPIC_API_KEY secret first; asks for the owner account (the only one that may switch real customer data on). Switched OFF until the owner
 #                                                switches it on in the screen. Run it BEFORE "live". No existing function is touched.
+#   ./scripts/deploy-quote-sending.sh receptionist  Phase 9 R3: the automatic receptionist's every-minute check (receptionistSweep) and pushReceipt. Run it after "ai" and BEFORE "live". It does nothing until the owner switches
+#                                                it on in Assistant > Settings AND for a chat. Switch it off there at any time.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
@@ -61,15 +63,16 @@ PROJECT_FUNCS="$PROJECT_NEW $PROJECT_CHANGED"
 PUSH_NEW="registerPushDevice unregisterPushDevice sendTestPush pushReceipt"                                                  # Phase 8: new; pushReceipt is reached through a Hosting rewrite
 PUSH_CHANGED="webhook leadIntake"                                                                                           # Phase 8: they now send a push (never allowed to break or hold up the message / lead)
 PUSH_FUNCS="$PUSH_NEW $PUSH_CHANGED"
-AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
+AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
 AI_FUNCS="$AI_NEW"
+REC_FUNCS="receptionistSweep pushReceipt"                                                      # Phase 9 R3: the every-minute receptionist check (not callable from outside) and pushReceipt (it now knows the "handover" notification)
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,39p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,41p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -338,7 +341,18 @@ case "${1:-}" in
       gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
     done
     check_reachable "$AI_FUNCS"
-    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult --region $REGION --project $PROJECT (nothing else depends on them)."
+    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist --region $REGION --project $PROJECT (nothing else depends on them)."
+    ;;
+  receptionist)
+    [ -f functions/lib/aiReceptionist.js ] || { echo "This checkout has no Phase 9 R3 (receptionist) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
+    [ -n "$(serving_revision setreceptionist)" ] || { echo "Deploy the AI backend first: $0 ai"; exit 1; }
+    check_settings; check_access
+    echo "Functions: $REC_FUNCS. receptionistSweep is NEW and runs every minute; it cannot be called from outside. pushReceipt only learns the new 'handover' notification."
+    echo "It answers NOBODY until the owner switches 'Automatic receptionist' on in Assistant > Settings AND switches the Receptionist on for a chat. It never runs between midnight and 7:00."
+    confirm "Deploy the receptionist check to the LIVE project?"
+    install
+    deploy_functions $REC_FUNCS
+    echo "Done. Next: $0 live (the screen). To stop it: switch 'Automatic receptionist' off in Assistant > Settings, or firebase functions:delete receptionistSweep --region $REGION --project $PROJECT"
     ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }
@@ -375,7 +389,8 @@ case "${1:-}" in
     # Phase 7: a screen that has Projects calls functions that must exist first (the screen would show errors otherwise).
     if [ -f functions/lib/projects.js ] && [ -z "$(serving_revision createproject)" ]; then echo "Deploy the Projects backend first: $0 projects"; exit 1; fi
     if [ -f functions/lib/push.js ] && [ -z "$(serving_revision pushreceipt)" ]; then echo "Deploy the push notifications backend first: $0 push"; exit 1; fi        # Phase 8: the screen and the /pushReceipt rewrite need these functions
-    if [ -f functions/lib/ai.js ] && [ -z "$(serving_revision aichat)" ]; then echo "Deploy the AI assistant backend first: $0 ai"; exit 1; fi        # Phase 9: the Assistant screen calls these functions
+    if [ -f functions/lib/ai.js ] && [ -z "$(serving_revision aichat)" ]; then echo "Deploy the AI assistant backend first: $0 ai"; exit 1; fi
+    if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions
     no_test_folders
     echo "This publishes the screen files of this checkout (the commit shown at the top) to everyone who uses Elite OS. Hosting only: no function, rule or setting changes."
     confirm "Publish the screen to PRODUCTION Hosting? Only with the owner's approval."

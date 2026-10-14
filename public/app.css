@@ -1134,3 +1134,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .a-day-note { margin: 4px 0 0; } .a-day-note.clash { color: var(--err); font-weight: 600; }
 @media (max-width: 899px) { .consult-card { margin: 8px 8px 0; } .consult-actions .btn { min-height: 44px; } .consult-bar { padding: 0 16px 8px; } }
 @media (min-width: 900px) and (max-width: 1279px) { .rail-badge.consult-badge { right: auto; left: 3px; margin-left: 0; } }
+
+/* Phase 9 R3: the per-chat Receptionist switch and the label on automatic messages */
+.recep-btn.on { background: var(--consult-bg); color: #5f3f08; border-color: #e3cf9f; font-weight: 600; }
+.auto-tag { margin: 0 0 3px; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--consult); }

@@ -39,8 +39,9 @@ window.CONSULT = (() => {
     if (r.noPreference) { pref.append(el('div', 'reply-label', 'Preferred days and times'), el('div', 'consult-pref-text', 'None given. They did not say when suits, so please get in touch to arrange a time.')); }
     else { pref.append(el('div', 'reply-label', 'Preferred days and times'), el('div', 'consult-pref-text', r.text)); if (r.customerWords) pref.append(el('div', 'consult-meta', 'Their words: "' + r.customerWords + '"')); }
     const facts = [conv.projectType, conv.location].filter(Boolean).join(' · ');
-    const rows = M.excerpt(S.msgs, 4), more = el('details', 'consult-msgs'); more.open = C.openMsgs; more.ontoggle = () => { C.openMsgs = more.open; };
-    more.append(el('summary', '', 'Latest messages'));
+    const rows = M.excerpt(S.msgs, 4), more = el('details', 'consult-msgs'); more.open = C.openMsgs;
+    const sum = el('summary', '', 'Latest messages'); sum.onclick = () => { C.openMsgs = !more.open; };         // remembered at the click, so a redraw (new message) keeps it open or closed
+    more.append(sum);
     if (rows.length) for (const m of rows) more.append(el('div', 'consult-msg' + (m.mine ? ' mine' : ''), (m.mine ? 'You: ' : 'Customer: ') + m.text)); else more.append(el('div', 'consult-meta', 'No messages loaded yet.'));
     const bar = el('div', 'consult-actions'), book = el('button', 'btn btn-primary btn-sm', 'Book appointment'), no = el('button', 'btn btn-ghost btn-sm', 'Not needed');
     book.type = no.type = 'button'; book.disabled = !window.APPT || !APPT.openBook; no.disabled = C.busy;

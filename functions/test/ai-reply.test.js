@@ -323,7 +323,7 @@ test('R2b: "Not needed" checks its input and only touches the waiting flag', asy
   await rejects(ai.dismissConsult({ db }, actor, { phone: 'abc' }), 'invalid-argument'); await rejects(ai.dismissConsult({ db }, actor, {}), 'invalid-argument'); await rejects(ai.dismissConsult({ db }, actor, { phone: PH, extra: 1 }), 'invalid-argument');
   await rejects(ai.dismissConsult({ db }, actor, { phone: '353800000000' }), 'not-found');
   assert.deepEqual(await ai.dismissConsult({ db }, actor, { phone: PH }), { ok: true, repeat: true }, 'nothing waiting: nothing to clear');
-  const src = fs.readFileSync(path.join(__dirname, '../lib/ai.js'), 'utf8'), fn = src.slice(src.indexOf('async function dismissConsult('), src.indexOf('// The Approve / Reject buttons.'));
+  const src = fs.readFileSync(path.join(__dirname, '../lib/ai.js'), 'utf8'), fn = src.slice(src.indexOf('async function dismissConsult('), src.indexOf('// R3: switch the receptionist'));
   assert.equal(/sendText|sendReply|sendTemplate|wa\.|appointments|complete\(|model/.test(fn), false, 'no message, no booking, no model');
 });
 

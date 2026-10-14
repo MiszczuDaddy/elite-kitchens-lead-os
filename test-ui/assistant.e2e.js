@@ -267,7 +267,7 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await page.click('#list .conv >> text=Brian Byrne'); await page.waitForSelector('#consult-card:not([hidden])');
   let card = await page.locator('#consult-card').innerText();
   assert.match(card, /Consultation request/); assert.match(card, /Waiting for you to book/); assert.match(card, /Kitchen · Malahide/); assert.match(card, /Preferred days and times\nNext week \(Mon 19 Oct to Sun 25 Oct\) · Tuesday 20 Oct · afternoons\nTheir words: "Tuesday afternoon would suit me"/); assert.match(card, /Nothing is booked or confirmed yet/);
-  await page.click('#consult-card summary'); assert.match(await page.locator('#consult-card').innerText(), /Customer: Hi, can someone come and measure up\?/);
+  await page.click('#consult-card summary'); await page.waitForFunction(() => /Customer: Hi, can someone come and measure up/.test(document.getElementById('consult-card').innerText)); assert.match(await page.locator('#consult-card').innerText(), /Customer: Hi, can someone come and measure up\?/);
   await page.screenshot({ path: path.join(SHOTS, 'assistant-consult-card.png') });
   const brianMsgs = async () => (await db.collection(`conversations/${ph.brian}/messages`).get()).size, brianBefore = await brianMsgs();
   const dayFrom = await page.evaluate((k) => CRM.rangeFor('custom', 0, { from: k, to: k }).from, firstDay);
@@ -299,6 +299,28 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
     for (const d of (await db.collection('appointments').get()).docs) await d.ref.delete();
     await seed(ph.brian, { name: 'Brian Byrne', location: 'Malahide' }, 'inbox'); }          // leave the data as the later checks expect it (the booking moved Brian to Booked)
   ok('Consultation requests on a phone: the bar above the list, the card within the screen, no sideways scrolling');
+  // ------------------------------------------------------------------ R3: the automatic receptionist: a master switch in Settings (owner only) and a per-chat button; automatic messages are labelled
+  await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.waitForSelector('#thread:not([hidden])'); await page.evaluate(() => { REPLY.checkedAt = 0; REPLY.onSelect(null); });
+  await page.evaluate((id) => { REPLY.onSelect(id); }, ph.anna); await page.waitForSelector('#reply-btn', { state: 'visible' });
+  assert.equal(await page.locator('#recep-btn').isVisible(), false, 'no Receptionist button while automatic replies are off');
+  await page.evaluate(() => { location.hash = '#assistant'; }); await page.waitForSelector('#assistant', { state: 'visible' });
+  await saveSettings(async () => { assert.equal(await page.locator('#as-set-auto').isChecked(), false); assert.equal(await page.locator('#as-set-auto').isDisabled(), false); await page.check('#as-set-auto'); });
+  for (let i = 0; i < 40 && (await settingsDoc().get()).data().autoReply !== true; i++) await page.waitForTimeout(150);
+  assert.equal((await settingsDoc().get()).data().autoReply, true, 'the owner switched automatic replies on');
+  await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.evaluate(() => { REPLY.checkedAt = 0; REPLY.onSelect(null); }); await page.evaluate((id) => { REPLY.onSelect(id); }, ph.anna); await page.waitForSelector('#recep-btn', { state: 'visible' });
+  assert.equal(await page.locator('#recep-btn').innerText(), 'Receptionist: off');
+  const recOf = async () => (await db.doc('conversations/' + ph.anna).get()).data().receptionist || null;
+  await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: on'); const on1 = await recOf(); assert.deepEqual([on1.on, on1.paused, on1.count], [true, null, 0]); assert.equal(await page.locator('#recep-btn.on').count(), 1);
+  assert.equal((await db.collection('appointments').get()).size, 0, 'switching it on books nothing');
+  await db.doc('conversations/' + ph.anna).update({ 'receptionist.paused': 'consultation passed to you' }); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: handed to you');
+  await db.collection(`conversations/${ph.anna}/messages`).add({ direction: 'out', type: 'text', body: 'Hi Anna, it is Thomas here.', status: 'sent', createdAt: Timestamp.fromMillis(Date.now() - 1000) });
+  await db.collection(`conversations/${ph.anna}/messages`).add({ direction: 'out', type: 'text', body: 'Perfect, I will pass that on to the team.', auto: true, status: 'sent', createdAt: Timestamp.now() });
+  await page.waitForSelector('#msgs .m.out .auto-tag'); assert.match(await page.locator('#msgs .m.out .auto-tag').last().innerText(), /^receptionist$/i, 'an automatic message is labelled'); assert.equal(await page.locator('#msgs .m.out').count() - await page.locator('#msgs .m.out .auto-tag').count() >= 1, true, 'a person\'s own messages carry no label');
+  await page.screenshot({ path: path.join(SHOTS, 'assistant-receptionist.png') });
+  await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: on'); assert.equal((await recOf()).paused, null, 'switching it on again starts afresh');
+  await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: off'); assert.equal((await recOf()).on, false);
+  await db.doc('aiSettings/current').update({ autoReply: false }); await page.evaluate(() => { REPLY.checkedAt = 0; return REPLY.onSelect(REPLY.phone); }); await page.waitForFunction(() => document.getElementById('recep-btn').hidden);
+  ok('Receptionist: master switch in Settings (owner), per-chat button (off / on / handed to you), automatic messages labelled, hidden when automatic replies are off, books nothing');
   await page.evaluate(() => { location.hash = '#assistant'; }); await page.waitForSelector('#assistant', { state: 'visible' });
   for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
 

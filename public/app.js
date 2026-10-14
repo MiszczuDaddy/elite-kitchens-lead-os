@@ -243,6 +243,7 @@ function renderList() {
   $('total-unread').hidden = !n; $('total-unread').textContent = n;
   $('rail-badge').hidden = !n; $('rail-badge').textContent = n > 9 ? '9+' : n;
   if (window.CONSULT) CONSULT.render();
+  if (window.REPLY && REPLY.drawRecep) REPLY.drawRecep();
   document.title = (n ? `(${n}) ` : '') + 'Inbox · Elite Kitchens';
   for (const button of $('status-filters').querySelectorAll('button')) {
     const status = button.dataset.status;
@@ -583,6 +584,7 @@ function buildBubble(m) {
   }
   const placeholder = /^\[[a-z]+\]$/.test(m.body || '');
   if (m.body && !(isMedia && placeholder)) b.append(el('div', 'body', m.body));
+  if (out && m.auto) b.append(el('div', 'auto-tag', 'Receptionist'));                      // Phase 9 R3: sent by the automatic receptionist, not by a person
   const meta = el('div', 'meta');
   meta.append(el('span', null, timeOf(m)), el('span', 'tickwrap'));
   b.append(meta);
@@ -600,7 +602,7 @@ function patchTick(b, m) {
 // Keep each message's element between renders (a playing voice note must not restart when a new message arrives).
 const nodeCache = new Map();
 let cacheFor = null;
-const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename], m.quote && [m.quote.ref, m.quote.version]]); };
+const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename], m.quote && [m.quote.ref, m.quote.version], m.auto === true]); };
 
 function renderMessages() {
   const box = $('msgs');
