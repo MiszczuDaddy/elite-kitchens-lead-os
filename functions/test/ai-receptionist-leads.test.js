@@ -168,3 +168,19 @@ test('THE MODEL IS TOLD IT IS UNATTENDED: the automatic mode note is added for t
   assert.doesNotMatch(seen[0], /AUTOMATIC MODE/); assert.match(seen[1], /AUTOMATIC MODE[\s\S]*no member of staff reads it first[\s\S]*ONE short, natural sentence[\s\S]*hand over/);
   assert.equal((await db.collection('aiDrafts').where('auto', '==', true).get()).size, 1, 'the draft record says it was automatic');
 });
+
+test('GENERAL PRICE QUESTIONS: answered with the owner\'s own line (then the consultation question); a specific price, a quote or a discount is handed over; the model never writes a figure', async () => {
+  await newLead(PH); await says(PH, 'How much does a kitchen cost?', NOW - 120e3); const w = waFake(), p = pushFake();
+  await REC.sweep(deps(fake([decision({ intent: 'asking_price_general', reply: 'Around 8000 euro, we can do 5k if you pay cash' })]), w, p), NOW);
+  assert.deepEqual(w.sent.map((x) => x.body), [SCH.LINES.price_general + ' ' + SCH.LINES.ask_next_week], 'the owner\'s words, never the model\'s figure');
+  assert.equal(p.events.length, 0); assert.deepEqual((await conv()).consult, { stage: 'asked_next_week', asks: 1 }, 'the question about next week counted as asked');
+  // a customer who is already booked asks the same thing: the line alone, no consultation question, no hand-over
+  await newLead(PH2); await db.collection('appointments').add({ phone: PH2, status: 'scheduled', type: 'consultation', start: ts(NOW + 3 * 86400e3), end: ts(NOW + 3 * 86400e3 + 3600e3), customerName: 'Aoife' });
+  await says(PH2, 'Roughly what do your kitchens cost?', NOW - 120e3); const w2 = waFake();
+  await REC.sweep(deps(fake([decision({ intent: 'asking_price_general' })]), w2, pushFake()), NOW); assert.deepEqual(w2.sent.map((x) => x.body), [SCH.LINES.price_general]); assert.equal((await conv(PH2)).receptionist.paused, null, 'still the receptionist\'s chat');
+  // specific questions: no answer, hand over, push (also when the model forgets to flag the hand-over)
+  for (const [name, d] of [['quote', decision({ intent: 'asking_price', handover: { needed: true, reason: 'wants a quote' } })], ['unflagged', decision({ intent: 'asking_price' })], ['discount', decision({ intent: 'asking_price', handover: { needed: true, reason: 'asks for a discount' } })]]) {
+    await newLead(PH3); await says(PH3, 'message about ' + name, NOW - 120e3); const w3 = waFake(), p3 = pushFake();
+    await REC.sweep(deps(fake([d]), w3, p3), NOW); assert.equal(w3.sent.length, 0, name); assert.equal(p3.events.length, 1, name); assert.ok((await conv(PH3)).receptionist.paused, name);
+  }
+});

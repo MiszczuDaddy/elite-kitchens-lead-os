@@ -21,7 +21,7 @@ const TZ = 'Europe/Dublin';
 const DEADLINE_MS = 100000;                    // no new model call is started once a question has run this long (the function itself may run 240 s; one call is limited to 40 s, 3 tries)
 const MAX_STEPS = 6, MAX_TOOLS_PER_STEP = 4, MAX_MESSAGE = 2000, MAX_HISTORY = 12, MAX_HISTORY_CHARS = 12000, MAX_TURN_CHARS = 4000;
 const RATE_PER_MINUTE = 8, RATE_PER_HOUR = 60;
-const LEAD_INTENTS = ['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling'];        // R3: what the receptionist may treat as an ordinary enquiry
+const LEAD_INTENTS = ['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general'];        // R3: what the receptionist may treat as an ordinary enquiry
 const CUSTOMER_ID = /^\d{9,15}$/, QUOTE_ID = /^q_[0-9a-f]{24}$/, PROJECT_ID = /^[pm]_[0-9a-f]{24}$/;
 
 // ---- settings: everything that can stop or limit the AI. A missing document means OFF. ----

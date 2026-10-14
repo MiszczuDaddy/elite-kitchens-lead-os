@@ -15,6 +15,20 @@
   }
   // The date the booking form should open on: the first day they named, but never in the past (then the form uses its own default).
   const openDate = (firstDate, todayKey) => (typeof firstDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(firstDate) && firstDate >= todayKey ? firstDate : null);
+  // The time the booking form opens on, from what they said about the time of day: "after 3pm" -> 15:00, "4-6pm" -> 16:00, "mornings" -> 10:00, "afternoons" -> 14:00, "evenings" -> 18:00. null = the form's normal default.
+  const pad2 = (n) => String(n).padStart(2, '0');
+  function openTime(times) {
+    const t = String(times == null ? '' : times).toLowerCase();
+    if (!t.trim()) return null;
+    const m = /(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/.exec(t);
+    if (m) {
+      let h = Number(m[1]); const min = Math.floor((m[2] ? Number(m[2]) : 0) / 15) * 15, ap = m[3] ? m[3][0] : '';
+      if (h <= 12) { if (ap === 'p' && h < 12) h += 12; else if (ap === 'a' && h === 12) h = 0; else if (!ap && h >= 1 && h <= 6) h += 12; }          // "after 3" means 3 pm
+      if (h >= 6 && h <= 21) return pad2(h) + ':' + pad2(min);
+    }
+    if (/morning/.test(t)) return '10:00'; if (/lunch/.test(t)) return '13:00'; if (/afternoon/.test(t)) return '14:00'; if (/evening|after work/.test(t)) return '18:00';
+    return null;
+  }
   // The request for one conversation, or null when nothing is waiting. `booked` is a Set of phones (null while appointments are still loading: then nothing is shown yet).
   function requestOf(conv, booked, todayKey) {
     const c = conv && conv.consult;
@@ -24,7 +38,7 @@
     const noPreference = !p || !p.summary;
     return {
       phone: String(conv.id), name: conv.name || '', noPreference, since: ms(c.at),
-      text: noPreference ? '' : String(p.summary), customerWords: noPreference ? '' : clip(p.text, 160), bookOn: noPreference ? null : openDate(p.firstDate, todayKey),
+      text: noPreference ? '' : String(p.summary), customerWords: noPreference ? '' : clip(p.text, 160), bookOn: noPreference ? null : openDate(p.firstDate, todayKey), bookAt: noPreference ? null : openTime(p.times),
     };
   }
   const countOf = (convs, booked, todayKey) => (booked ? (convs || []).filter((c) => requestOf(c, booked, todayKey)).length : 0);
@@ -47,5 +61,5 @@
     const line = (a) => `${hm(ms(a.start))}–${hm(ms(a.end))}${a.customerName ? ' ' + a.customerName : ''}`;
     return clash.length ? { text: 'Clashes with: ' + clash.map(line).join(', ') + '.', clash: true } : { text: 'Already booked that day: ' + list.map(line).join(', ') + '.', clash: false };
   }
-  return { ms, bookedPhones, openDate, requestOf, countOf, excerpt, dayNote };
+  return { ms, bookedPhones, openDate, openTime, requestOf, countOf, excerpt, dayNote };
 });

@@ -45,7 +45,7 @@ window.CONSULT = (() => {
     if (rows.length) for (const m of rows) more.append(el('div', 'consult-msg' + (m.mine ? ' mine' : ''), (m.mine ? 'You: ' : 'Customer: ') + m.text)); else more.append(el('div', 'consult-meta', 'No messages loaded yet.'));
     const bar = el('div', 'consult-actions'), book = el('button', 'btn btn-primary btn-sm', 'Book appointment'), no = el('button', 'btn btn-ghost btn-sm', 'Not needed');
     book.type = no.type = 'button'; book.disabled = !window.APPT || !APPT.openBook; no.disabled = C.busy;
-    book.onclick = () => { if (window.APPT && APPT.openBook) APPT.openBook(r.phone, r.bookOn); };
+    book.onclick = () => { if (window.APPT && APPT.openBook) APPT.openBook(r.phone, r.bookOn, r.bookAt); };
     no.onclick = () => dismiss(r.phone);
     bar.append(book, no);
     box.replaceChildren(head, ...(facts ? [el('div', 'consult-meta', facts)] : []), pref, more, el('p', 'consult-note', 'Nothing is booked or confirmed yet. You choose the time; the customer hears nothing until you message them.'), ...(C.error ? [el('p', 'reply-err', C.error)] : []), bar);

@@ -13,7 +13,7 @@ const MESSAGES = 40, MESSAGE_CHARS = 400, DRAFT_MAX = 700, FACT_MAX = 120;
 const FIELD_LABEL = { name: 'Name', projectType: 'Project', location: 'Area', address: 'Home address', eircode: 'Eircode', budget: 'Budget', timing: 'Preferred time', email: 'Email' };
 const NEW_FACT_FIELDS = Object.keys(FIELD_LABEL);
 const REQUIRED = ['name', 'projectType', 'address', 'timing'];                     // what a home consultation needs; budget and email are helpful, not required
-const INTENTS = ['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price', 'asking_info', 'complaint', 'other'];
+const INTENTS = ['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general', 'asking_price', 'asking_info', 'complaint', 'other'];
 const TZ = 'Europe/Dublin';
 const clip = (s, n) => S.one(s, n);
 
@@ -25,6 +25,7 @@ const SYSTEM = [
   'If the customer wants to change or cancel a consultation that is already booked, reply in one short line asking whether any day next week would suit better (use exactly "No problem, would any day next week suit you better?"; consultations are always arranged for next week, so never say or accept today, tomorrow or any other date), set handover.needed to true with the reason "wants to change booking" (a person changes bookings), and do not mention dates, times or availability.',
   'Examples of the tone (adapt, never copy blindly): "Hi Anna, thanks for getting in touch! What kind of project do you have in mind?" (project not known) / "Hi Anna, thanks for getting in touch. Would any day next week suit you for a home visit?" (kitchen project known, wants a consultation) / "No problem, would the following week suit you?" (next week did not work).',
   'If the project type is already in KNOWN or the customer already said it, NEVER ask what kind of project it is: use it ("your new kitchen") or just move on.',
+  'A GENERAL question about what kitchens cost or the usual price range (for example "how much is a kitchen?", "what are your prices like?") is answered by the SYSTEM with the owner\'s own wording: just set intent to asking_price_general, write no reply about money and do not hand over. For anything more specific (the price of THIS kitchen, a quote, a discount, a deposit or payment, a comparison with another quote) set intent to asking_price and hand over.',
   'Never state or estimate prices, discounts, timelines, availability or process details that are not in the records, and never promise anything. If the customer asks about those, say a member of the team will come back to them, and hand over.',
   'Arranging a consultation is handled by the SYSTEM with fixed wording, not by you. Do NOT write any question or line about days, times, weeks or availability, and never offer, choose, promise or confirm a date or time, never say availability exists, never say anything is booked or confirmed. Your only jobs here: (1) set wantsConsultation to true when the customer is interested in a consultation or home visit, and (2) put what they said about when they are free into schedule.preference (the week counted from TIME NOW, the days, anyDay, a time of day, and their own words). If they have not said, leave the preference empty. In the first message of a conversation you may add a short friendly opener in schedule.opener, with no question. If the customer only wants to arrange a consultation, leave reply empty; use reply for anything else they asked.',
   'If CONSULTATION ALREADY BOOKED shows a date, do not arrange another one: do not ask about days, and do not say you will check availability. Answer what the customer actually said, or briefly refer to the booked visit.',
@@ -127,10 +128,10 @@ function cleanDecision(args) {
 // Warnings for the person who will send it. Never blocks: staff decide.
 const ASKS = { address: /\b(eircode|post ?code|address)\b/i, budget: /\bbudget\b/i, projectType: /\b(kitchen or|what (?:kind|type) of|which room)\b/i, timing: /\b(what day|which day|what time|when (?:would|suits|are you)|suit you)\b/i, name: /\b(your (?:full )?name)\b/i };
 function lint(reply, known, asked) {
-  const w = [], r = String(reply || '');
+  const w = [], r = String(reply || '').split(SCH.LINES.price_general).join('');                  // the owner's own price line is the one price statement that is allowed
   if (!r) return w;
   if (/https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|ie|net|org)\b/i.test(r)) w.push('contains a link');
-  if (/€|\beuros?\b|\bprice\b|\bcosts?\b|\bquote of\b|\bdiscount\b/i.test(r)) w.push('mentions money or prices');
+  if (/€|\beuros?\b|\bprice\b|\bcosts?\b|\bquote of\b|\bdiscount\b|\b\d+(?:[.,]\d+)?\s?k\b/i.test(r)) w.push('mentions money or prices');
   if (/\b\d[\d\s]{8,}\d\b/.test(r)) w.push('contains a phone number');
   if (/\b(guarantee|promise|definitely will|100%)\b/i.test(r)) w.push('makes a promise');
   if (/\b(today|tomorrow|tonight)\b/i.test(r)) w.push('mentions today or tomorrow: consultations are arranged for next week');
@@ -166,6 +167,7 @@ function analyse(sheet, d, plan) {
   else if (d.handover.needed) { state = 'handover'; label = 'Hand over to you'; }
   else if (sheet.nextAppointment) { state = 'booked'; label = 'Consultation already booked'; }
   else if (!d.wantsConsultation) { state = 'not_yet'; label = 'Not asking for a consultation yet'; }
+  else if (plan.step === 'price_general') { state = 'almost'; label = 'General price question: answered with your usual range'; }
   else if (plan.step === 'ask_next_week') { state = 'almost'; label = 'Wants a consultation: asking about next week'; }
   else if (plan.step === 'ask_following_week') { state = 'almost'; label = 'Wants a consultation: asking about the following week'; }
   else if (missing.length) { state = 'almost'; label = 'Wants a consultation: details still needed'; }

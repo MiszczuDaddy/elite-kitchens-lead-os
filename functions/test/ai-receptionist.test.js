@@ -176,5 +176,5 @@ test('ERASURE AND SAFETY: the receptionist state goes with the customer; the mod
   const src = fs.readFileSync(path.join(__dirname, '../lib/aiReceptionist.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   assert.equal(/sendTemplate|sendMedia|createAppointment|updateAppointment|appointments|quotes|projects|updateContact|setConversationStatus/.test(src), false, 'no booking, quote, project or contact change');
   assert.equal((src.match(/wa\.sendText\(/g) || []).length, 1, 'exactly one place sends, after the claim'); assert.ok(src.indexOf('outbound.begin(') < src.indexOf('wa.sendText('));
-  assert.ok(src.includes("SEND_STEPS = new Set(['ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on'])"));
+  assert.ok(src.includes("SEND_STEPS = new Set(['price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on'])"));
 });

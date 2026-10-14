@@ -14,6 +14,8 @@ const LINES = {
   ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
   acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
   asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
+  // The owner's own words for a GENERAL price question (how much do kitchens cost): the only price statement the system ever makes. Nothing about a specific kitchen, a quote or a discount.
+  price_general: 'All our kitchens are different, so each project is priced individually, but most of our kitchens range from €10k to €20k.',
   change_ask: 'No problem, would any day next week suit you better?',
   no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.',
 };
@@ -96,6 +98,12 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false }) {
     const given = describe(decision.schedule && decision.schedule.preference, nowMs), asked = (messages || []).some((m) => m.direction === 'out' && /any day next week suit you better/i.test(m.body || ''));
     if (given) return { step: 'change_given', reply: LINES.acknowledge, handover: { needed: true, reason: 'wants to change booking: preference received' }, preference: given };
     return asked ? { step: 'change_pass_on', reply: LINES.no_preference, handover: { needed: true, reason: 'wants to change booking' }, preference: null } : { step: 'change_ask', reply: LINES.change_ask, handover: { needed: true, reason: 'wants to change booking' }, preference: null };
+  }
+  // A general question about what kitchens cost is answered with the owner's fixed line, followed by the next consultation question when one is due (never for a specific price, a quote or a discount: those are handed over).
+  if (decision.intent === 'asking_price_general' && !(decision.handover && decision.handover.needed)) {
+    const next = plan({ decision: { ...decision, intent: 'new_enquiry' }, consult, messages, booked, nowMs, natural: false });
+    if (next.step === 'none') return { step: 'price_general', reply: LINES.price_general, handover: null, preference: null };
+    return { ...next, reply: LINES.price_general + ' ' + (next.step === 'ask_next_week' || next.step === 'ask_following_week' ? LINES[next.step] : next.reply) };
   }
   if (!decision.wantsConsultation || booked || (decision.handover && decision.handover.needed)) return none;
   const pref = describe(decision.schedule && decision.schedule.preference, nowMs);

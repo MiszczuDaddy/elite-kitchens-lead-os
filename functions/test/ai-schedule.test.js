@@ -15,10 +15,11 @@ test('the scheduling lines are fixed and contain no promise, no date, no availab
     ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
     acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
     asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
+    price_general: 'All our kitchens are different, so each project is priced individually, but most of our kitchens range from €10k to €20k.',
     change_ask: 'No problem, would any day next week suit you better?',
     no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.' });
   assert.equal(S.MAX_ASKS, 2);
-  for (const l of Object.values(S.LINES)) assert.doesNotMatch(l, /\b(booked|confirmed|available|availability|\d)\b/i);
+  for (const [k, l] of Object.entries(S.LINES)) if (k !== 'price_general') assert.doesNotMatch(l, /\b(booked|confirmed|available|availability|\d)\b/i, k);
 });
 
 test('weeks run Monday to Sunday in Irish time, counted from today', () => {
@@ -46,6 +47,19 @@ test('the summary for the person who books it: the real dates, the days, the tim
   assert.equal(d({ anyDay: true }).text, 'any day'); assert.equal(d({ times: 'mornings' }).text, 'mornings'); assert.equal(d({ days: ['monday'] }).text, 'Monday', 'no week known: no invented date');
   assert.equal(d({ weeks: 'other', text: 'sometime in November' }).text, ''); assert.equal(d({ weeks: 'other', times: 'evenings', text: 'sometime in November' }).customerWords, 'sometime in November');
   assert.equal(S.describe(null, TUE), null); assert.equal(S.describe(S.cleanPreference({ text: 'maybe' }), TUE), null);
+});
+
+test('a GENERAL price question is answered with the owner\'s own line, followed by the next consultation question when one is due; a specific price, a quote or a discount is not answered', () => {
+  const g = (o = {}, extra = {}) => S.plan({ decision: dec({ intent: 'asking_price_general', wantsConsultation: false, schedule: { preference: null, opener: '' }, ...o }), consult: null, messages: [], booked: false, nowMs: TUE, ...extra });
+  const alone = g(); assert.deepEqual([alone.step, alone.reply, alone.handover], ['price_general', S.LINES.price_general, null], 'no consultation asked yet and none wanted: just the price line');
+  const both = g({ wantsConsultation: true }); assert.deepEqual([both.step, both.reply], ['ask_next_week', S.LINES.price_general + ' ' + S.LINES.ask_next_week], 'the price line, then the usual question (the step counts as the first question)');
+  assert.equal(g({ wantsConsultation: true }, { consult: { stage: 'asked_next_week', asks: 1 } }).reply, S.LINES.price_general + ' ' + S.LINES.ask_following_week);
+  assert.equal(g({ wantsConsultation: true }, { consult: { stage: 'preference_given', asks: 1 } }).reply, S.LINES.price_general, 'already handed over: just the price line');
+  assert.equal(g({ wantsConsultation: true }, { booked: true }).step, 'price_general', 'booked: just the price line');
+  const withPref = g({ wantsConsultation: true, schedule: { preference: S.cleanPreference({ days: ['friday'], text: 'Fri' }), opener: '' } }); assert.deepEqual([withPref.step, withPref.reply, withPref.handover.needed], ['acknowledge', S.LINES.price_general + ' ' + S.LINES.acknowledge, true]);
+  assert.equal(g({ intent: 'asking_price', handover: { needed: true, reason: 'asks about price' } }).step, 'none', 'a specific price is not answered here');
+  assert.equal(g({ handover: { needed: true, reason: 'wants a discount' } }).step, 'none');
+  assert.equal(S.advance(null, 'price_general', null, 1), null);
 });
 
 test('asked whether it is a person or an AI: one honest line (written by code, never by the model), handed over, whether or not a consultation is booked', () => {

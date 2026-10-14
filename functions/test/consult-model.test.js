@@ -25,6 +25,15 @@ test('no preference after two questions: a request with no days; the booking dat
   assert.equal(M.openDate(null, TODAY), null); assert.equal(M.openDate('20 Oct', TODAY), null);
 });
 
+test('the time the booking form opens on follows what they said about the time of day', () => {
+  const t = M.openTime;
+  assert.deepEqual(['after 3pm', 'after 3 pm', 'after 3', '4-6pm', 'at 2:30pm', '11am', '8am', 'around 9', '7:40am'].map(t), ['15:00', '15:00', '15:00', '16:00', '14:30', '11:00', '08:00', '09:00', '07:30']);
+  assert.deepEqual(['mornings', 'afternoons', 'evenings', 'lunchtime'].map(t), ['10:00', '14:00', '18:00', '13:00']);
+  assert.deepEqual(['', null, undefined, 'whenever', 'after 10pm', '12am', 'x'].map(t), [null, null, null, null, null, null, null], 'anything unclear or outside 6:00-21:45: the form keeps its normal default');
+  const r = M.requestOf(conv({ consult: { stage: 'preference_given', needsBooking: true, preference: { ...pref, times: 'after 3pm' } } }), new Set(), TODAY); assert.equal(r.bookAt, '15:00');
+  assert.equal(M.requestOf(conv({ consult: { stage: 'no_preference', needsBooking: true } }), new Set(), TODAY).bookAt, null);
+});
+
 test('the count and the booked set', () => {
   const booked = M.bookedPhones([{ phone: '353871234567', status: 'scheduled', end: ts(NOW + 3600000) }, { phone: '353870000001', status: 'cancelled', end: ts(NOW + 3600000) }, { phone: '353870000002', status: 'scheduled', end: ts(NOW - 3600000) }], NOW);
   assert.deepEqual([...booked], ['353871234567'], 'only a scheduled appointment that has not ended counts');
