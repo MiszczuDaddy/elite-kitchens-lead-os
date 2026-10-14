@@ -216,3 +216,13 @@ test('READ-ONLY: the receptionist module only reads; the suggestion code writes 
   assert.equal(/wa\.|sendText|sendReply|sendTemplate/.test(fn), false);
   const idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8'); assert.match(idx, /exports\.aiSuggestReply = onCall\(\{ secrets: \[ANTHROPIC_API_KEY\]/);
 });
+
+test('TONE: the instructions ask for short, simple, natural replies, one question, no repeated project question, the next-week scheduling question, and nothing about a visit that is already booked', () => {
+  const s = R.SYSTEM;
+  assert.match(s, /SHORT: one or two sentences, never more than three/); assert.match(s, /Ask ONE question/); assert.match(s, /NEVER ask what kind of project it is/);
+  assert.match(s, /ask whether any day next week suits them/); assert.match(s, /following week/); assert.match(s, /stop asking about scheduling/);
+  assert.match(s, /Never offer, choose or promise a date or time/); assert.match(s, /never say anything is confirmed or booked/);
+  assert.match(s, /CONSULTATION ALREADY BOOKED shows a date, do not arrange another one/);
+  assert.doesNotMatch(s, /come back with suggested times/, 'the old "we will check availability and come back with times" wording is gone');
+  assert.doesNotMatch(s, /Aoife|K67|Kavanagh/, 'no customer data in the instructions');
+});
