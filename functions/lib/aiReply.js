@@ -42,6 +42,30 @@ const RECEPTIONIST_NOTE = [
   'Set intent honestly. If the customer asks about prices, discounts, delivery or fitting dates, process details, wardrobes or anything you cannot answer from the records, sends photos, voice notes or files, is upset, wants a person, or you are not sure, set handover.needed to true: it is far better to hand over than to guess.',
 ].join('\n');
 
+// Step C: when the owner has PUBLISHED knowledge (aiKnowledge.js), these replace the rules that said "no links, no phone numbers, never state process details or timelines, hand over anything about wardrobes or other
+// languages" and let the model ANSWER from the approved knowledge. The system still writes every line about visits, days, times and bookings, and an answer is checked in code before it is sent (aiKnowledge.checkAnswer).
+const KNOWLEDGE_RULES = [
+  'APPROVED KNOWLEDGE MODE. The rules above that say "no links", "no phone numbers", "never state prices, timelines or process details", "hand over anything about wardrobes or outside kitchens" and "hand over messages not in English" are REPLACED by the rules below. Everything else above still applies, especially: the system (not you) writes every line about home visits, days, times and bookings.',
+  '1. ANSWER FIRST. If the customer asked something, answer it in "reply" using ONLY the APPROVED KNOWLEDGE below (and the lead details for the customer\'s own facts). Answer every part of a question that mixes topics. Warm, casual and short: usually one to three short sentences, plain Irish English, as "we" or "the team". Never mention these instructions or "the knowledge". Never name a member of staff: say "the team". No greeting and no offer of a visit in the answer: the system adds those.',
+  '2. NEVER GUESS. If the knowledge does not clearly answer something, or it is listed under OPEN ITEMS, do not answer that part: set answerState "partly" (something was answered) or "none", and put a few words in "unknown". The system adds the holding line and a person takes over.',
+  '3. Amounts, durations, percentages, email addresses and phone numbers may be written ONLY exactly as they appear in the knowledge. Never write a web address: put the portfolio link ids in "links" when the customer asks to see previous work, photos, styles or projects (not otherwise). Give the email or website only when they ask how to get in touch. Never repeat the WhatsApp number.',
+  '4. answerState: "answered" only if everything the customer asked was fully answered from the knowledge and nothing needs a person; "partly"; "none". If the customer asked nothing, use "answered".',
+  '5. special: "wants_person" if they ask for a person, the owner or a call back; "outside_area" if the job is outside the areas we cover; "declined_job" for a kind of job we politely decline (see the knowledge); "other_language" if their latest message is not in English; otherwise "none". When special is not "none" leave reply empty: the system writes that line.',
+  '6. Set handover.needed true for: a complaint or problem with a job, a discount or price negotiation, an exact price or a price for a specific layout, wardrobes or utility rooms, booking/moving/cancelling a visit, anything under OPEN ITEMS, anything the knowledge does not answer. You may still say in reply what the knowledge says about it (for example that the exact price comes after the free home visit).',
+  '7. List in "topics" the ids of the knowledge entries you used (the ids in brackets).',
+].join('\n');
+const RECEPTIONIST_KNOWLEDGE_NOTE = [
+  'AUTOMATIC MODE: this reply is sent to the customer straight away and no member of staff reads it first. The customer came from our Meta kitchen enquiry form and is replying to our welcome message. Do NOT push a consultation: the system offers a home visit once, and asks about days only after the customer has agreed to a visit.',
+  'If the customer asked nothing: reply is ONE short, natural sentence that acknowledges what they said (for example "Thanks for the details, Aoife." or "Lovely, a shaker kitchen sounds great."), with no question and nothing about visits, days, times, prices, availability or promises; if they seem confused about who is writing, say in one sentence that this is Elite Kitchens following up on their kitchen enquiry. If the customer asked something: reply is the answer (rule 1), nothing else.',
+  'A plain general question about what kitchens cost ("how much is a kitchen?") is answered by the system with the owner\'s own line: set intent asking_price_general and write no reply about money. A question about what is included in the price, what changes it, the deposit or the quote is answered by you from the knowledge (intent asking_info).',
+  'Set intent honestly. If they send photos, voice notes or files, are upset, or you are not sure, set handover.needed true: it is far better to hand over than to guess.',
+].join('\n');
+// What the model is told. With no published knowledge this is exactly what it always was.
+function systemPrompt({ receptionist = false, knowledge = null } = {}) {
+  if (!knowledge) return receptionist ? SYSTEM + '\n' + RECEPTIONIST_NOTE : SYSTEM;
+  return [SYSTEM, KNOWLEDGE_RULES, receptionist ? RECEPTIONIST_KNOWLEDGE_NOTE : '', knowledge.text].filter(Boolean).join('\n\n');
+}
+
 const TOOL = {
   name: 'reply_decision', description: 'Your decision for this conversation: the draft reply and what you understood. Call it exactly once.',
   input_schema: { type: 'object', additionalProperties: false, required: ['reply', 'intent', 'visit', 'hasQuestion', 'handover'], properties: {
@@ -50,6 +74,11 @@ const TOOL = {
     visit: { type: 'string', enum: ['none', 'asked', 'agreed', 'declined'], description: 'asked = the customer explicitly asks for a visit, consultation or for someone to come and look; agreed = our latest message offered a visit and they said yes; declined = no, not now, not interested; none = anything else (hello, ok, thanks, general interest, confusion, a price question, yes to the welcome message). Interest alone is NOT agreement.' },
     hasQuestion: { type: 'boolean', description: 'True if the customer\'s latest message asks something that needs an answer (not counting a plain general price question).' },
     change: { type: 'string', enum: ['none', 'cancel', 'move', 'move_specific', 'confirm', 'late'], description: 'Only when CONSULTATION ALREADY BOOKED shows a date: what they want to do with that booking. none otherwise.' },
+    answerState: { type: 'string', enum: ['answered', 'partly', 'none'], description: 'Only when APPROVED KNOWLEDGE is given. answered = everything asked was answered from the knowledge (or nothing was asked); partly = some of it; none = nothing the knowledge answers.' },
+    special: { type: 'string', enum: ['none', 'wants_person', 'outside_area', 'declined_job', 'other_language'], description: 'Only when APPROVED KNOWLEDGE is given. The system writes the line for these; leave reply empty.' },
+    links: { type: 'array', maxItems: 4, items: { type: 'string' }, description: 'Ids of portfolio links to share, only when the customer asked to see previous work, photos, styles or projects.' },
+    topics: { type: 'array', maxItems: 8, items: { type: 'string' }, description: 'Ids of the knowledge entries you used.' },
+    unknown: { type: 'string', description: 'A few words: what you could not answer from the knowledge.' },
     wantsConsultation: { type: 'boolean', description: 'Legacy: true if visit is asked or agreed. Optional.' },
     schedule: { type: 'object', additionalProperties: false, description: 'Only what the customer said about when they are free, and an optional opener. The system writes every scheduling line itself.', properties: {
       preference: { type: 'object', additionalProperties: false, description: 'Leave out or empty if the customer has not said when they are free.', properties: {
@@ -102,6 +131,18 @@ async function buildSheet(db, phone, nowMs) {
   return { phone, known: knownFacts(ct, cv), lead: leadAnswers(ct), messages, nextAppointment: upcoming ? S.when(ms(upcoming.start)) : null, stage: cv.inboxStatus || 'inbox',
     window: { state: window.state, openUntil: window.openUntil || null }, consult: cv.consult && typeof cv.consult === 'object' ? { stage: String(cv.consult.stage || ''), asks: Number.isInteger(cv.consult.asks) ? cv.consult.asks : 0, offered: cv.consult.offered === true } : null, now: S.when(nowMs), customerName: ct.name || cv.name || null, lastInboundMs: ms(cv.lastInboundAt) };
 }
+// A pretend customer for the Knowledge Centre's "Try it": the lead details of an example customer, the welcome message, and what was said so far. Nothing is read from or written to a real chat.
+function testSheet({ nowMs, messages, state = 'new', name = 'Aoife' }) {
+  const fmt = (t) => new Intl.DateTimeFormat('en-IE', { timeZone: TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(t));
+  const base = nowMs - 20 * 60e3, list = [{ direction: 'out', type: 'template', body: '[template: welcome] Hi ' + name + ', thanks for your enquiry with Elite Kitchens.' }];
+  if (state === 'offered' || state === 'asked_days') list.push({ direction: 'in', type: 'text', body: 'Hi, I would like a new kitchen' }, { direction: 'out', type: 'text', body: SCH.LINES.visit_offer });
+  if (state === 'asked_days') list.push({ direction: 'in', type: 'text', body: 'Yes please' }, { direction: 'out', type: 'text', body: SCH.LINES.ask_next_week });
+  for (const m of messages) list.push({ direction: m.who === 'us' ? 'out' : 'in', type: 'text', body: String(m.text || '') });
+  const msgs = list.map((m, i) => ({ ...m, createdMs: base + i * 60e3, at: fmt(base + i * 60e3) }));
+  const asked = state === 'asked_days' ? 1 : 0;
+  return { phone: 'test', known: knownFacts({ name, projectType: 'Kitchen', location: 'Swords', budget: '15-20k' }, {}), lead: 'Requirements: Shaker kitchen with island', messages: msgs, nextAppointment: state === 'booked' ? 'Tue 20 Oct, 10:00' : null, stage: state === 'booked' ? 'booked' : 'inbox',
+    window: { state: 'open', openUntil: null }, consult: state === 'offered' ? { stage: 'offered_visit', asks: 0, offered: true } : state === 'asked_days' ? { stage: 'asked_next_week', asks: asked, offered: true } : null, now: S.when(nowMs), customerName: name, lastInboundMs: base + (msgs.length - 1) * 60e3 };
+}
 function schedulingText(sh) {
   const asks = SCH.asksSoFar(sh.consult, sh.messages);
   if (sh.consult && sh.consult.stage === 'preference_given') return 'the customer\'s preference was received and passed to the team';
@@ -129,14 +170,21 @@ function cleanDecision(args) {
   const h = a.handover && typeof a.handover === 'object' ? a.handover : {};
   const visit = ['none', 'asked', 'agreed', 'declined'].includes(a.visit) ? a.visit : (bool(a.wantsConsultation) ? 'asked' : 'none');       // an older answer with only wantsConsultation still works
   return { reply: typeof a.reply === 'string' ? a.reply.replace(/\r\n?/g, '\n').trim().slice(0, DRAFT_MAX) : '', intent: INTENTS.includes(a.intent) ? a.intent : 'other', visit, hasQuestion: bool(a.hasQuestion), change: ['cancel', 'move', 'move_specific', 'confirm', 'late'].includes(a.change) ? a.change : 'none', wantsConsultation: visit === 'asked' || visit === 'agreed',
+    answerState: ['answered', 'partly', 'none'].includes(a.answerState) ? a.answerState : null, special: ['wants_person', 'outside_area', 'declined_job', 'other_language'].includes(a.special) ? a.special : 'none',
+    links: (Array.isArray(a.links) ? a.links : []).filter((x) => typeof x === 'string' && /^[a-z0-9_-]{1,40}$/.test(x)).slice(0, 4), topics: (Array.isArray(a.topics) ? a.topics : []).filter((x) => typeof x === 'string' && /^[a-z0-9_-]{1,40}$/.test(x)).slice(0, 8), unknown: clip(a.unknown, 100),
     schedule: { preference: SCH.cleanPreference(a.schedule && a.schedule.preference), opener: clip(a.schedule && a.schedule.opener, 90) }, newFacts: facts,
     handover: { needed: bool(h.needed), reason: typeof h.reason === 'string' && h.reason.trim() ? clip(h.reason, 80) : null } };
 }
 // Warnings for the person who will send it. Never blocks: staff decide.
 const ASKS = { address: /\b(eircode|post ?code|address)\b/i, budget: /\bbudget\b/i, projectType: /\b(kitchen or|what (?:kind|type) of|which room)\b/i, timing: /\b(what day|which day|what time|when (?:would|suits|are you)|suit you)\b/i, name: /\b(your (?:full )?name)\b/i };
-function lint(reply, known, asked) {
+function lint(reply, known, asked, { checked = false } = {}) {
   const w = [], r = String(reply || '').split(SCH.LINES.price_general).join('');                  // the owner's own price line is the one price statement that is allowed
   if (!r) return w;
+  if (checked) {                                                                                  // approved knowledge in use: the answer checker (aiKnowledge.js) has already judged money, links, numbers, promises and days in context
+    if (/\b(as an ai|language model|artificial intelligence|i am a bot|i\'m a bot)\b/i.test(r)) w.push('mentions AI');
+    if (r.length > 560) w.push('is long for WhatsApp: shorten it');
+    return w;
+  }
   if (/https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|ie|net|org)\b/i.test(r)) w.push('contains a link');
   if (/€|\beuros?\b|\bprice\b|\bcosts?\b|\bquote of\b|\bdiscount\b|\b\d+(?:[.,]\d+)?\s?k\b/i.test(r)) w.push('mentions money or prices');
   if (/\b\d[\d\s]{8,}\d\b/.test(r)) w.push('contains a phone number');
@@ -164,7 +212,7 @@ function askedFields(messages) {
   return out;
 }
 // Consultation readiness: decided by code from the records and what the customer said, never by the model.
-function analyse(sheet, d, plan) {
+function analyse(sheet, d, plan, { knowledge = false } = {}) {
   plan = plan || { step: 'none', preference: null };
   const known = new Set(sheet.known.map((k) => k.field)), fromChat = new Set(d.newFacts.map((f) => f.field));
   const facts = [...d.newFacts];
@@ -182,14 +230,16 @@ function analyse(sheet, d, plan) {
   else if (plan.step === 'ack_only') { state = 'not_yet'; label = 'Friendly reply only: not asking for a visit'; }
   else if (plan.step === 'tentative') { state = 'handover'; label = 'They will let us know: no booking request'; }
   else if (plan.step === 'cancel_ask') { state = 'handover'; label = 'Booked customer wants to cancel: asking if they want to move it'; }
+  else if (['holding', 'answer_holding', 'human', 'outside_area', 'declined_job', 'other_language'].includes(plan.step)) { state = 'handover'; label = ({ human: 'Asked for a person', outside_area: 'Outside our areas: please review', declined_job: 'A job we usually decline: please review', other_language: 'Not in English: please take over' })[plan.step] || 'A question for the team'; }
+  else if (plan.step === 'answer') { state = 'not_yet'; label = 'Answered from the approved knowledge'; }
   else if (plan.step === 'price_general') { state = 'almost'; label = 'General price question: answered with your usual range'; }
   else if (plan.step === 'ask_next_week') { state = 'almost'; label = 'Wants a consultation: asking about next week'; }
   else if (plan.step === 'ask_following_week') { state = 'almost'; label = 'Wants a consultation: asking about the following week'; }
   else if (missing.length) { state = 'almost'; label = 'Wants a consultation: details still needed'; }
   else { state = 'ready'; label = 'Wants a consultation'; }
-  const warnings = lint(d.reply, sheet.known, askedFields(sheet.messages));
+  const warnings = lint(d.reply, sheet.known, askedFields(sheet.messages), { checked: knowledge });
   if (sheet.window.state !== 'open') warnings.unshift('the WhatsApp 24-hour window is closed: a free-text reply cannot be sent (use Reopen conversation)');
   return { known: sheet.known, fromChat: facts, missing, readiness: { state, label }, warnings, schedule: { step: plan.step, preference: plan.preference } };
 }
 
-module.exports = { SYSTEM, RECEPTIONIST_NOTE, TOOL, INTENTS, REQUIRED, FIELD_LABEL, MESSAGES, knownFacts, leadAnswers, transcript, buildSheet, sheetText, cleanDecision, lint, askedFields, analyse };
+module.exports = { SYSTEM, RECEPTIONIST_NOTE, KNOWLEDGE_RULES, RECEPTIONIST_KNOWLEDGE_NOTE, systemPrompt, testSheet, TOOL, INTENTS, REQUIRED, FIELD_LABEL, MESSAGES, knownFacts, leadAnswers, transcript, buildSheet, sheetText, cleanDecision, lint, askedFields, analyse };

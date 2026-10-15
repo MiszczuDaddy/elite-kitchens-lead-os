@@ -110,7 +110,7 @@ function opener(text, hasOutbound) {
 // The plan for this message. Returns { step, reply, handover, preference }:
 //   step 'none'     nothing is said by the system (a person takes over if handover.needed; otherwise the model's own reply is only a draft for staff)
 //   offer_visit / price_offer / price_general / ack_only / ask_next_week / ask_following_week / acknowledge / no_preference / tentative / cancel_ask / change_ask / change_given / change_pass_on / asked_ai   a fixed line
-function plan({ decision, consult, messages, booked, nowMs, natural = false }) {
+function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
   const visit = d.visit || (d.wantsConsultation ? 'asked' : 'none');
@@ -138,6 +138,33 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false }) {
     if (change === 'move_specific') return person('wants the booking moved to a specific time (tomorrow, earlier, a date): needs you');
     if (change === 'confirm') return person('asks you to confirm the booking');
     if (change === 'late') return person('running late for the booking');
+  }
+
+  // 2b. Step C: the owner has published knowledge, and this is the automatic receptionist. A customer who asks for a person, or whose job is outside our areas, a job we decline, or not in English, gets the
+  //     owner's line and a person takes over. A question is ANSWERED from the knowledge first (the answer was checked in code), and only then does the Step A flow go on exactly as before: the visit is offered once,
+  //     days are asked only after agreement, a preference is recorded. A question the knowledge does not answer (or an answer that failed the check) gets the holding line and a person takes over: never a guess.
+  if (kn && natural) {
+    const special = { wants_person: ['human', kn.lines.human, 'asked for a person'], outside_area: ['outside_area', kn.lines.outside_area, 'outside the areas we cover: please review'], declined_job: ['declined_job', kn.lines.declined_job, 'a job we usually decline: please review'], other_language: ['other_language', kn.lines.other_language, 'message not in English'] }[d.special];
+    if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
+    const text = String(d.reply || '').trim(), asking = d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent) || (d.intent === 'asking_price_general' && !!text);
+    if (asking && d.intent !== 'complaint') {
+      const has = !!text && d.answerState !== 'none', chk = has ? kn.check(text) : { ok: true, reasons: [] }, ok = has && chk.ok;
+      const state = ok ? (hand || d.answerState === 'partly' ? 'partly' : 'answered') : 'none', unknown = d.unknown ? ': ' + d.unknown : '';
+      const links = ok ? kn.linksText(d.links) : '', first = !out.some((m) => m.type !== 'template'), op = ok && first ? opener(d.schedule && d.schedule.opener, hasOutbound) : '';
+      const answer = ok ? (op ? op + ' ' : '') + text + (links ? ' ' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
+      if (!ok) return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
+      if (state === 'partly') {
+        const why = (reason || 'part of the question needs the team') + unknown;
+        if (given && !booked) return { step: 'acknowledge', reply: answer + ' ' + LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + why }, preference: given, kn: info };
+        return { step: 'answer_holding', reply: answer + ' ' + kn.lines.holding, handover: { needed: true, reason: why }, preference: null, kn: info };
+      }
+      // fully answered: the answer goes first, then whatever the consultation flow would have said, with the question taken out of the picture
+      const neutral = { ...d, hasQuestion: false, reply: '', answerState: null, special: 'none', links: [], handover: { needed: false, reason: null }, schedule: { preference: d.schedule && d.schedule.preference, opener: '' },
+        intent: ['asking_info', 'asking_price'].includes(d.intent) ? 'answering_questions' : d.intent };
+      const core = plan({ decision: neutral, consult, messages, booked, nowMs, natural, kn: null });
+      if (core.step === 'none') return { step: 'answer', reply: answer, handover: core.handover, preference: core.preference, kn: info };
+      return { ...core, reply: answer + ' ' + core.reply, kn: info };
+    }
   }
 
   // 3. A general question about what kitchens cost is answered with the owner's fixed line; then, once, the offer of a visit (never a question about days before they agree).
@@ -208,4 +235,9 @@ function advance(consult, step, preference, nowMs) {
   return null;
 }
 
-module.exports = { LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, cleanPreference, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, plan, advance };
+// The only steps whose words are sent by themselves by the automatic receptionist. All are written by code (the fixed lines above and the owner's knowledge lines) or are an answer that passed the answer checker.
+const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on',
+  'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language']);
+// After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
+const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language']);
+module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, cleanPreference, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, plan, advance };

@@ -214,6 +214,8 @@ exports.aiDecide = onCall({}, (req) => h.aiDecide(req.auth, req.data, quoteDeps(
 exports.aiSuggestReply = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 120 }, (req) => h.aiSuggestReply(req.auth, req.data, aiDeps()));
 exports.aiDraftOutcome = onCall({}, (req) => h.aiDraftOutcome(req.auth, req.data, quoteDeps()));
 exports.aiDismissConsult = onCall({}, (req) => h.aiDismissConsult(req.auth, req.data, quoteDeps()));
+exports.aiKnowledge = onCall({}, (req) => h.aiKnowledge(req.auth, req.data, aiDeps()));
+exports.aiKnowledgeTest = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 180 }, (req) => h.aiKnowledgeTest(req.auth, req.data, aiDeps()));
 exports.setReceptionist = onCall({}, (req) => h.setReceptionist(req.auth, req.data, { ...quoteDeps(), aiOwners: AI_OWNER_EMAILS.value() }));
 // R3: the receptionist's BACKUP check, every 5 minutes (docs/AI.md). Not callable from outside. The main path is receptionistOnMessage below (a Firestore event when a customer message is saved); this one answers
 // whatever the event path missed and everything that arrived during quiet hours. It answers only the chats the owner switched on or new Meta leads, and only while every AI switch is on.

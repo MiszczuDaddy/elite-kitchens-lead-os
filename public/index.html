@@ -498,11 +498,24 @@
       <div id="as-set-kinds" class="as-kinds"><label class="as-check as-check-sub"><input id="as-set-kind-customerNote" data-kind="customerNote" type="checkbox"> <span>Customer notes</span></label><label class="as-check as-check-sub"><input id="as-set-kind-projectUpdate" data-kind="projectUpdate" type="checkbox"> <span>Project updates (checklist, installation date, notes)</span></label></div>
       <p id="as-set-actions-hint" class="hint">Nothing is saved until you press Approve on the preview it shows. Only the person who asked can approve.</p>
     </div>
+    <div class="as-know"><button type="button" id="as-know-open" class="btn btn-ghost btn-sm">AI Knowledge Centre…</button><span class="hint">What the receptionist may say about the business: edit, test, publish, roll back.</span></div>
     <div class="as-models"><div class="as-models-head"><strong>Models</strong><button type="button" id="as-set-check" class="btn btn-ghost btn-sm">Check models</button></div><ul id="as-set-models" class="as-models-list"></ul><p class="hint">"Check models" asks the AI provider whether each model exists and is active. A model cannot be used until it passes. It costs nothing.</p></div>
     <p id="as-set-key" class="hint"></p>
     <div id="as-set-err" class="dlg-err" role="alert"></div>
     <div class="dlg-actions"><button type="button" id="as-set-cancel" class="btn btn-ghost">Cancel</button><button type="submit" id="as-set-save" class="btn btn-primary">Save</button></div>
   </form>
+</dialog>
+<dialog id="kn-dlg" class="dlg kn-dlg" aria-labelledby="kn-title">
+  <div class="kn-wrap">
+    <h2 id="kn-title">AI Knowledge Centre</h2>
+    <p id="kn-ro" class="hint" hidden>You can read this. Only the owner account can change it.</p>
+    <p id="kn-live" class="kn-live"></p>
+    <p id="kn-draft" class="kn-draft"></p>
+    <div class="kn-tabs" role="tablist"><button type="button" role="tab" data-tab="know">Knowledge</button><button type="button" role="tab" data-tab="lines">Lines, links and contact</button><button type="button" role="tab" data-tab="try">Try it</button><button type="button" role="tab" data-tab="versions">Versions</button></div>
+    <div id="kn-body" class="kn-body"></div>
+    <div id="kn-msg" class="kn-msg" role="status"></div>
+    <div class="kn-bar"><button type="button" id="kn-close" class="btn btn-ghost">Close</button><input id="kn-note" type="text" maxlength="120" placeholder="Note for this version (optional)" aria-label="Note for this version"><button type="button" id="kn-save" class="btn btn-ghost">Save draft</button><button type="button" id="kn-publish" class="btn btn-primary">Publish</button></div>
+  </div>
 </dialog>
 <dialog id="np-dlg" class="dlg">
   <form id="np-form" autocomplete="off">
@@ -685,6 +698,7 @@
 <script src="/push.js"></script>
 <script src="/assistant-model.js"></script>
 <script src="/assistant.js"></script>
+<script src="/knowledge.js"></script>
 <script src="/reply-model.js"></script>
 <script src="/reply-assist.js"></script>
 <script src="/consult-model.js"></script>

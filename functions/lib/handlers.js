@@ -10,6 +10,7 @@ const quotes = require('./quotes');
 const projects = require('./projects');
 const push = require('./push');
 const ai = require('./ai');
+const KN = require('./aiKnowledge');
 const reopenLib = require('./reopen');
 const delivery = require('./quoteDelivery');
 const { WINDOW_MS } = require('./windowState');          // 24 hours; the same rule the screen uses (Phase 6.1)
@@ -399,6 +400,8 @@ const aiCheckModels = aiAction(ai.checkModels);
 // R1: a suggested reply for a WhatsApp chat (staff read, edit and send it themselves), and how that draft ended.
 const aiSuggestReply = aiAction(ai.suggestReply);
 const aiDraftOutcome = aiAction(ai.draftOutcome);
+const aiKnowledge = aiAction(KN.admin);                                 // Step C: the Knowledge Centre (staff read; only the owner changes it)
+const aiKnowledgeTest = aiAction(ai.testKnowledge);                      // Step C: "Try it" on the draft knowledge (owner only; sends nothing)
 const setReceptionist = aiAction(ai.setReceptionist);            // R3: the receptionist on or off for one chat (owner only)
 const aiDismissConsult = aiAction(ai.dismissConsult);            // R2b: "Not needed" on a consultation request card
 // Phase 9.2a: Approve / Reject on a proposal. Staff only; only the person who asked can decide; no model, no secret.
@@ -428,6 +431,6 @@ async function quoteChannels(auth, data, deps) {
 
 module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
-  registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist,
+  registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,
   createAppointment, updateAppointment, cancelAppointment, retryCalendarSync, setConversationStatus, deleteCustomer, mediaUrl, retryMedia, sendMedia, processMedia, updateContact, markRead, webhookVerify, webhookReceive, claimAccess, startConversation, sendReply, isAllowedUser };

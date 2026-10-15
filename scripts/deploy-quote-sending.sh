@@ -63,7 +63,7 @@ PROJECT_FUNCS="$PROJECT_NEW $PROJECT_CHANGED"
 PUSH_NEW="registerPushDevice unregisterPushDevice sendTestPush pushReceipt"                                                  # Phase 8: new; pushReceipt is reached through a Hosting rewrite
 PUSH_CHANGED="webhook leadIntake"                                                                                           # Phase 8: they now send a push (never allowed to break or hold up the message / lead)
 PUSH_FUNCS="$PUSH_NEW $PUSH_CHANGED"
-AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
+AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist aiKnowledge aiKnowledgeTest"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
 AI_FUNCS="$AI_NEW"
 REC_FUNCS="receptionistSweep receptionistOnMessage pushReceipt"                                                      # Phase 9 R3: the receptionist (a message-arrival trigger plus a 5-minute backup; neither callable from outside) and pushReceipt (it now knows the "handover" notification)
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
@@ -341,7 +341,7 @@ case "${1:-}" in
       gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
     done
     check_reachable "$AI_FUNCS"
-    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist --region $REGION --project $PROJECT (nothing else depends on them)."
+    echo "Done. Next: $0 live (the Assistant screen). To go back: firebase functions:delete aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist aiKnowledge aiKnowledgeTest --region $REGION --project $PROJECT (nothing else depends on them)."
     ;;
   receptionist)
     [ -f functions/lib/aiReceptionist.js ] || { echo "This checkout has no Phase 9 R3 (receptionist) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
