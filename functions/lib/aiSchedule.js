@@ -176,6 +176,9 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
       const neutral = { ...d, hasQuestion: false, reply: '', answerState: null, special: 'none', links: [], handover: { needed: false, reason: null }, schedule: { preference: d.schedule && d.schedule.preference, opener: '' },
         intent: ['asking_info', 'asking_price'].includes(d.intent) ? 'answering_questions' : d.intent };
       const core = plan({ decision: neutral, consult, messages, booked, nowMs, natural, kn: null });
+      // A plain question of fact (does it include, do you supply, how long, what do you cover) is just answered: the visit is not attached to it. The offer waits for a message where they talk about their own project
+      // or ask what kitchens cost, and is still made only once. (Owner's decision, 15 Oct 2026.)
+      if (core.step === 'offer_visit' && d.intent === 'asking_info') return { step: 'answer', reply: answer, handover: null, preference: null, kn: info };
       if (core.step === 'none') return { step: 'answer', reply: answer, handover: core.handover, preference: core.preference, kn: info };
       return { ...core, reply: answer + sep + core.reply, kn: info };
     }
