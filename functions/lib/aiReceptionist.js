@@ -16,13 +16,18 @@
 //     fixed lines (ask the following week, "I'll pass that on", "no preference", the honest "automated assistant" line, the booking-change question). A draft with any warning is not sent.
 //   * It never invents a price, promises availability, books or changes anything. Prices, discounts, delivery and fitting questions, complaints, photos, "are you a person" and anything unsure are handed
 //     over: no reply, a push to the owner.
+// HOW IT RUNS (event-driven, with a backup): a Firestore trigger (functions/index.js receptionistOnMessage) calls onInbound() the moment a customer message is saved. It waits the reply delay (30 seconds by
+// default; one number, aiSettings.replyDelaySeconds, 5 to 90) so that a burst of messages is answered ONCE, and only the run for the LAST message goes on. A scheduled job every 5 minutes (sweep) is the backup: it
+// answers anything the event path missed, and everything that arrived during quiet hours. Both call the same processChat(), so they cannot both answer: a per-chat lock, the "already answered" record and the
+// claim before sending see to that. Just before sending, the chat is read AGAIN: a message from a person, or a newer message from the customer, stops this reply (a person replying while the reply was being
+// written must never be talked over, and a newer message gets its own answer with the full picture).
 const { Timestamp } = require('firebase-admin/firestore');
 const ai = require('./ai');
 const outbound = require('./outbound');
 const store = require('./store');
 
 const TZ = 'Europe/Dublin';
-const WAIT_MS = 45000, DAILY_CAP = 6, QUIET_UNTIL_HOUR = 7, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
+const WAIT_MS = 30000, DEBOUNCE_MS = 30000, MIN_DELAY_MS = 5000, MAX_DELAY_MS = 90000, DAILY_CAP = 6, QUIET_UNTIL_HOUR = 7, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
 const ACTOR = { kind: 'system', id: 'receptionist' };
 // The only steps whose words are sent by themselves. All of them are written by code (aiSchedule.js); the first may carry a short checked acknowledgement in front.
 const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on']);
@@ -63,7 +68,7 @@ async function activateIfNewLead(deps, doc, since) {
 }
 
 // One chat. Returns a short reason (what was done or why not), never throws.
-async function processChat(deps, phone, nowMs = Date.now()) {
+async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS } = {}) {
   const { db, wa, model, owners } = deps, ref = db.doc('conversations/' + phone);
   let locked = false;
   try {
@@ -74,7 +79,7 @@ async function processChat(deps, phone, nowMs = Date.now()) {
     if (r.paused) return 'paused';
     if (!lastIn || lastIn <= at) return 'nothing_new';                           // only messages sent after it was switched on
     if (lastIn <= (r.handledMs || 0)) return 'handled';
-    if (nowMs - lastIn < WAIT_MS) return 'wait';
+    if (nowMs - lastIn < waitMs) return 'wait';
     if (nowMs - lastIn >= WINDOW_MS) return 'window_closed';
     // a person has taken the chat over (anything sent by staff since it was switched on, except our own welcome template)
     const recent = await ref.collection('messages').orderBy('createdAt', 'desc').limit(12).get();
@@ -108,6 +113,12 @@ async function processChat(deps, phone, nowMs = Date.now()) {
       await handOver(deps, ref, phone, needs ? 'handover: ' + String((res.handover && res.handover.reason) || 'needs you').slice(0, 80) : (warnings.length ? 'draft failed a check' : 'needs a person'), nowMs);
       return 'handed_over';
     }
+    // Just before sending: read the chat AGAIN. The reply took a few seconds to write; in that time the customer may have written again (then THAT message gets its own answer, with everything they said), a person may have
+    // replied (a person is never talked over), or the owner may have paused the chat. Nothing is sent, nothing is marked answered.
+    const [fresh, latest] = await Promise.all([ref.get(), ref.collection('messages').orderBy('createdAt', 'desc').limit(12).get()]), fc = fresh.exists ? fresh.data() : {}, fr = fc.receptionist || {};
+    if (fr.on !== true || fr.paused) { await report('discarded'); return 'paused'; }
+    if (latest.docs.some((d) => { const x = d.data(); return x.direction === 'out' && !x.auto && !isWelcome(x, deps.welcomeTemplate) && ms(x.createdAt) > at; })) { await report('discarded'); await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }
+    if (ms(fc.lastInboundAt) > lastIn) { await report('discarded'); return 'newer_message'; }
     // send: claim first (never twice for the same customer message), then WhatsApp, then record
     const requestId = 'auto_' + lastIn;
     let claim; try { claim = await outbound.begin(db, phone, requestId, nowMs); } catch (e) { await report('discarded'); if (e && e.details && e.details.reason === 'in_progress') return 'busy'; await handOver(deps, ref, phone, 'send not confirmed', nowMs); return 'send_unconfirmed'; }
@@ -122,7 +133,7 @@ async function processChat(deps, phone, nowMs = Date.now()) {
     }
     await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
     await store.storeOutbound(db, phone, { wamid, type: 'text', body: res.draft, extra: { auto: true } }).catch(() => log('error', 'receptionist text sent but not recorded', { wamid }));
-    await ref.update({ 'receptionist.handledMs': lastIn, 'receptionist.day': day, 'receptionist.count': (r.day === day ? r.count || 0 : 0) + 1, 'receptionist.last': { step, at: Timestamp.fromMillis(nowMs) }, 'receptionist.tries': 0 });
+    await ref.update({ 'receptionist.handledMs': lastIn, 'receptionist.day': day, 'receptionist.count': (r.day === day ? r.count || 0 : 0) + 1, 'receptionist.last': { step, at: Timestamp.fromMillis(nowMs), delayMs: Math.max(0, nowMs - lastIn) }, 'receptionist.tries': 0 });
     await report('used_unchanged');                                              // moves the consultation flow on (and leaves the request for the owner to book)
     if (PAUSE_STEPS.has(step)) await handOver(deps, ref, phone, step === 'asked_ai' ? 'asked if AI' : 'consultation passed to you', nowMs, { notify: false });
     if (needs) await ping(deps, phone, nowMs);
@@ -133,14 +144,46 @@ async function processChat(deps, phone, nowMs = Date.now()) {
   } finally { if (locked) await ref.update({ 'receptionist.lockUntil': 0 }).catch(() => {}); }
 }
 
-// The every-minute check. Returns a count of what happened, for the log (no names, no words).
+// The reply delay: one number in the settings document (seconds, 5 to 90), 30 by default. Read on every run, so it can be changed without redeploying.
+const delayMs = (s) => { const v = Number(s && s.replyDelaySeconds); return Number.isFinite(v) && v > 0 ? Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, Math.round(v * 1000))) : DEBOUNCE_MS; };
+// The switches, the same for the event path and the backup. The master switch (autoReply) controls the AUTOMATIC handling of new Meta leads. A chat the owner switched on himself with its Receptionist button (for
+// testing one chat) works without it; the AI kill switch, real customer data and reply suggestions must all be on for either. Returns why not, or null.
+const closed = (s, deps, nowMs) => (!s.enabled || !s.customerDataApproved || !s.replyAssistant ? 'off' : !deps.model ? 'no key' : quiet(nowMs) ? 'quiet hours' : null);
+
+// The event path: called when a customer message has just been saved. Cheap for every chat that is not the receptionist's (one settings read and one chat read), and it never throws.
+// `messageMs` is the time of the message that fired the event. Returns a short reason (what was done or why not).
+async function onInbound(deps, phone, messageMs, { sleep = (n) => new Promise((r) => setTimeout(r, n)), now = Date.now } = {}) {
+  try {
+    const t0 = now(), s = await ai.loadSettings(deps.db), why = closed(s, deps, t0);
+    if (why) return why === 'quiet hours' ? 'quiet' : why;                                // during quiet hours the backup answers it after 7:00
+    const ref = deps.db.doc('conversations/' + phone), first = await ref.get();
+    if (!first.exists) return 'gone';
+    const c = first.data(), rec = c.receptionist;
+    const ours = rec ? rec.on === true && !rec.paused && (s.autoReply || !rec.auto) : !!(s.autoReply && s.autoReplySince && ms(c.createdAt) >= s.autoReplySince);          // switched on, or a new Meta lead that may be
+    if (!ours) return 'not_ours';
+    if (ms(c.lastInboundAt) > messageMs) return 'superseded';                              // a newer message is already here: its own run answers
+    await sleep(Math.max(0, delayMs(s) - (now() - t0)));                                   // the reply delay: a burst of messages is answered once
+    const again = await ref.get();
+    if (!again.exists) return 'gone';
+    if (ms(again.data().lastInboundAt) > messageMs) return 'superseded';                    // the customer wrote again while we waited: only the run for the LAST message goes on
+    const t1 = now(); if (quiet(t1)) return 'quiet';
+    if (!again.data().receptionist && !(await activateIfNewLead(deps, again, s.autoReplySince))) return 'not_ours';
+    return await processChat(deps, phone, t1, { waitMs: 0 });                              // the delay has been waited: no second wait
+  } catch (e) { log('error', 'receptionist event failed', { code: String((e && e.code) || 'unknown').slice(0, 60) }); return 'error'; }
+}
+
+// The Firestore event for a new message: only a message FROM THE CUSTOMER goes on (our own messages, a person's and the welcome template all return at once, without reading anything).
+async function onMessage(deps, phone, message, opts) {
+  if (!message || message.direction !== 'in') return 'ignored';
+  return onInbound(deps, phone, ms(message.createdAt), opts);
+}
+
+// The backup check (every 5 minutes): anything the event path missed, and everything that arrived during quiet hours. Returns a count of what happened, for the log (no names, no words).
 async function sweep(deps, nowMs = Date.now()) {
-  const s = await ai.loadSettings(deps.db);
-  // The master switch (autoReply) controls the AUTOMATIC handling of new Meta leads. A chat the owner switched on himself with its Receptionist button (for testing) works without it; the AI kill switch,
-  // real customer data and reply suggestions must all be on for either.
-  if (!s.enabled || !s.customerDataApproved || !s.replyAssistant) return { skipped: 'off' };
-  if (!deps.model) return { skipped: 'no key' };
-  if (quiet(nowMs)) return { skipped: 'quiet hours' };
+  const s = await ai.loadSettings(deps.db), why = closed(s, deps, nowMs);
+  if (why === 'off') return { skipped: 'off' };
+  if (why === 'no key') return { skipped: 'no key' };
+  if (why === 'quiet hours') return { skipped: 'quiet hours' };
   // The chats the customer has written in during the last 24 hours (the only ones that can be answered): one query, newest first.
   const chats = await deps.db.collection('conversations').where('lastInboundAt', '>=', Timestamp.fromMillis(nowMs - WINDOW_MS)).orderBy('lastInboundAt', 'desc').limit(MAX_CHATS).get();
   const out = { chats: chats.size };
@@ -154,4 +197,4 @@ async function sweep(deps, nowMs = Date.now()) {
   return out;
 }
 
-module.exports = { processChat, sweep, activateIfNewLead, quiet, hourOf, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DAILY_CAP, QUIET_UNTIL_HOUR };
+module.exports = { processChat, onInbound, onMessage, sweep, delayMs, activateIfNewLead, quiet, hourOf, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DEBOUNCE_MS, MIN_DELAY_MS, MAX_DELAY_MS, DAILY_CAP, QUIET_UNTIL_HOUR };

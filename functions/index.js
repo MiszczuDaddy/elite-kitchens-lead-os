@@ -215,11 +215,21 @@ exports.aiSuggestReply = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 
 exports.aiDraftOutcome = onCall({}, (req) => h.aiDraftOutcome(req.auth, req.data, quoteDeps()));
 exports.aiDismissConsult = onCall({}, (req) => h.aiDismissConsult(req.auth, req.data, quoteDeps()));
 exports.setReceptionist = onCall({}, (req) => h.setReceptionist(req.auth, req.data, { ...quoteDeps(), aiOwners: AI_OWNER_EMAILS.value() }));
-// R3: the receptionist's every-minute check (docs/AI.md). Not callable from outside. It answers only the chats the owner switched on, and only while every AI switch is on.
+// R3: the receptionist's BACKUP check, every 5 minutes (docs/AI.md). Not callable from outside. The main path is receptionistOnMessage below (a Firestore event when a customer message is saved); this one answers
+// whatever the event path missed and everything that arrived during quiet hours. It answers only the chats the owner switched on or new Meta leads, and only while every AI switch is on.
 const receptionist = require('./lib/aiReceptionist');
-exports.receptionistSweep = onSchedule({ schedule: 'every 1 minutes', timeZone: 'Europe/Dublin', secrets: [...SECRETS, ANTHROPIC_API_KEY], timeoutSeconds: 180, retryCount: 0 }, async () => {
+exports.receptionistSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', secrets: [...SECRETS, ANTHROPIC_API_KEY], timeoutSeconds: 180, retryCount: 0 }, async () => {
   const r = await receptionist.sweep({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook(), welcomeTemplate: TEMPLATE.value() });
   console.log(JSON.stringify({ level: 'info', msg: 'receptionist sweep', ...r }));
+});
+// R3 (event-driven): the moment a message is saved in a chat, the receptionist is asked. Only a message FROM THE CUSTOMER does anything (everything else returns at once). It waits the reply delay (30 seconds by
+// default, aiSettings.replyDelaySeconds) so a burst of messages is answered once, then runs the same checks as the backup. No retry (a failed run is picked up by the backup within 5 minutes); no always-on instance.
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+exports.receptionistOnMessage = onDocumentCreated({ document: 'conversations/{phone}/messages/{messageId}', region: 'europe-west1', secrets: [...SECRETS, ANTHROPIC_API_KEY], timeoutSeconds: 180, memory: '256MiB', maxInstances: 10, retry: false }, async (event) => {
+  const m = event.data && event.data.data();
+  if (!m || m.direction !== 'in') return;                                                  // our own messages, a person's and the welcome template: nothing to do
+  const r = await receptionist.onMessage({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook(), welcomeTemplate: TEMPLATE.value() }, event.params.phone, m);
+  console.log(JSON.stringify({ level: 'info', msg: 'receptionist event', result: r }));
 });
 exports.aiCheckModels = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60 }, (req) => h.aiCheckModels(req.auth, req.data, aiDeps()));
 

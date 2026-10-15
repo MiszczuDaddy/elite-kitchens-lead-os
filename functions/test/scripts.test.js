@@ -672,13 +672,14 @@ test('Phase 9: the ai stage names exactly the three new callables (each bound to
   assert.match(live, /serving_revision aichat[\s\S]*Deploy the AI assistant backend first/); assert.ok(live.indexOf('aichat') < live.indexOf('confirm "'));
 });
 
-test('Phase 9 R3: the receptionist stage deploys only the every-minute check and pushReceipt, needs the AI backend first, asks before deploying, never makes the check public, and the screen waits for it', () => {
+test('Phase 9 R3: the receptionist stage deploys only the message-arrival trigger, the 5-minute backup and pushReceipt, needs the AI backend first, asks before deploying, never makes the check public, and the screen waits for it', () => {
   const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
-  assert.match(s, /^REC_FUNCS="receptionistSweep pushReceipt"/m);
+  assert.match(s, /^REC_FUNCS="receptionistSweep receptionistOnMessage pushReceipt"/m);
   const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
   assert.match(idx, /^exports\.receptionistSweep\s*=\s*onSchedule\(/m, 'the check is a scheduled job, not a callable'); assert.match(idx, /^exports\.setReceptionist\s*=\s*onCall\(\{\}/m);
   const i = s.indexOf('\n  receptionist)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));
   assert.match(stage, /serving_revision setreceptionist[\s\S]*Deploy the AI backend first/); assert.match(stage, /deploy_functions \$REC_FUNCS/);
+  assert.match(stage, /gcloud firestore databases describe[\s\S]*"\$DB_LOC" != "\$REGION"[\s\S]*exit 1/); assert.ok(stage.indexOf('databases describe') < stage.indexOf('confirm "'), 'the database region is checked before asking');
   assert.equal(/add-iam-policy-binding/.test(stage), false, 'a scheduled job is never opened to the public'); assert.ok(stage.indexOf('serving_revision') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'checks first, then the question, then the deploy');
   const j = s.indexOf('\n  live)\n'), live = s.slice(j, s.indexOf('\n    ;;', j)); assert.match(live, /serving_revision receptionistsweep[\s\S]*Deploy the receptionist backend first/); assert.ok(live.indexOf('receptionistsweep') < live.indexOf('confirm "'));
   assert.match(idx, /receptionistSweep[\s\S]{0,200}secrets: \[\.\.\.SECRETS, ANTHROPIC_API_KEY\]/, 'it holds the WhatsApp and Anthropic secrets');

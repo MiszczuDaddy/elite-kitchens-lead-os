@@ -1106,6 +1106,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .as-caps { display: flex; gap: 12px; } .as-caps label { flex: 1; }
 .dlg .as-check { display: flex; align-items: flex-start; gap: 9px; font-size: 14px; margin-bottom: 8px; }
 .dlg .as-check input { display: inline-block; width: auto; margin: 3px 0 0; flex: none; }
+.dlg .as-delay { display: block; font-size: 14px; margin: 10px 0 2px; } .dlg .as-delay input { display: block; width: 90px; margin-top: 4px; }
 .dlg .as-check-sub { margin-left: 26px; font-size: 13px; color: var(--muted); }
 @media (max-width: 899px) {
   .as-bar { padding: 8px 14px; } .as-notice { margin: 10px 14px 0; } .as-scroll { padding: 14px 14px 6px; } .as-form { padding: 8px 14px max(12px, env(safe-area-inset-bottom)); }
