@@ -118,9 +118,9 @@ test('PERSON TAKES OVER: anything a person sent since it was switched on stops i
   await ai.setReceptionist({ db, owners: OWNERS }, actor, { phone: PH, on: true }, { nowMs: NOW + 400e3 }); assert.equal((await rec()).paused, null, 'switching it on again starts a fresh page');
 });
 
-test('NOT A SIMPLE CASE: a complaint, a plain greeting or a question about prices is handed over with a push and NO reply', async () => {
+test('NOT A SIMPLE CASE: an unclear message or a question about prices is handed over with a push and NO reply (a complaint has its own test)', async () => {
   await on();
-  for (const [name, d] of [['complaint', decision({ intent: 'complaint', wantsConsultation: false, handover: { needed: true, reason: 'upset customer' }, reply: 'So sorry' })], ['unclear', decision({ intent: 'other', wantsConsultation: false, reply: 'Hmm' })], ['price', decision({ intent: 'pricing', wantsConsultation: false, handover: { needed: true, reason: 'asks about price' }, reply: 'It costs 5000 euro' })]]) {
+  for (const [name, d] of [['unclear', decision({ intent: 'other', wantsConsultation: false, reply: 'Hmm' })], ['price', decision({ intent: 'pricing', wantsConsultation: false, handover: { needed: true, reason: 'asks about price' }, reply: 'It costs 5000 euro' })]]) {
     await fresh(); await arm(); const m = fake([d]), w = fakeWa(), p = fakePush();
     assert.equal(await REC.processChat(deps(m, w, p), PH, NOW), 'handed_over', name); assert.equal(w.sent.length, 0, name + ': nothing sent'); assert.equal(p.events.length, 1, name + ': the owner is told'); assert.ok((await rec()).paused, name);
     const drafts = (await db.collection('aiDrafts').get()).docs.map((x) => x.data()); assert.ok(drafts.every((x) => x.outcome === 'discarded'), name + ': the draft is recorded as not used'); await db.recursiveDelete(db.collection('aiDrafts'));
@@ -176,5 +176,7 @@ test('ERASURE AND SAFETY: the receptionist state goes with the customer; the mod
   const src = fs.readFileSync(path.join(__dirname, '../lib/aiReceptionist.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   assert.equal(/sendTemplate|sendMedia|createAppointment|updateAppointment|appointments|quotes|projects|updateContact|setConversationStatus/.test(src), false, 'no booking, quote, project or contact change');
   assert.equal((src.match(/wa\.sendText\(/g) || []).length, 1, 'exactly one place sends, after the claim'); assert.ok(src.indexOf('outbound.begin(') < src.indexOf('wa.sendText('));
-  assert.ok(src.includes("SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on'])"));
+  const sch = fs.readFileSync(path.join(__dirname, '../lib/aiSchedule.js'), 'utf8');   // Step C: the sets of steps moved to aiSchedule.js (the test screen needs them too); the ones the receptionist sends before Step C are unchanged
+  assert.ok(sch.includes("SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on',"));
+  assert.ok(src.includes("require('./aiSchedule')") && !/new Set\(\['offer_visit'/.test(src));
 });

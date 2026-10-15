@@ -25,14 +25,13 @@ const { Timestamp } = require('firebase-admin/firestore');
 const ai = require('./ai');
 const outbound = require('./outbound');
 const store = require('./store');
+const { SEND_STEPS, PAUSE_STEPS } = require('./aiSchedule');
 
 const TZ = 'Europe/Dublin';
 const WAIT_MS = 30000, DEBOUNCE_MS = 30000, MIN_DELAY_MS = 5000, MAX_DELAY_MS = 90000, DAILY_CAP = 6, QUIET_UNTIL_HOUR = 7, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
 const ACTOR = { kind: 'system', id: 'receptionist' };
 // The only steps whose words are sent by themselves. All of them are written by code (aiSchedule.js); the first may carry a short checked acknowledgement in front.
-const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on']);
 // After these the chat is the owner's: the receptionist stays out.
-const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on']);
 // Step A: the receptionist offers a home visit ONCE and asks about days only after the customer has agreed; cancel_ask / tentative / ack_only / offer steps do not pause the chat (the customer may answer).
 // An ordinary message that needs no reply and no person (e.g. "thanks" from a customer who is already booked): not answered, not handed over.
 const QUIET_INTENTS = new Set(['greeting', 'new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general']);
@@ -135,7 +134,7 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     await store.storeOutbound(db, phone, { wamid, type: 'text', body: res.draft, extra: { auto: true } }).catch(() => log('error', 'receptionist text sent but not recorded', { wamid }));
     await ref.update({ 'receptionist.handledMs': lastIn, 'receptionist.day': day, 'receptionist.count': (r.day === day ? r.count || 0 : 0) + 1, 'receptionist.last': { step, at: Timestamp.fromMillis(nowMs), delayMs: Math.max(0, nowMs - lastIn) }, 'receptionist.tries': 0 });
     await report('used_unchanged');                                              // moves the consultation flow on (and leaves the request for the owner to book)
-    if (PAUSE_STEPS.has(step)) await handOver(deps, ref, phone, step === 'asked_ai' ? 'asked if AI' : 'consultation passed to you', nowMs, { notify: false });
+    if (PAUSE_STEPS.has(step) || (step === 'answer' && needs)) await handOver(deps, ref, phone, step === 'asked_ai' ? 'asked if AI' : ['acknowledge', 'no_preference', 'change_given', 'change_pass_on'].includes(step) ? 'consultation passed to you' : 'handover: ' + String((res.handover && res.handover.reason) || 'needs you').slice(0, 80), nowMs, { notify: false });
     if (needs) await ping(deps, phone, nowMs);
     return 'sent:' + step;
   } catch (e) {

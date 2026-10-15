@@ -15,6 +15,8 @@ const T = require('./aiTools');
 const A = require('./aiActions');
 const R = require('./aiReply');
 const SCH = require('./aiSchedule');
+const S = require('./aiSummary');
+const KN = require('./aiKnowledge');
 const { normalizePhone } = require('./whatsapp');
 
 const TZ = 'Europe/Dublin';
@@ -148,12 +150,12 @@ async function settle(db, { worstEur, actualEur, feature, model, usage, ok, ms, 
   await Promise.all([mRef.set(body(), { merge: true }), dRef.set(body(), { merge: true }),
     db.collection('aiLog').add({ feature, model, inputTokens: (usage && usage.input) || 0, outputTokens: (usage && usage.output) || 0, costEur: Math.round((keep ? worstEur : actualEur) * 1e8) / 1e8, ms, ok, at: Timestamp.fromMillis(nowMs) })]);
 }
-async function checkRate(db, uid, nowMs) {
-  const ref = db.doc('aiRate/' + String(uid).replace(/[^\w-]/g, '_').slice(0, 100));
+async function checkRate(db, uid, nowMs, { perMinute = RATE_PER_MINUTE, perHour = RATE_PER_HOUR, pool = '' } = {}) {
+  const ref = db.doc('aiRate/' + pool + String(uid).replace(/[^\w-]/g, '_').slice(0, 100));
   await db.runTransaction(async (tx) => {
     const s = await tx.get(ref), times = ((s.exists && s.data().times) || []).filter((t) => nowMs - t < 3600e3);
-    if (times.filter((t) => nowMs - t < 60e3).length >= RATE_PER_MINUTE || times.length >= RATE_PER_HOUR) throw new HttpsError('resource-exhausted', 'You are asking quickly. Wait a few seconds and ask again.');
-    tx.set(ref, { times: [...times, nowMs].slice(-RATE_PER_HOUR) });
+    if (times.filter((t) => nowMs - t < 60e3).length >= perMinute || times.length >= perHour) throw new HttpsError('resource-exhausted', 'You are asking quickly. Wait a few seconds and ask again.');
+    tx.set(ref, { times: [...times, nowMs].slice(-perHour) });
   });
 }
 async function status({ db, model, owners }, actor, data, { nowMs = Date.now() } = {}) {
@@ -411,6 +413,44 @@ async function chat({ db, model, owners }, actor, data, { uid, nowMs = Date.now(
 }
 
 // ---- R1: reply suggestions for a WhatsApp chat. One model call, nothing sent, nothing saved but a record WITHOUT the draft's words (so the owner can see how often drafts are used). ----
+// The reply itself, one core for everything that asks the model for a reply: "Suggest reply", the automatic receptionist, and the Knowledge Centre's test. It reserves the budget, asks, settles the cost and works
+// out what would be said. It does not read or write any chat. With published (or, in a test, draft) knowledge the model answers from it and the answer is checked in code; with none it behaves exactly as before.
+async function replyCore({ db, model, settings, key, sheet, knowledge, receptionist, nowMs, feature = 'reply' }) {
+  const system = R.systemPrompt({ receptionist, knowledge }), text = R.sheetText(sheet), modelName = MODELS[key].id, p = priceOf(settings, modelName);
+  const worst = eur(settings, p, { input: roughTokens(system.length + text.length + JSON.stringify(R.TOOL).length) * 1.25, output: settings.maxOutputTokens, cacheWrite: 0 });
+  await reserve(db, settings, worst, nowMs);
+  const t0 = Date.now(); let res;
+  try { res = await model.complete({ model: modelName, system, messages: [{ role: 'user', text }], tools: [R.TOOL], maxTokens: settings.maxOutputTokens }); }
+  catch (e) {
+    await settle(db, { worstEur: worst, actualEur: 0, feature, model: modelName, usage: null, ok: false, ms: Date.now() - t0, nowMs, keep: !!(e && e.timeout) }).catch(() => {});
+    log('error', 'ai call failed', { feature, model: modelName, status: (e && e.status) || 0, timeout: !!(e && e.timeout) });
+    throw new HttpsError('unavailable', 'The assistant is not available right now. Try again in a moment.');
+  }
+  const cost = eur(settings, p, res.usage);
+  await settle(db, { worstEur: worst, actualEur: cost, feature, model: modelName, usage: res.usage, ok: true, ms: Date.now() - t0, nowMs });
+  log('info', 'ai reply suggestion', { model: modelName, in: res.usage.input, out: res.usage.output, ms: Date.now() - t0 });
+  const call = res.toolCalls.find((c) => c.name === R.TOOL.name);
+  const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
+  // What the system itself may say about knowledge: the owner's lines, the portfolio links (the model only picks ids), and the answer checker.
+  const customerSaid = sheet.messages.filter((m) => m.direction === 'in').map((m) => m.body || '').join(' ') + ' ' + (sheet.lead || '') + ' ' + sheet.known.map((k) => k.value).join(' ');
+  const kn = knowledge ? { lines: knowledge.lines, check: (x) => KN.checkAnswer(x, knowledge, { extra: customerSaid }), linksText(ids) {
+    const sent = (u) => sheet.messages.some((m) => m.direction === 'out' && String(m.body || '').toLowerCase().includes(u.toLowerCase()));
+    const list = (ids || []).map((id) => knowledge.links.find((l) => l.id === id)).filter((l) => l && !sent(l.url));
+    return list.length ? knowledge.lines.links_intro + ' ' + list.map((l) => l.url).join(' and ') : '';
+  } } : null;
+  // Arranging a consultation is a fixed flow decided by code: the wording of every scheduling line is ours, the model only read the chat (see aiSchedule.js).
+  // Step A: interest is NOT agreement. Nothing is forced here: the plan asks about days only after the customer asked for a visit or said yes to the offer of one (aiSchedule.plan).
+  const plan = call ? SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs, natural: receptionist, kn: receptionist ? kn : null }) : { step: 'none', reply: null, handover: null, preference: null };       // an answer without the structure is shown as it is
+  let decision = plan.step === 'none' ? (plan.handover ? { ...asked, handover: plan.handover } : asked) : { ...asked, reply: plan.reply, handover: plan.handover || asked.handover };
+  // Staff ("Suggest reply"): the model's own answer is only a draft. Its links are added by code, and its content is checked and shown as warnings.
+  let extra = [];
+  if (!receptionist && kn && plan.step === 'none' && decision.reply) { const lt = kn.linksText(asked.links); if (lt) decision = { ...decision, reply: decision.reply + ' ' + lt }; extra = kn.check(asked.reply).reasons.map((x) => 'check: ' + x); }
+  // The automatic receptionist writes nothing of its own: a question it cannot answer (or a complaint) goes to a person with a reason, never to silence.
+  if (receptionist && plan.step === 'none' && !decision.handover.needed && (asked.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(asked.intent))) decision = { ...decision, handover: { needed: true, reason: asked.intent === 'complaint' ? 'upset customer' : 'a question that needs a person' } };
+  const analysis = R.analyse(sheet, decision, plan, { knowledge: !!knowledge });
+  if (extra.length) analysis.warnings.push(...extra);
+  return { res, call, asked, plan, decision, analysis, cost, modelName };
+}
 async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = Date.now(), receptionist = false } = {}) {
   onlyKeys(data, ['phone', 'model']);
   const phone = normalizePhone(typeof data.phone === 'string' ? data.phone : '');
@@ -426,35 +466,47 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   await checkRate(db, uid || actor.id, nowMs);
   const sheet = await R.buildSheet(db, phone, nowMs);
   if (!sheet) throw new HttpsError('not-found', 'Customer not found.');
-  const system = receptionist ? R.SYSTEM + '\n' + R.RECEPTIONIST_NOTE : R.SYSTEM, text = R.sheetText(sheet), modelName = MODELS[key].id, p = priceOf(settings, modelName);
-  const worst = eur(settings, p, { input: roughTokens(system.length + text.length + JSON.stringify(R.TOOL).length) * 1.25, output: settings.maxOutputTokens, cacheWrite: 0 });
-  await reserve(db, settings, worst, nowMs);
-  const t0 = Date.now(); let res;
-  try { res = await model.complete({ model: modelName, system, messages: [{ role: 'user', text }], tools: [R.TOOL], maxTokens: settings.maxOutputTokens }); }
-  catch (e) {
-    await settle(db, { worstEur: worst, actualEur: 0, feature: 'reply', model: modelName, usage: null, ok: false, ms: Date.now() - t0, nowMs, keep: !!(e && e.timeout) }).catch(() => {});
-    log('error', 'ai call failed', { feature: 'reply', model: modelName, status: (e && e.status) || 0, timeout: !!(e && e.timeout) });
-    throw new HttpsError('unavailable', 'The assistant is not available right now. Try again in a moment.');
-  }
-  const cost = eur(settings, p, res.usage);
-  await settle(db, { worstEur: worst, actualEur: cost, feature: 'reply', model: modelName, usage: res.usage, ok: true, ms: Date.now() - t0, nowMs });
-  log('info', 'ai reply suggestion', { model: modelName, in: res.usage.input, out: res.usage.output, ms: Date.now() - t0 });
-  const call = res.toolCalls.find((c) => c.name === R.TOOL.name);
-  const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
-  // Arranging a consultation is a fixed flow decided by code: the wording of every scheduling line is ours, the model only read the chat (see aiSchedule.js).
-  // Step A: interest is NOT agreement. Nothing is forced here: the plan asks about days only after the customer asked for a visit or said yes to the offer of one (aiSchedule.plan).
-  const plan = call ? SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs, natural: receptionist }) : { step: 'none', reply: null, handover: null, preference: null };       // an answer without the structure is shown as it is
-  let decision = plan.step === 'none' ? (plan.handover ? { ...asked, handover: plan.handover } : asked) : { ...asked, reply: plan.reply, handover: plan.handover || asked.handover };
-  // The automatic receptionist writes nothing of its own: a question it cannot answer (or a complaint) goes to a person with a reason, never to silence.
-  if (receptionist && plan.step === 'none' && !decision.handover.needed && (asked.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(asked.intent))) decision = { ...decision, handover: { needed: true, reason: asked.intent === 'complaint' ? 'upset customer' : 'a question that needs a person' } };
-  const analysis = R.analyse(sheet, decision, plan);
+  const knowledge = await KN.loadLive(db);                                    // the PUBLISHED knowledge only (none published = the behaviour from before Step C)
+  const { call, asked, plan, decision, analysis, cost } = await replyCore({ db, model, settings, key, sheet, knowledge, receptionist, nowMs });
   const draftId = 'ad_' + require('crypto').randomBytes(12).toString('hex');
   await db.doc('aiDrafts/' + draftId).set({ id: draftId, phone, createdBy: actor.id, createdByUid: uid || actor.id, createdAt: Timestamp.fromMillis(nowMs), model: key, intent: decision.intent, handover: decision.handover.needed, wantsConsultation: decision.wantsConsultation,
-    readiness: analysis.readiness.state, step: plan.step, visit: asked.visit, change: asked.change, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate, status: plan.preference.status || 'available' } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null, ...(receptionist ? { auto: true } : {}) });                 // no words of the draft or the chat
+    readiness: analysis.readiness.state, step: plan.step, visit: asked.visit, change: asked.change, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate, status: plan.preference.status || 'available' } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call,
+    ...(knowledge ? { knowledgeVersion: knowledge.version, answerState: plan.kn ? plan.kn.state : (asked.answerState || null), blocked: plan.kn ? plan.kn.blocked : [], topics: plan.kn ? plan.kn.topics : [] } : {}), costEur: Math.round(cost * 1e8) / 1e8, outcome: null, ...(receptionist ? { auto: true } : {}) });                 // no words of the draft or the chat
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,
     schedule: { step: plan.step, preference: plan.preference }, window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
+}
+// Step C: "Try it" in the Knowledge Centre (owner only). Runs the real receptionist decision on a PRETEND customer with the DRAFT (or the live) knowledge. Nothing is sent, no chat or draft record is written; the cost counts
+// against the AI budget like any other question. It needs the AI switched on and a model that passed "Check models", but not the real-customer-data switch (no real customer is involved).
+async function testKnowledge({ db, model, owners }, actor, data, { uid, nowMs = Date.now() } = {}) {
+  onlyKeys(data, ['source', 'cases', 'model']);
+  if (!KN.isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can test the knowledge.');
+  const source = data.source === 'live' ? 'live' : 'draft';
+  const cases = Array.isArray(data.cases) ? data.cases : []; if (!cases.length || cases.length > 6) throw bad('Send one to six questions at a time.');
+  if (data.model != null && !modelKey(data.model)) throw bad('Unknown model.');
+  const settings = await loadSettings(db);
+  if (!settings.enabled) throw refused('The AI assistant is switched off.');
+  if (!model) throw refused('The AI assistant is not set up yet (no key).');
+  const key = modelKey(data.model) || settings.replyModel;
+  if (!modelReady(await loadModelCheck(db), key)) throw refused(`The ${MODELS[key].label} model has not been checked yet. Open Settings and press "Check models".`);
+  const knowledge = source === 'live' ? await KN.loadLive(db) : await KN.loadDraftCompiled(db);
+  if (!knowledge) throw refused(source === 'live' ? 'Nothing is published yet.' : 'There is no draft yet.');
+  const out = [];
+  for (const c of cases) {
+    if (!c || typeof c !== 'object') throw bad('A test question is not valid.');
+    await checkRate(db, uid || actor.id, nowMs, { perMinute: 40, perHour: 300, pool: 'kt_' });                // the owner's own tests: a higher limit of its own (the budget cap still applies)
+    const text = S.one(c.text, 400); if (!text) throw bad('A test question is empty.');
+    const state = ['new', 'offered', 'asked_days', 'booked'].includes(c.state) ? c.state : 'new';
+    const sheet = R.testSheet({ nowMs, messages: [{ who: 'customer', text }], state });
+    const r = await replyCore({ db, model, settings, key, sheet, knowledge, receptionist: true, nowMs, feature: 'knowledge_test' });
+    const send = SCH.SEND_STEPS.has(r.plan.step) && !!r.decision.reply && !!r.call && !r.analysis.warnings.length;
+    const mustNot = (Array.isArray(c.mustNot) ? c.mustNot : []).map((x) => S.one(x, 60)).filter(Boolean).slice(0, 6), hit = mustNot.filter((x) => r.decision.reply.toLowerCase().includes(x.toLowerCase()));
+    out.push({ question: text, state, reply: send ? r.decision.reply : '', wouldSend: send, step: r.plan.step, handover: r.decision.handover, intent: r.decision.intent, visit: r.asked.visit, answerState: r.plan.kn ? r.plan.kn.state : r.asked.answerState, special: r.asked.special,
+      topics: ((r.plan.kn && r.plan.kn.topics) || r.asked.topics || []).map((id) => ({ id, title: knowledge.titles[id] || null })), blocked: r.plan.kn ? r.plan.kn.blocked : [], warnings: r.analysis.warnings, silent: !send, failed: hit, costEur: Math.round(r.cost * 1e8) / 1e8 });
+  }
+  const st = await status({ db, model, owners }, actor, {}, { nowMs });
+  return { source, knowledgeVersion: knowledge.version, results: out, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
 }
 // How a draft ended, reported by the screen: used as it was, used after editing, or not used. Only the person who asked for it can say; it is recorded once. No text is sent.
 async function draftOutcome({ db }, actor, data, { uid } = {}) {
@@ -516,4 +568,4 @@ async function decideProposal({ db }, actor, data, { uid, nowMs = Date.now() } =
   return A.decide({ db }, actor, uid || actor.id, data, { nowMs }, await loadSettings(db));
 }
 
-module.exports = { suggestReply, draftOutcome, dismissConsult, setReceptionist, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };
+module.exports = { suggestReply, testKnowledge, draftOutcome, dismissConsult, setReceptionist, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };

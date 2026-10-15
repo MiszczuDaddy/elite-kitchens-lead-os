@@ -19,6 +19,8 @@ const LINES = {
   ask_next_week: 'Would any day next week suit you for a home consultation?',
   ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
   acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+  // A complaint or an upset customer (owner's wording, 15 Oct 2026): one line, then a person takes over at once. No promise about resolving it, and the automatic conversation does not continue.
+  complaint: 'I\'m sorry to hear that. I\'ll pass this on to the team so they can look into it.',
   asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
   // The owner's own words for a GENERAL price question (how much do kitchens cost): the only price statement the system ever makes. Nothing about a specific kitchen, a quote or a discount.
   price_general: 'All our kitchens are different, so each project is priced individually, but most of our kitchens range from €10k to €20k.',
@@ -110,7 +112,15 @@ function opener(text, hasOutbound) {
 // The plan for this message. Returns { step, reply, handover, preference }:
 //   step 'none'     nothing is said by the system (a person takes over if handover.needed; otherwise the model's own reply is only a draft for staff)
 //   offer_visit / price_offer / price_general / ack_only / ask_next_week / ask_following_week / acknowledge / no_preference / tentative / cancel_ask / change_ask / change_given / change_pass_on / asked_ai   a fixed line
-function plan({ decision, consult, messages, booked, nowMs, natural = false }) {
+// The model is told to write only the answer, but it sometimes adds a "the team will come back to you" (the system adds that line itself) or "here are some photos" (the system adds the links). Those sentences are
+// taken out, so the customer is not told the same thing twice. Nothing is added or reworded; a reply that is only such sentences is not used.
+const FOLLOWUP = /\b(?:the team|a member of the team|one of the team|someone|we(?:'ll| will)|i(?:'ll| will))\b[^.?!]*\b(?:come back|get back|be in touch|follow up|check|confirm|go through|call you|ring you)\b/i;
+const SHOWING = /\bhere(?:'s| is| are)\b[^.?!]*\b(?:work|photos?|pictures?|kitchens?|projects?|links?|look)\b/i;
+function tidy(text, { partly = false, links = false } = {}) {
+  const parts = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean), keep = parts.filter((s) => !(partly && FOLLOWUP.test(s)) && !(links && SHOWING.test(s)));
+  return keep.join(' ').trim();
+}
+function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
   const visit = d.visit || (d.wantsConsultation ? 'asked' : 'none');
@@ -138,6 +148,37 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false }) {
     if (change === 'move_specific') return person('wants the booking moved to a specific time (tomorrow, earlier, a date): needs you');
     if (change === 'confirm') return person('asks you to confirm the booking');
     if (change === 'late') return person('running late for the booking');
+  }
+
+  // 2a. A complaint (the automatic receptionist only): the owner's one line, then a person takes over at once and the receptionist stops (PAUSE_STEPS). Nothing is answered, offered, asked or promised.
+  if (natural && d.intent === 'complaint') return { step: 'complaint', reply: (kn && kn.lines.complaint) || LINES.complaint, handover: { needed: true, reason: 'complaint: upset customer' }, preference: null, ...(kn ? { kn: { state: 'special', special: 'complaint', blocked: [], topics: [] } } : {}) };
+
+  // 2b. Step C: the owner has published knowledge, and this is the automatic receptionist. A customer who asks for a person, or whose job is outside our areas, a job we decline, or not in English, gets the
+  //     owner's line and a person takes over. A question is ANSWERED from the knowledge first (the answer was checked in code), and only then does the Step A flow go on exactly as before: the visit is offered once,
+  //     days are asked only after agreement, a preference is recorded. A question the knowledge does not answer (or an answer that failed the check) gets the holding line and a person takes over: never a guess.
+  if (kn && natural) {
+    const special = { wants_person: ['human', kn.lines.human, 'asked for a person'], outside_area: ['outside_area', kn.lines.outside_area, 'outside the areas we cover: please review'], declined_job: ['declined_job', kn.lines.declined_job, 'a job we usually decline: please review'], other_language: ['other_language', kn.lines.other_language, 'message not in English'] }[d.special];
+    if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
+    const raw = String(d.reply || '').trim(), asking = d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent) || (d.intent === 'asking_price_general' && !!raw);
+    if (asking && d.intent !== 'complaint') {
+      const linkLine = kn.linksText(d.links), text = tidy(raw, { partly: hand || d.answerState === 'partly', links: !!linkLine }) || (linkLine ? 'Of course.' : '');
+      const has = !!text && d.answerState !== 'none', chk = has ? kn.check(text) : { ok: true, reasons: [] }, ok = has && chk.ok;
+      const state = ok ? (hand || d.answerState === 'partly' ? 'partly' : 'answered') : 'none', unknown = d.unknown ? ': ' + d.unknown : '';
+      const links = ok ? linkLine : '', first = !out.some((m) => m.type !== 'template'), op = ok && first ? opener(d.schedule && d.schedule.opener, hasOutbound) : '';
+      const sep = links ? '\n' : ' ', answer = ok ? (op ? op + ' ' : '') + text + (links ? '\n' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
+      if (!ok) return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
+      if (state === 'partly') {
+        const why = (reason || 'part of the question needs the team') + unknown;
+        if (given && !booked) return { step: 'acknowledge', reply: answer + sep + LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + why }, preference: given, kn: info };
+        return { step: 'answer_holding', reply: answer + sep + (kn.lines.partly || kn.lines.holding), handover: { needed: true, reason: why }, preference: null, kn: info };
+      }
+      // fully answered: the answer goes first, then whatever the consultation flow would have said, with the question taken out of the picture
+      const neutral = { ...d, hasQuestion: false, reply: '', answerState: null, special: 'none', links: [], handover: { needed: false, reason: null }, schedule: { preference: d.schedule && d.schedule.preference, opener: '' },
+        intent: ['asking_info', 'asking_price'].includes(d.intent) ? 'answering_questions' : d.intent };
+      const core = plan({ decision: neutral, consult, messages, booked, nowMs, natural, kn: null });
+      if (core.step === 'none') return { step: 'answer', reply: answer, handover: core.handover, preference: core.preference, kn: info };
+      return { ...core, reply: answer + sep + core.reply, kn: info };
+    }
   }
 
   // 3. A general question about what kitchens cost is answered with the owner's fixed line; then, once, the offer of a visit (never a question about days before they agree).
@@ -208,4 +249,9 @@ function advance(consult, step, preference, nowMs) {
   return null;
 }
 
-module.exports = { LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, cleanPreference, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, plan, advance };
+// The only steps whose words are sent by themselves by the automatic receptionist. All are written by code (the fixed lines above and the owner's knowledge lines) or are an answer that passed the answer checker.
+const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on',
+  'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
+// After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
+const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
+module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, cleanPreference, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, plan, advance };

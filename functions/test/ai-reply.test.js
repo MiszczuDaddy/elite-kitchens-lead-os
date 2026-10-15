@@ -62,7 +62,7 @@ test('LINT: drafts get warnings for links, money, phone numbers, promises, AI wo
 });
 
 test('DECISION: what the model returns is cleaned: unknown fields dropped, lengths capped, wrong types ignored, nothing trusted', () => {
-  assert.deepEqual(R.cleanDecision(null), { reply: '', intent: 'other', visit: 'none', hasQuestion: false, change: 'none', wantsConsultation: false, schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null } });
+  assert.deepEqual(R.cleanDecision(null), { reply: '', intent: 'other', visit: 'none', hasQuestion: false, change: 'none', wantsConsultation: false, answerState: null, special: 'none', links: [], topics: [], unknown: '', schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null } });
   // Step A fields: the visit, the question, the change to a booking and the status of what they said about when they are free; anything unknown is ignored, an older answer with only wantsConsultation still works
   const v = R.cleanDecision({ intent: 'greeting', visit: 'agreed', hasQuestion: true, change: 'cancel', schedule: { preference: { status: 'tentative', text: 'I will know on Friday' } } });
   assert.deepEqual([v.intent, v.visit, v.hasQuestion, v.change, v.wantsConsultation, v.schedule.preference.status], ['greeting', 'agreed', true, 'cancel', true, 'tentative']);
