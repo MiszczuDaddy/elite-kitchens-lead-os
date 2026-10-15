@@ -475,7 +475,7 @@ window.QUOTES = (() => {
     }
     if (q.draftVersion) {
       row.append(button('Save draft', 'btn-primary', () => saveDraft(false), 'qv-save'), button('Send…', 'btn-ghost', () => openSend('send'), 'qv-send'),
-        button('Preview', 'btn-ghost', openPreview, 'qv-preview'));
+        button('Preview PDF', 'btn-ghost', openPdfPreview, 'qv-preview-pdf'), button('Quick preview', 'btn-ghost', openPreview, 'qv-preview'));
       if (q.sentVersion) row.append(button('Discard draft…', 'btn-ghost', confirmDiscard, 'qv-discard'));
       else row.append(button('Delete quote…', 'btn-ghost qv-danger', confirmDelete, 'qv-delete'));
       nodes.push(row, el('p', 'qb-note qv-hint', SEND_HINT));
@@ -795,6 +795,8 @@ window.QUOTES = (() => {
     return { ref: `${q.ref}-v${n}`, issueDate, validUntil: addDays(issueDate, ctx.settings.validityDays), customer: { ...ctx.customer, phone: q.phone },
       business: ctx.settings.business, sheet, renders: renders || [], draft: !!draft };
   }
+  // What the customer's PDF is made from, for a send dialog: the same data for the real send, the "send it yourself" way and the Preview PDF button, so a preview is the PDF that would be sent.
+  const pdfDataFor = (d, n, sheet) => documentData(d.q, n, sheet, d.ctx, d.issueDate, d.renders, false);
   const sendDlg = () => { const d = Q.dlg; return d && d.kind === 'send' ? d : null; };
   const err = (t) => { $('qsend-err').textContent = t || ''; };
 
@@ -947,7 +949,7 @@ window.QUOTES = (() => {
   async function makePdfAndUpload(d, n, sheet, progress) {
     if (!d.upload) {
       progress('Making the PDF…');
-      const data = documentData(d.q, n, sheet, d.ctx, d.issueDate, d.renders, false);
+      const data = pdfDataFor(d, n, sheet);
       d.filename = `EliteKitchens-${d.q.ref}-v${n}.pdf`;
       d.blob = await QuoteDocument.toPdf(data, { filename: d.filename });
       d.upload = true;
@@ -1044,7 +1046,7 @@ window.QUOTES = (() => {
         const v = await versionDoc(d.q.id, n); sheet = v.sheet;
       }
       progress('Making the PDF…');
-      const data = documentData(d.q, n, sheet, d.ctx, d.issueDate, d.renders, false);
+      const data = pdfDataFor(d, n, sheet);
       const filename = `EliteKitchens-${d.q.ref}-v${n}.pdf`;
       const blob = await QuoteDocument.toPdf(data, { filename });
       progress('Uploading the PDF…');
@@ -1176,6 +1178,41 @@ window.QUOTES = (() => {
     const url = 'https://mail.google.com/mail/?view=cm&fs=1' + (c.email ? '&to=' + encodeURIComponent(c.email) : '') + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
     window.open(url, '_blank', 'noopener');
   };
+
+  // ---------- Preview PDF: the real PDF, opened for viewing; nothing is sent, stored or marked ----------
+  // Made with the same function and the same data as a real send (QuoteDocument.toPdf), then opened in a new tab. The new tab is opened straight away (while the click still counts, or the browser blocks it) and
+  // filled when the PDF is ready; if the browser still blocks it, the PDF is downloaded instead. Nothing is uploaded, no quote or customer changes, and the file made for a real send is not touched.
+  const previewUrls = [];
+  async function previewPdf(makeData, filename, setBusy, report) {
+    const win = window.open('', '_blank');
+    if (win) { try { win.document.write('<!doctype html><title>Preview PDF</title><body style="font:16px system-ui,sans-serif;padding:28px;color:#444">Making the PDF…</body>'); } catch (e) { /* cross-origin guard: ignore */ } }
+    setBusy(true);
+    try {
+      const blob = await QuoteDocument.toPdf(makeData(), { filename });
+      while (previewUrls.length > 3) URL.revokeObjectURL(previewUrls.shift());
+      const url = URL.createObjectURL(blob); previewUrls.push(url); Q.lastPreview = { url, size: blob.size, filename };
+      if (win && !win.closed) win.location.href = url;
+      else { const a = document.createElement('a'); a.href = url; a.download = filename; document.body.append(a); a.click(); a.remove(); report('Your browser blocked the new tab, so the preview PDF was downloaded instead.'); }
+      return { blob, url };
+    } catch (e) { if (win && !win.closed) win.close(); report(errText(e), true); return null; }
+    finally { setBusy(false); }
+  }
+  // From the Send box: with the design renders chosen there, exactly as it would be sent.
+  $('qsend-preview-pdf').onclick = async () => {
+    const d = sendDlg(); if (!d || d.working || d.view !== 'form') return;
+    const b = $('qsend-preview-pdf'), label = b.textContent; err('');
+    await previewPdf(() => pdfDataFor(d, d.n, d.sheet), 'EliteKitchens-' + d.q.ref + '-v' + d.n + '.pdf', (on) => { b.disabled = on; b.textContent = on ? 'Making the PDF…' : label; }, (t, bad) => { if (bad) err('Preview PDF: ' + t); else $('qsend-progress').textContent = t; });
+  };
+  // From the quote page: the saved draft as it stands (design renders are added in the Send box, so they are not in this one).
+  async function openPdfPreview() {
+    const q = Q.quote, dv = draftV(); if (!q || !dv) return;
+    if (!Q.sheet) { note('Fix the highlighted fields first.', 'err'); return; }
+    let ctx; try { ctx = await sendContext(q); } catch (e) { note(errText(e), 'err'); return; }
+    const b = $('qv-preview-pdf'), label = b ? b.textContent : '';
+    if (Q.dirty) note('The preview PDF includes your unsaved changes. Design renders are added in the Send box.', '');
+    await previewPdf(() => documentData(q, q.draftVersion, Q.sheet, ctx, today(), [], false), 'EliteKitchens-' + q.ref + '-v' + q.draftVersion + '.pdf',
+      (on) => { if (b) { b.disabled = on; b.textContent = on ? 'Making the PDF…' : label; } }, (t, bad) => note(bad ? 'Preview PDF: ' + t : t, bad ? 'err' : ''));
+  }
 
   // ---------- preview (marked "Draft · not sent") ----------
   async function showPreview(data, title) {

@@ -624,7 +624,7 @@
       <p id="qsend-via-note" class="hint qsend-via-note"></p>
     </fieldset>
     <div id="qsend-new-only">
-      <label>Design renders <span class="label-note">(optional: up to 5 images, each on its own page)</span><input id="qsend-renders" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+      <label>Design renders <span class="label-note">(optional: up to 5 images, laid out together on the quote pages)</span><input id="qsend-renders" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
       <div id="qsend-thumbs" class="qsend-thumbs"></div>
       <label class="q-check" id="qsend-reopen-row" hidden><input type="checkbox" id="qsend-reopen"> <span id="qsend-reopen-text"></span></label>
       <label>Pipeline value<input id="qsend-value" inputmode="decimal" maxlength="12" aria-describedby="qsend-value-help"></label>
@@ -634,7 +634,8 @@
     <p id="qsend-progress" class="qsend-progress" role="status"></p>
     <div id="qsend-err" class="dlg-err" role="alert"></div>
     <div class="dlg-actions">
-      <button type="button" id="qsend-preview" class="btn btn-ghost qsend-left">Preview</button>
+      <button type="button" id="qsend-preview-pdf" class="btn btn-ghost qsend-left">Preview PDF</button>
+      <button type="button" id="qsend-preview" class="btn btn-ghost">Quick preview</button>
       <button type="button" id="qsend-cancel" class="btn btn-ghost">Cancel</button>
       <button type="submit" id="qsend-send" class="btn btn-primary">Send quote</button>
     </div>
@@ -688,6 +689,7 @@
 <script src="/pipeline.js"></script>
 <script src="/appointments.js"></script>
 <script src="/quote-engine.js"></script>
+<script src="/quote-numbers.js"></script>
 <script src="/quote-document.js"></script>
 <script src="/quote-builder.js"></script>
 <script src="/quote-settings.js"></script>
