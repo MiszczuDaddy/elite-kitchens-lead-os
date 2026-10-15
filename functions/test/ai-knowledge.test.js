@@ -158,7 +158,8 @@ test('ANSWER FIRST, THEN STEP A: a question is answered from the knowledge and t
   await publishSeed(); await chat([['in', 'What deposit do you take?']]);
   const dep = 'We take a 30% deposit once you accept the quote.';
   let { r } = await ask(dec({ topics: ['process-steps'] }, dep));
-  assert.equal(r.schedule.step, 'offer_visit'); assert.equal(r.draft, dep + ' ' + L.visit_offer, 'the answer first, then the one offer of a visit'); assert.equal(r.handover.needed, false);
+  assert.equal(r.schedule.step, 'answer'); assert.equal(r.draft, dep, 'a plain question of fact is just answered: no visit attached'); assert.equal(r.handover.needed, false);
+  ({ r } = await ask(dec({ intent: 'new_enquiry' }, dep))); assert.equal(r.schedule.step, 'offer_visit'); assert.equal(r.draft, dep + ' ' + L.visit_offer, 'when they talk about their own project, the answer is followed by the one offer of a visit');
   // already offered: only the answer, never the offer again, and nothing about days
   await chat([['in', 'What deposit do you take?']], { state: 'offered' });
   ({ r } = await ask(dec({}, dep))); assert.equal(r.schedule.step, 'answer'); assert.equal(r.draft, dep); assert.equal(r.handover.needed, false);
@@ -167,7 +168,7 @@ test('ANSWER FIRST, THEN STEP A: a question is answered from the knowledge and t
   ({ r } = await ask(dec({ visit: 'agreed' }, 'No, the home visit is free and there is no obligation.'))); assert.equal(r.schedule.step, 'ask_next_week'); assert.equal(r.draft, 'No, the home visit is free and there is no obligation. ' + L.ask_next_week);
   // interest or a question alone is NOT agreement: no days question
   await chat([['in', 'Do you do wardrobes too?']]);
-  ({ r } = await ask(dec({}, 'Yes, we do kitchens, wardrobes and utility rooms.'))); assert.doesNotMatch(r.draft, /next week|which day|what day/i); assert.equal(r.schedule.step, 'offer_visit');
+  ({ r } = await ask(dec({}, 'Yes, we do kitchens, wardrobes and utility rooms.'))); assert.doesNotMatch(r.draft, /next week|which day|what day/i); assert.equal(r.schedule.step, 'answer');
   // a plain general price question: the owner's own line, then the offer (the system, not the model)
   await chat([['in', 'how much is a kitchen?']]);
   ({ r } = await ask(decision({ intent: 'asking_price_general', hasQuestion: false, reply: '' }))); assert.equal(r.schedule.step, 'price_offer'); assert.equal(r.draft, L.price_general + ' ' + L.visit_offer);
@@ -217,7 +218,7 @@ test('THE OWNER\'S DECISIONS: a request for a person, outside our area, a job we
 test('LINKS: the model only picks ids; the addresses come from the owner\'s settings, once per chat, and only when the customer asked; a made-up address is blocked', async () => {
   await publishSeed(); await chat([['in', 'Can I see photos of your work?']]);
   let { r } = await ask(dec({ links: ['website', 'instagram', 'nope'], intent: 'asking_info' }, 'Of course.'));
-  assert.equal(r.draft, 'Of course.\n' + K.links_intro + ' elitekitchens.ie and instagram.com/elite_kitchens_ie\n' + L.visit_offer); assert.equal(r.schedule.step, 'offer_visit');
+  assert.equal(r.draft, 'Of course.\n' + K.links_intro + ' elitekitchens.ie and instagram.com/elite_kitchens_ie'); assert.equal(r.schedule.step, 'answer');
   // sent already: not sent again
   await chat([['in', 'Can I see photos of your work?']], { state: 'offered' }); const sent = await store.storeOutbound(db, PH, { wamid: 'wamid.LINKS', type: 'text', body: 'See elitekitchens.ie and instagram.com/elite_kitchens_ie' });
   await db.doc(`conversations/${PH}/messages/wamid.LINKS`).update({ createdAt: ts(NOW - 60e3) }); await store.storeInbound(db, { wamid: 'wamid.IN2', from: PH, type: 'text', body: 'any more photos?', name: 'A', createdAt: new Date(NOW - 30e3) });
@@ -236,7 +237,7 @@ test('ONLY PUBLISHED KNOWLEDGE REACHES CUSTOMERS: the draft is never used; publi
   await KN.importStarter({ db, owners: OWNERS }, owner, {}, { nowMs: NOW });                                 // a draft exists, nothing is published
   m = spy(dec({}, 'We take a 30% deposit once you accept the quote.')); ({ r } = await ask(null, { model: m })); assert.doesNotMatch(m.calls[0].system, /APPROVED KNOWLEDGE/, 'a draft never reaches the model');
   await KN.publish({ db, owners: OWNERS }, owner, { note: 'one' }, { nowMs: NOW });
-  m = spy(dec({}, 'We take a 30% deposit once you accept the quote.')); ({ r } = await ask(null, { model: m }));
+  m = spy(dec({ intent: 'new_enquiry' }, 'We take a 30% deposit once you accept the quote.')); ({ r } = await ask(null, { model: m }));
   assert.match(m.calls[0].system, /APPROVED KNOWLEDGE \(version 1\)[\s\S]*30% deposit/); assert.match(m.calls[0].system, /AUTOMATIC MODE[\s\S]*Do NOT push a consultation/); assert.match(m.calls[0].system, /APPROVED KNOWLEDGE MODE/);
   assert.equal(r.schedule.step, 'offer_visit');
   // the owner edits the draft and publishes: the next message uses it at once
@@ -254,7 +255,7 @@ test('IN THE REAL FLOW: the receptionist sends the answer, hands over after a ho
   await publishSeed(); const w = { sent: [], async sendText(to, body) { w.sent.push(body); return 'wamid.A' + w.sent.length; } }, push = { events: [], async notify(e) { push.events.push(e); } };
   const run = async (d) => { const m = spy(d), c = await db.doc('conversations/' + PH).get(); await db.doc('conversations/' + PH).update({ receptionist: { on: true, auto: true, at: ts(NOW - 5 * 3600e3), by: 'auto', paused: null, handledMs: 0, count: 0, day: null } });
     return REC.processChat({ db, wa: w, model: m, owners: OWNERS, push, welcomeTemplate: TEMPLATE }, PH, (c.data().lastInboundAt.toMillis()) + 40e3); };
-  await chat([['in', 'What deposit do you take?']]); assert.equal(await run(dec({}, 'We take a 30% deposit once you accept the quote.')), 'sent:offer_visit'); assert.equal(w.sent.pop(), 'We take a 30% deposit once you accept the quote. ' + L.visit_offer);
+  await chat([['in', 'What deposit do you take?']]); assert.equal(await run(dec({ intent: 'new_enquiry' }, 'We take a 30% deposit once you accept the quote.')), 'sent:offer_visit'); assert.equal(w.sent.pop(), 'We take a 30% deposit once you accept the quote. ' + L.visit_offer);
   assert.equal((await db.doc('conversations/' + PH).get()).data().receptionist.paused, null, 'an answer plus an offer does not end the conversation'); assert.equal(push.events.length, 0);
   await chat([['in', 'Is the carcass warranty 10 years?']]); assert.equal(await run(dec({ answerState: 'none', handover: { needed: true, reason: 'open item' } }, '')), 'sent:holding'); assert.equal(w.sent.pop(), K.holding);
   const c = (await db.doc('conversations/' + PH).get()).data(); assert.match(c.receptionist.paused, /^handover: open item/, 'handed over after the holding line'); assert.equal(push.events.length, 1, 'the owner is told');
@@ -267,7 +268,7 @@ test('IN THE REAL FLOW: the receptionist sends the answer, hands over after a ho
 // ====================== the test screen ======================
 test('TRY IT: the owner tests questions on the DRAFT (or the live knowledge) with a pretend customer: the real decision is shown, nothing is sent, no chat or draft record is written, the cost counts against the budget; only the owner, one to six at a time', async () => {
   await KN.importStarter({ db, owners: OWNERS }, owner, {}, { nowMs: NOW });
-  const m = spy((n) => (n === 1 ? decision({ reply: 'We take a 30% deposit once you accept the quote.', topics: ['process-steps', 'bogus'] }) : decision({ reply: 'Your visit is booked.' })));
+  const m = spy((n) => (n === 1 ? decision({ intent: 'new_enquiry', reply: 'We take a 30% deposit once you accept the quote.', topics: ['process-steps', 'bogus'] }) : decision({ reply: 'Your visit is booked.' })));
   const T = (d, who = owner) => ai.testKnowledge({ db, model: m, owners: OWNERS }, who, d, { uid: 'u1', nowMs: NOW });
   const out = await T({ source: 'draft', cases: [{ text: 'What deposit do you take?' }, { text: 'When are you coming?', mustNot: ['booked'] }] });
   assert.equal(out.source, 'draft'); assert.equal(out.results.length, 2); const [a, b] = out.results;
@@ -286,6 +287,23 @@ test('TRY IT: the owner tests questions on the DRAFT (or the live knowledge) wit
   await rej(T({ source: 'live', cases: [{ text: 'x' }] }), 'failed-precondition');                                // nothing is published
   await db.doc('aiSettings/current').update({ enabled: false }); await rej(T({ cases: [{ text: 'x' }] }), 'failed-precondition');
   await db.doc('aiSettings/current').update({ enabled: true, monthlyCapEur: 0, dailyCapEur: 0 }); await rej(T({ cases: [{ text: 'x' }] }), 'failed-precondition');
+});
+
+test('NO OFFER ON A PLAIN FACT: a question of fact is just answered (no visit attached); talking about their own project or asking what kitchens cost still gets the one offer; the offer is still made only once; after agreement the days question still follows the answer', async () => {
+  await publishSeed();
+  const cases = [['Do you supply the appliances?', 'asking_info', 'answer', false], ['How long does fitting take?', 'asking_info', 'answer', false], ['Hi, I am looking for a shaker kitchen. Do you do wardrobes too?', 'new_enquiry', 'offer_visit', true], ['I want a new kitchen, what is included?', 'wants_consultation', 'offer_visit', true]];
+  for (const [q, intent, step, offer] of cases) {
+    await chat([['in', q]]); const { r } = await ask(dec({ intent }, 'We fit the integrated ones.'));
+    assert.equal(r.schedule.step, step, q); assert.equal(r.draft.includes(L.visit_offer), offer, q); assert.doesNotMatch(r.draft, /next week|which day|what day/i, 'never days before agreement'); assert.equal(r.handover.needed, false);
+  }
+  // a plain fact does not use up the offer: the next message about their project still gets it (once)
+  await chat([['in', 'Do you supply the appliances?'], ['out', 'No, you buy them and we fit the integrated ones.'], ['in', 'ok, I want a shaker kitchen']]);
+  let { r } = await ask(dec({ intent: 'new_enquiry', hasQuestion: false, answerState: 'answered' }, 'Lovely, a shaker kitchen sounds great.')); assert.equal(r.schedule.step, 'offer_visit'); assert.match(r.draft, new RegExp(L.visit_offer.replace(/[?]/g, '\\?') + '$'));
+  await chat([['in', 'Do you supply the appliances?']], { state: 'offered' }); ({ r } = await ask(dec({ intent: 'new_enquiry' }, 'No, you buy them.'))); assert.equal(r.draft, 'No, you buy them.', 'offered once already: never again');
+  // agreed and asked a fact: the answer, then the first days question
+  await chat([['in', 'Yes please. Do you supply the appliances?']], { state: 'offered' }); ({ r } = await ask(dec({ intent: 'asking_info', visit: 'agreed' }, 'No, you buy them.'))); assert.equal(r.schedule.step, 'ask_next_week'); assert.equal(r.draft, 'No, you buy them. ' + L.ask_next_week);
+  // the general price question keeps its own line and the offer
+  await chat([['in', 'how much is a kitchen?']]); ({ r } = await ask(decision({ intent: 'asking_price_general', hasQuestion: false, reply: '' }))); assert.equal(r.schedule.step, 'price_offer');
 });
 
 test('A COMPLAINT: one polite line, then a person takes over at once; no promise to fix anything, no offer, no days, no answer, and the automatic conversation does not continue', async () => {
@@ -329,7 +347,7 @@ test('WIRING: two new callables, owner and staff gates in the code; nothing in t
 
 test('A CUSTOMER\'S OWN FIGURE MAY BE REPEATED BACK, nothing else about it is trusted: "7k" is fine in the answer, a price built on it is not', async () => {
   await publishSeed(); await chat([['in', 'My budget is about 7k, is that enough?']]);
-  let { r } = await ask(dec({ intent: 'asking_info' }, 'Most of our kitchens start around €10,000, so 7k is a bit under, but we can still have a look at what\'s possible.'));
+  let { r } = await ask(dec({ intent: 'new_enquiry' }, 'Most of our kitchens start around €10,000, so 7k is a bit under, but we can still have a look at what\'s possible.'));
   assert.equal(r.schedule.step, 'offer_visit'); assert.match(r.draft, /^Most of our kitchens start around €10,000, so 7k is a bit under/);
   ({ r } = await ask(dec({ intent: 'asking_info' }, 'Yes, we can do your kitchen for 7k.'))); assert.equal(r.schedule.step, 'holding', 'a price promise is still blocked');
   assert.equal(KN.checkAnswer('That works out at 8k.', await KN.loadLive(db), { extra: 'about 7k' }).ok, false, 'a figure the customer did not give');
@@ -340,8 +358,8 @@ test('NO DOUBLE TALK: a "the team will come back" or "here are some photos" the 
   let { r } = await ask(dec({ answerState: 'partly', links: ['website'], handover: { needed: true, reason: 'wardrobe price' } }, 'Yes, we do fitted wardrobes. The team will come back to you on prices. Here are some of our work.'));
   assert.equal(r.draft, 'Yes, we do fitted wardrobes.\n' + K.links_intro + ' elitekitchens.ie\n' + K.partly);
   await chat([['in', 'photos please']]); ({ r } = await ask(dec({ links: ['website', 'instagram'] }, 'Of course, here\'s a look at some of our work.')));
-  assert.equal(r.draft, 'Of course.\n' + K.links_intro + ' elitekitchens.ie and instagram.com/elite_kitchens_ie\n' + L.visit_offer);
-  await chat([['in', 'is the visit free?']]); ({ r } = await ask(dec({}, 'Yes, the free visit has no obligation.'))); assert.equal(r.schedule.step, 'offer_visit', 'free visit = free home visit');
+  assert.equal(r.draft, 'Of course.\n' + K.links_intro + ' elitekitchens.ie and instagram.com/elite_kitchens_ie');
+  await chat([['in', 'is the visit free?']]); ({ r } = await ask(dec({}, 'Yes, the free visit has no obligation.'))); assert.equal(r.schedule.step, 'answer', 'free visit = free home visit');
   assert.equal(KN.checkAnswer('You get a free design and free delivery.', await KN.loadLive(db)).ok, false);
   await chat([['in', 'what is the price of wardrobes?']]); ({ r } = await ask(dec({ answerState: 'partly' }, 'The team will come back to you on that.'))); assert.equal(r.schedule.step, 'holding', 'nothing left to say but the follow-up: just the holding line');
 });
