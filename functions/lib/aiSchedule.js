@@ -19,6 +19,8 @@ const LINES = {
   ask_next_week: 'Would any day next week suit you for a home consultation?',
   ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
   acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+  // A complaint or an upset customer (owner's wording, 15 Oct 2026): one line, then a person takes over at once. No promise about resolving it, and the automatic conversation does not continue.
+  complaint: 'I\'m sorry to hear that. I\'ll pass this on to the team so they can look into it.',
   asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
   // The owner's own words for a GENERAL price question (how much do kitchens cost): the only price statement the system ever makes. Nothing about a specific kitchen, a quote or a discount.
   price_general: 'All our kitchens are different, so each project is priced individually, but most of our kitchens range from €10k to €20k.',
@@ -148,6 +150,9 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     if (change === 'late') return person('running late for the booking');
   }
 
+  // 2a. A complaint (the automatic receptionist only): the owner's one line, then a person takes over at once and the receptionist stops (PAUSE_STEPS). Nothing is answered, offered, asked or promised.
+  if (natural && d.intent === 'complaint') return { step: 'complaint', reply: (kn && kn.lines.complaint) || LINES.complaint, handover: { needed: true, reason: 'complaint: upset customer' }, preference: null, ...(kn ? { kn: { state: 'special', special: 'complaint', blocked: [], topics: [] } } : {}) };
+
   // 2b. Step C: the owner has published knowledge, and this is the automatic receptionist. A customer who asks for a person, or whose job is outside our areas, a job we decline, or not in English, gets the
   //     owner's line and a person takes over. A question is ANSWERED from the knowledge first (the answer was checked in code), and only then does the Step A flow go on exactly as before: the visit is offered once,
   //     days are asked only after agreement, a preference is recorded. A question the knowledge does not answer (or an answer that failed the check) gets the holding line and a person takes over: never a guess.
@@ -246,7 +251,7 @@ function advance(consult, step, preference, nowMs) {
 
 // The only steps whose words are sent by themselves by the automatic receptionist. All are written by code (the fixed lines above and the owner's knowledge lines) or are an answer that passed the answer checker.
 const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on',
-  'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language']);
+  'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
 // After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
-const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language']);
+const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
 module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, cleanPreference, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, plan, advance };

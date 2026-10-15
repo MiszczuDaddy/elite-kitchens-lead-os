@@ -201,7 +201,7 @@ test('NEVER A GUESS: a question the knowledge does not answer, an open item, an 
   ({ r } = await ask({ text: 'Plain words', toolCalls: [], stopReason: 'end_turn', usage: USAGE })); assert.equal(r.structured, false);
   // an upset customer is not answered by the knowledge: a person takes it, silently, as before
   await chat([['in', 'My kitchen door fell off, this is terrible']]);
-  ({ r } = await ask(dec({ intent: 'complaint', answerState: 'answered' }, 'Sorry to hear that.'))); assert.equal(r.schedule.step, 'none'); assert.equal(r.handover.needed, true);
+  ({ r } = await ask(dec({ intent: 'complaint', answerState: 'answered' }, 'Sorry to hear that.'))); assert.equal(r.schedule.step, 'complaint'); assert.equal(r.draft, K.complaint); assert.equal(r.handover.needed, true);
 });
 
 test('THE OWNER\'S DECISIONS: a request for a person, outside our area, a job we decline and another language each get the owner\'s own line and a person; the model writes none of those lines', async () => {
@@ -286,6 +286,38 @@ test('TRY IT: the owner tests questions on the DRAFT (or the live knowledge) wit
   await rej(T({ source: 'live', cases: [{ text: 'x' }] }), 'failed-precondition');                                // nothing is published
   await db.doc('aiSettings/current').update({ enabled: false }); await rej(T({ cases: [{ text: 'x' }] }), 'failed-precondition');
   await db.doc('aiSettings/current').update({ enabled: true, monthlyCapEur: 0, dailyCapEur: 0 }); await rej(T({ cases: [{ text: 'x' }] }), 'failed-precondition');
+});
+
+test('A COMPLAINT: one polite line, then a person takes over at once; no promise to fix anything, no offer, no days, no answer, and the automatic conversation does not continue', async () => {
+  const LINE = 'I\'m sorry to hear that. I\'ll pass this on to the team so they can look into it.';
+  assert.equal(L.complaint, LINE); assert.equal(K.complaint, LINE);
+  assert.doesNotMatch(LINE, /\d|refund|compensat|fix|sort|resolve|today|tomorrow|week|apolog|fault|will be/i, 'it promises nothing');
+  // the plan: also with a day in the same message, with a visit already offered, with a booked customer, and with knowledge published
+  const base = { reply: 'x', intent: 'complaint', visit: 'none', hasQuestion: true, change: 'none', schedule: { preference: SCH.cleanPreference({ status: 'available', days: ['tuesday'], text: 'come Tuesday' }), opener: '' }, handover: { needed: true, reason: 'upset' } };
+  for (const ctx of [{}, { consult: { stage: 'offered_visit', asks: 0, offered: true } }, { booked: true }]) {
+    const p = SCH.plan({ decision: base, consult: null, messages: [], booked: false, nowMs: NOW, natural: true, ...ctx });
+    assert.deepEqual([p.step, p.reply, p.handover.needed, p.handover.reason, p.preference], ['complaint', LINE, true, 'complaint: upset customer', null]);
+  }
+  assert.equal(SCH.plan({ decision: base, consult: null, messages: [], booked: false, nowMs: NOW, natural: false }).step, 'none', 'a person reading the draft (Suggest reply) is not sent the line');
+  // in the real flow, with nothing published (the behaviour before Step C) and then with knowledge published and the line edited by the owner
+  const w = { sent: [], async sendText(to, body) { w.sent.push(body); return 'wamid.C' + w.sent.length; } }, push = { events: [], async notify(e) { push.events.push(e); } };
+  const run = async (m) => { const c = await db.doc('conversations/' + PH).get(); await db.doc('conversations/' + PH).update({ receptionist: { on: true, auto: true, at: ts(NOW - 5 * 3600e3), by: 'auto', paused: null, handledMs: 0, count: 0, day: null } });
+    return REC.processChat({ db, wa: w, model: m, owners: OWNERS, push, welcomeTemplate: TEMPLATE }, PH, c.data().lastInboundAt.toMillis() + 40e3); };
+  await chat([['in', 'The fitter wrecked my floor and nobody will answer me']]);
+  assert.equal(await run(spy(dec({ intent: 'complaint', handover: { needed: true, reason: 'upset customer' } }, 'We will fix it tomorrow and refund you'))), 'sent:complaint');
+  assert.deepEqual(w.sent, [LINE], 'exactly the owner\'s line: the model\'s own words are never used'); assert.equal(push.events.length, 1, 'the owner is told at once');
+  const c1 = (await db.doc('conversations/' + PH).get()).data(); assert.match(c1.receptionist.paused, /^handover: complaint/); assert.equal(c1.consult, undefined, 'no consultation was started');
+  // the customer writes again: the receptionist stays out (a person has the chat)
+  await store.storeInbound(db, { wamid: 'wamid.C2', from: PH, type: 'text', body: 'hello??', name: 'A', createdAt: new Date(NOW - 20e3) });
+  const m2 = spy(dec({})); assert.equal(await REC.processChat({ db, wa: w, model: m2, owners: OWNERS, push, welcomeTemplate: TEMPLATE }, PH, NOW + 60e3), 'paused'); assert.equal(m2.calls.length, 0); assert.equal(w.sent.length, 1);
+  // with knowledge published, the owner's edited line is used
+  await publishSeed(); const g = await KN.get({ db, owners: OWNERS }, owner), d = g.draft.data; d.lines.complaint = 'Sorry about that. I\'ll pass this to the team now.'; await KN.saveDraft({ db, owners: OWNERS }, owner, { data: d }, { nowMs: NOW }); await KN.publish({ db, owners: OWNERS }, owner, {}, { nowMs: NOW });
+  await chat([['in', 'This is a disgrace']]); w.sent.length = 0; assert.equal(await run(spy(dec({ intent: 'complaint', handover: { needed: true, reason: 'upset' } }, ''))), 'sent:complaint'); assert.deepEqual(w.sent, ['Sorry about that. I\'ll pass this to the team now.']);
+  // the same rules apply in the Knowledge Centre's test: the line is shown and the answer state is "special"
+  const t = await ai.testKnowledge({ db, model: spy(decision({ intent: 'complaint', reply: '', handover: { needed: true, reason: 'upset' } })), owners: OWNERS }, owner, { source: 'live', cases: [{ text: 'My drawer is broken and I am furious' }] }, { uid: 'u9', nowMs: NOW });
+  assert.deepEqual([t.results[0].step, t.results[0].reply, t.results[0].handover.needed], ['complaint', 'Sorry about that. I\'ll pass this to the team now.', true]);
+  // and the draft is editable but never empty or full of numbers
+  assert.throws(() => KN.clean({ lines: { complaint: '' } }), /cannot be empty/); assert.throws(() => KN.clean({ lines: { complaint: 'Refund of 500 euro' } }), /cannot contain numbers/);
 });
 
 test('WIRING: two new callables, owner and staff gates in the code; nothing in the knowledge code sends, books or reads a customer', () => {

@@ -138,7 +138,7 @@ test('PREFERENCES ARE KEPT: a day given together with a question that needs a pe
   assert.match(c.receptionist.paused, /consultation passed to you/); assert.equal(p.events.length, 1);
   await newLead(PHONES[1]); const w2 = waFake(), p2 = pushFake();
   const angry = await turn(PHONES[1], 'Your fitter wrecked my floor, come Tuesday and fix it', decision({ intent: 'complaint', handover: { needed: true, reason: 'upset customer' }, ...pref({ days: ['tuesday'], text: 'come Tuesday' }) }), w2, p2);
-  assert.deepEqual(angry.got, []); assert.notEqual((await conv(PHONES[1])).consult && (await conv(PHONES[1])).consult.needsBooking, true, 'a complaint is not a booking request'); assert.equal(p2.events.length, 1);
+  assert.deepEqual(angry.got, [SCH.LINES.complaint], 'one line, no offer, no days'); assert.notEqual((await conv(PHONES[1])).consult && (await conv(PHONES[1])).consult.needsBooking, true, 'a complaint is not a booking request'); assert.equal(p2.events.length, 1);
 });
 
 test('GOOD WORDING IS NOT BLOCKED: an acknowledgement that mentions the Eircode before the offer, and the second scheduling question, are sent; they are no longer "asks for the address again" / "asks for the time again"', async () => {

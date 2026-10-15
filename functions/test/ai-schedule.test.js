@@ -19,7 +19,7 @@ const out = (text, type = 'text') => ({ direction: 'out', type, body: text }), i
 const sent = (p) => p.reply || '';
 
 test('the owner\'s approved lines are in place and make no promise, no date and no availability claim (the price line is the only one with a figure)', () => {
-  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'change_ask', 'no_preference', 'price_general', 'tentative', 'visit_offer']);
+  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'change_ask', 'complaint', 'no_preference', 'price_general', 'tentative', 'visit_offer']);
   assert.equal(L.visit_offer, 'Would you like us to call out and have a look at your space?'); assert.equal(L.cancel_ask, 'No problem, do you want to move it to any other date?'); assert.equal(L.tentative, 'No problem at all, just let us know when suits.');
   assert.equal(L.acknowledge, 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.');
   for (const [k, l] of Object.entries(L)) if (k !== 'price_general') assert.doesNotMatch(l, /\b(booked|confirmed available|availability|\d)\b/i, k);
@@ -87,7 +87,7 @@ test('ANSWER FIRST, OFFER ONCE: the offer follows the reply to what they said; i
   const price = P({ intent: 'asking_price_general' }); assert.equal(price.step, 'price_offer'); assert.ok(sent(price).startsWith(L.price_general)); assert.equal(offersVisit(sent(price)), true); assert.equal(asksDays(sent(price)), false);
   assert.equal(P({ intent: 'asking_price_general' }, ctx).step, 'price_general', 'already offered: the price line alone');
   // a question that needs a person: nothing is offered or asked meanwhile
-  for (const o of [{ hasQuestion: true, intent: 'asking_info' }, { intent: 'asking_price', handover: { needed: true, reason: 'asks about price' } }, { intent: 'complaint', handover: { needed: true, reason: 'upset' } }, { hasQuestion: true, intent: 'new_enquiry' }])
+  for (const o of [{ hasQuestion: true, intent: 'asking_info' }, { intent: 'asking_price', handover: { needed: true, reason: 'asks about price' } }, { hasQuestion: true, intent: 'new_enquiry' }])
     { const p = P(o); assert.equal(p.step, 'none'); assert.equal(p.reply, null); }
   // said no / not now: nothing is offered or asked, a person is told
   const no = P({ visit: 'declined' }); assert.equal(no.step, 'none'); assert.equal(no.handover.needed, true);
@@ -137,7 +137,7 @@ test('PREFERENCES ARE KEPT: a day given together with a question that needs a pe
   const both = P({ visit: 'agreed', hasQuestion: true, intent: 'asking_info', handover: { needed: true, reason: 'asks if the visit is free' }, ...pref({ weeks: 'next', days: ['monday'], times: 'afternoons', text: 'Monday afternoon works' }) });
   assert.equal(both.step, 'acknowledge'); assert.ok(both.preference && both.preference.days[0] === 'monday' && both.preference.times === 'afternoons'); assert.match(both.handover.reason, /asked something that needs you/); assert.match(both.handover.reason, /asks if the visit is free/);
   const q2 = P({ hasQuestion: true, intent: 'asking_info', ...pref({ days: ['thursday'], text: 'Thursday works' }) }); assert.equal(q2.step, 'acknowledge'); assert.ok(q2.preference);
-  const angry = P({ intent: 'complaint', handover: { needed: true, reason: 'upset' }, ...pref({ days: ['tuesday'], text: 'come Tuesday and fix it' }) }); assert.equal(angry.preference, null); assert.equal(angry.step, 'none');
+  const angry = P({ intent: 'complaint', handover: { needed: true, reason: 'upset' }, ...pref({ days: ['tuesday'], text: 'come Tuesday and fix it' }) }); assert.equal(angry.preference, null); assert.equal(angry.step, 'complaint'); assert.equal(angry.reply, L.complaint);
 });
 
 test('CANCELLATION IS NOT RESCHEDULING: a booked customer who cancels is asked once if they want to move it; nothing is claimed as done, no days are asked, a person is told; "no, just cancel" goes to a person silently', () => {

@@ -26,9 +26,10 @@ const DEFAULT_LINES = {
   outside_area: 'Thanks for getting in touch. That\'s outside the areas we cover, but I\'ll pass your message to the team to have a look.',
   declined_job: 'Thanks for getting in touch. That\'s not something we usually take on, but I\'ll pass your message to the team to have a look.',
   other_language: 'Thanks for your message, I\'ll pass this to the team and they\'ll get back to you.',
+  complaint: 'I\'m sorry to hear that. I\'ll pass this on to the team so they can look into it.',
   links_intro: 'You can see some of our work here:',
 };
-const LINE_LABELS = { holding: 'Not sure / need to check', partly: 'Part answered, the rest needs checking', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', links_intro: 'Before the portfolio links' };
+const LINE_LABELS = { holding: 'Not sure / need to check', partly: 'Part answered, the rest needs checking', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', complaint: 'A complaint or an upset customer', links_intro: 'Before the portfolio links' };
 const URLISH = /@|https?:|www\.|\.(?:ie|com|net|org|co|uk)\b|€|\d/i;
 
 const emptyData = () => ({ sections: [], links: [], contact: { email: '', website: '', whatsapp: '' }, lines: { ...DEFAULT_LINES }, instructions: '', examples: [] });

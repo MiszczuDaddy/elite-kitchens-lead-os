@@ -230,7 +230,7 @@ function analyse(sheet, d, plan, { knowledge = false } = {}) {
   else if (plan.step === 'ack_only') { state = 'not_yet'; label = 'Friendly reply only: not asking for a visit'; }
   else if (plan.step === 'tentative') { state = 'handover'; label = 'They will let us know: no booking request'; }
   else if (plan.step === 'cancel_ask') { state = 'handover'; label = 'Booked customer wants to cancel: asking if they want to move it'; }
-  else if (['holding', 'answer_holding', 'human', 'outside_area', 'declined_job', 'other_language'].includes(plan.step)) { state = 'handover'; label = ({ human: 'Asked for a person', outside_area: 'Outside our areas: please review', declined_job: 'A job we usually decline: please review', other_language: 'Not in English: please take over' })[plan.step] || 'A question for the team'; }
+  else if (['holding', 'answer_holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint'].includes(plan.step)) { state = 'handover'; label = ({ complaint: 'Complaint: please take over', human: 'Asked for a person', outside_area: 'Outside our areas: please review', declined_job: 'A job we usually decline: please review', other_language: 'Not in English: please take over' })[plan.step] || 'A question for the team'; }
   else if (plan.step === 'answer') { state = 'not_yet'; label = 'Answered from the approved knowledge'; }
   else if (plan.step === 'price_general') { state = 'almost'; label = 'General price question: answered with your usual range'; }
   else if (plan.step === 'ask_next_week') { state = 'almost'; label = 'Wants a consultation: asking about next week'; }

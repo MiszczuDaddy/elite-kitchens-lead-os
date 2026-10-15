@@ -87,10 +87,9 @@ test('ORDINARY MESSAGES: an enquiry is answered and a visit offered; "hello" or 
   assert.equal(SCH.acknowledgement('Thanks for the details, Aoife.'), 'Thanks for the details, Aoife.'); assert.equal(SCH.acknowledgement('x'.repeat(120)), '');
 });
 
-test('NEVER INVENTED: prices, availability, delivery or fitting dates, photos, a complaint, or "are you a person?" are not answered by guessing: a price question is handed over with no reply and a push', async () => {
+test('NEVER INVENTED: prices, availability, delivery or fitting dates, photos, a complaint, or "are you a person?" are not answered by guessing: a price question is handed over with no reply and a push (a complaint has its own test: one fixed line, then a person)', async () => {
   const cases = [['price', decision({ intent: 'asking_price', handover: { needed: true, reason: 'asks about price' }, reply: 'It will be around 12000 euro' })],
     ['availability', decision({ intent: 'scheduling', handover: { needed: true, reason: 'asks about fitting dates' }, reply: 'We can fit it in March' })],
-    ['complaint', decision({ intent: 'complaint', handover: { needed: true, reason: 'upset customer' }, reply: 'Sorry about that' })],
     ['photo', decision({ intent: 'other', reply: '' })]];
   for (const [name, d] of cases) {
     await newLead(PH); await says(PH, 'message about ' + name, NOW - 120e3); const w = waFake(), p = pushFake();
