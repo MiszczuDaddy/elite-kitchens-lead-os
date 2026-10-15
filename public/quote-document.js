@@ -30,11 +30,11 @@ window.QuoteDocument = (() => {
   .serif{font-family:'Faustina',Georgia,'Times New Roman',serif}
   .logo{max-height:60px;max-width:200px;object-fit:contain;display:block}
   .contact{text-align:right;font-size:10.5px;line-height:1.7;color:var(--soft)}
-  .rule{height:1px;background:var(--rule);margin:12px 0}
+  .rule{height:1px;background:var(--rule);margin:10px 0}
   .rule-ink{height:2px;background:var(--ink);margin:0 0 9px}
   .eyebrow{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
   .sec-h{font-family:'Faustina',Georgia,serif;font-size:15px;font-weight:600;letter-spacing:-.01em;margin-bottom:9px}
-  .blk{padding-top:16px;page-break-inside:avoid}
+  .blk{padding-top:13px;page-break-inside:avoid}
   .blk.first{padding-top:0}
   .blk.pb{page-break-before:always;padding-top:3px}
   .meta td{padding:0;vertical-align:top}
@@ -72,12 +72,18 @@ window.QuoteDocument = (() => {
   .sign{font-size:11px;line-height:1.7;padding-top:4px}
   .sign .nm{font-family:'Faustina',Georgia,serif;font-size:14px;font-weight:600}
   .soft{color:var(--soft)}
-  .render-pg{page-break-before:always;text-align:center;padding-top:6mm}
-  .render-pg img{max-width:100%;max-height:225mm;object-fit:contain;display:block;margin:0 auto}
-  .render-note{font-size:9.5px;color:var(--faint);margin-top:12px}
+  .rend{width:calc(100% + 18px);margin:0 -9px;border-collapse:separate;border-spacing:9px 0;table-layout:fixed}
+  .rend-cell{vertical-align:top}
+  .rend-img{width:100%;height:auto;display:block;border:1px solid var(--rule)}
+  .rend.one .rend-img{width:auto;max-width:100%;max-height:88mm;margin:0 auto}
+  .rend-cap{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:4px}
+  .blk.rend-next{padding-top:7px}
+  .render-note{font-size:9.5px;color:var(--faint);margin-top:7px}
   .draft-band{margin:0 0 6mm;padding:5px 10px;background:#f7f0dc;color:#655420;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
   .tight .blk{padding-top:10px}
   .tight .blk.first{padding-top:0}
+  .tight .blk.rend-next{padding-top:5px}
+  .tight .rend-cap{margin-top:2px}
   .tight .contact{line-height:1.5}
   .tight .rule{margin:7px 0}
   .tight .meta .ref{line-height:1.25}
@@ -134,7 +140,7 @@ window.QuoteDocument = (() => {
   // data: { ref, issueDate, validUntil, customer:{name,address,email,phone}, business:{tradingName,signatureName,phone,email,web,
   //         address,vatNumber}, sheet (the frozen price sheet), renders:[image data URLs], draft:boolean }
   // The document is a .doc element of sections (".blk"), in order: the introduction, the specification, the options, what is
-  // included, and the closing section (not included, the terms and the sign-off together); then one page per design render.
+  // included, the design renders (side by side, in the flow of the quote), and the closing section (not included, the terms and the sign-off together, always last).
   function build(doc, data) {
     const h = maker(doc), s = data.sheet, d = s.document, b = data.business || {}, c = data.customer || {};
     const w = wording(d.project);
@@ -214,6 +220,25 @@ window.QuoteDocument = (() => {
     it.append(h('tbody', null, row));
     blk('', h('div', 'rule-ink'), h('div', 'sec-h', many ? 'Every option includes' : 'Included'), it);
 
+    // Design renders: laid out in the flow of the quote, not a page each. One render is shown wide and centred; two or four sit side by side in two columns, three or five or more in three; a row is never split
+    // across pages. The note about indicative renders follows the last row.
+    const renders = data.renders || [];
+    if (renders.length) {
+      const cols = renders.length === 1 ? 1 : renders.length <= 4 ? 2 : 3, rows = [];
+      for (let i = 0; i < renders.length; i += cols) rows.push(renders.slice(i, i + cols));
+      rows.forEach((row, ri) => {
+        const tr = h('tr');
+        row.forEach((url, ci) => { const img = h('img', 'rend-img'); img.src = url; img.alt = 'Design render'; const td = h('td', 'rend-cell', img, renders.length > 1 ? h('div', 'rend-cap', 'Render ' + (ri * cols + ci + 1)) : null); td.style.width = colWidth(cols); tr.append(td); });
+        for (let k = row.length; k < cols; k++) { const td = h('td', 'rend-cell'); td.style.width = colWidth(cols); tr.append(td); }
+        const t = h('table', 'rend' + (cols === 1 ? ' one' : '')); t.style.width = '100%'; t.append(h('tbody', null, tr));
+        const kids = [];
+        if (ri === 0) kids.push(h('div', 'rule-ink'), h('div', 'sec-h', renders.length > 1 ? 'Design renders' : 'Design render'));
+        kids.push(t);
+        if (ri === rows.length - 1) kids.push(h('div', 'render-note', (renders.length > 1 ? 'Indicative renders' : 'Indicative render') + '. Final design confirmed at detailed design stage.'));
+        blk(ri === 0 ? '' : 'rend-next', ...kids);
+      });
+    }
+
     // The closing section: not included and the terms side by side, then the sign-off. One section, so the sign-off always
     // stays with the terms.
     const nt = h('table'); nt.style.width = '100%';
@@ -233,19 +258,12 @@ window.QuoteDocument = (() => {
     blk('closing', nt, h('div', 'sign', h('div', 'rule'), intro, regards, h('div', 'nm', b.signatureName || b.tradingName || ''),
       h('div', 'soft', [b.tradingName || 'Elite Kitchens', b.phone, b.email].filter(Boolean).join(' · '))));
 
-    // Design renders, each on its own page.
-    const renders = data.renders || [];
-    renders.forEach((url, i) => {
-      const img = h('img'); img.src = url; img.alt = 'Design render';
-      const eb = h('div', 'eyebrow', `Design render${renders.length > 1 ? ` ${i + 1} of ${renders.length}` : ''} · ${data.ref}`); eb.style.marginBottom = '10px';
-      root.append(h('div', 'render-pg', eb, img, h('div', 'render-note', 'Indicative render. Final design confirmed at detailed design stage.')));
-    });
     return root;
   }
 
   // ---------- pages ----------
   // html2pdf turns the document into one long picture and cuts it into pages. Elite OS chooses where the cuts go first:
-  // - a quote that fits on one page is one page, and one that only just does not is set slightly closer together to fit;
+  // - a quote that fits on one page is one page, and one that only just does not is set slightly closer together to fit; with more pages, the closer setting is used whenever it needs fewer pages;
   // - otherwise each page takes as many whole sections as fit, never cutting a section in half;
   // - the closing section (not included, terms, sign-off) never starts a page on its own: the section before it moves with
   //   it, so the sign-off is never left alone at the end.
@@ -258,23 +276,24 @@ window.QuoteDocument = (() => {
   }
   function paginate(doc) {
     const root = doc.querySelector('.doc'), blocks = [...root.querySelectorAll(':scope > .blk')];
-    const heights = () => blocks.map((n) => n.getBoundingClientRect().height);
+    const measure = (tight) => { root.classList.toggle('tight', tight); return blocks.map((n) => n.getBoundingClientRect().height); };
     const total = (hs) => hs.reduce((a, x) => a + x, 0);
-    blocks.forEach((n) => n.classList.remove('pb')); root.classList.remove('tight');
-    const hs = heights();
-    if (total(hs) <= PAGE_PX) return 1;
-    root.classList.add('tight');
-    if (total(heights()) <= PAGE_PX) return 1;
-    root.classList.remove('tight');
-    const starts = plan(hs);
-    starts.forEach((i) => blocks[i].classList.add('pb'));
-    return starts.length + 1;
+    blocks.forEach((n) => n.classList.remove('pb'));
+    const normal = measure(false);
+    if (total(normal) <= PAGE_PX) return 1;
+    const tight = measure(true);
+    if (total(tight) <= PAGE_PX) return 1;
+    const pn = plan(normal), pt = plan(tight);
+    if (pt.length < pn.length) { pt.forEach((i) => blocks[i].classList.add('pb')); return pt.length + 1; }      // the closer setting saves a page: keep it
+    measure(false);
+    pn.forEach((i) => blocks[i].classList.add('pb'));
+    return pn.length + 1;
   }
   // The preview: the same pages, each shown as a sheet of A4 paper.
   function sheets(doc, draft) {
     const h = maker(doc), root = doc.querySelector('.doc'), pages = [];
     for (const n of [...root.children]) {
-      if (!pages.length || n.classList.contains('pb') || n.classList.contains('render-pg')) pages.push(h('div', 'sheet'));
+      if (!pages.length || n.classList.contains('pb')) pages.push(h('div', 'sheet'));
       pages[pages.length - 1].append(n);
     }
     if (draft) pages.forEach((p) => p.prepend(h('div', 'draft-band', DRAFT)));

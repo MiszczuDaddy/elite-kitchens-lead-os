@@ -125,6 +125,19 @@ function savePages(buf, prefix) {
   assert.equal(await page.evaluate(() => document.querySelector('#qdoc-page iframe').contentDocument.querySelectorAll('.sheet').length), previewPages, 'one sheet per page');
   await page.screenshot({ path: path.join(SHOTS, 'quote-preview.png') });
   await page.click('#qdoc-close');
+  // ---- Preview PDF on the quote page: the real PDF is made and opened; nothing is sent, stored or marked ----
+  const filesBefore = (await bucket.getFiles({ prefix: 'uploads/' }))[0].length, graphBefore = graph.length, stageBefore = (await conv(ph.anna)).inboxStatus;
+  assert.equal(await page.isVisible('#qv-preview-pdf'), true, 'a clearly visible Preview PDF button, next to Send'); assert.equal((await page.textContent('#qv-preview-pdf')).trim(), 'Preview PDF');
+  await page.evaluate(() => { window.QUOTES.lastPreview = null; });
+  await page.click('#qv-preview-pdf'); await page.waitForFunction(() => window.QUOTES.lastPreview && window.QUOTES.lastPreview.size > 1000, null, { timeout: 60000 });
+  const pagePdf = Buffer.from(await page.evaluate(async () => Array.from(new Uint8Array(await (await fetch(window.QUOTES.lastPreview.url)).arrayBuffer()))));
+  assert.equal(pagePdf.subarray(0, 5).toString(), '%PDF-'); assert.equal(pagesOf(pagePdf), previewPages, 'the PDF has the pages of the on-screen preview');
+  assert.equal((await page.textContent('#qv-preview-pdf')).trim(), 'Preview PDF', 'the button is back to normal');
+  assert.equal((await bucket.getFiles({ prefix: 'uploads/' }))[0].length, filesBefore, 'nothing was uploaded'); assert.equal(graph.length, graphBefore, 'nothing was sent');
+  assert.equal((await version(q.id, 1)).state, 'draft', 'the quote is still a draft'); assert.equal((await conv(ph.anna)).inboxStatus, stageBefore, 'the customer did not move');
+  assert.deepEqual(opened.splice(0), [''], 'one new tab was opened for the preview (the test records it instead of opening it)');
+  for (const p of page.context().pages()) if (p !== page) await p.close().catch(() => {});
+  ok('Preview PDF on the quote page makes the real PDF (the same pages as the preview) and opens it; nothing is uploaded or sent and the quote stays a draft');
   ok('Preview shows the customer document, marked "Draft · not sent": options and prices, wording, terms and validity, with no counts or per-unit prices');
 
   // ---- send: the PDF with a design render, stored exactly as downloaded; the pipeline moves as agreed ----
@@ -138,6 +151,20 @@ function savePages(buf, prefix) {
   assert.equal(await page.isVisible('#qsend-reopen-row'), false);
   await page.setInputFiles('#qsend-renders', path.join(ROOT, 'public/brand/elite-kitchens-logo.png'));
   await page.waitForFunction(() => /1 render added/.test(document.getElementById('qsend-progress').textContent));
+  // ---- Preview PDF in the Send box: with the render, exactly as it would be sent; nothing sent, nothing stored, nothing marked ----
+  assert.equal(await page.isVisible('#qsend-preview-pdf'), true); const upBefore = (await bucket.getFiles({ prefix: 'uploads/' }))[0].length, gBefore = graph.length;
+  await page.evaluate(() => { window.QUOTES.lastPreview = null; }); await page.click('#qsend-preview-pdf'); await page.waitForFunction(() => window.QUOTES.lastPreview && window.QUOTES.lastPreview.size > 1000, null, { timeout: 60000 });
+  const sendPreview = Buffer.from(await page.evaluate(async () => Array.from(new Uint8Array(await (await fetch(window.QUOTES.lastPreview.url)).arrayBuffer()))));
+  assert.equal(sendPreview.subarray(0, 5).toString(), '%PDF-'); assert.ok(pagesOf(sendPreview) >= previewPages, 'with the render the PDF has at least the pages of the quote');
+  assert.equal(await page.isVisible('#qsend-dlg'), true, 'the Send box stays open'); assert.equal((await page.textContent('#qsend-preview-pdf')).trim(), 'Preview PDF');
+  assert.equal((await bucket.getFiles({ prefix: 'uploads/' }))[0].length, upBefore, 'nothing was uploaded'); assert.equal(graph.length, gBefore, 'nothing was sent'); assert.equal((await version(q.id, 1)).state, 'draft', 'not marked sent');
+  assert.deepEqual(opened.splice(0), [''], 'one new tab was opened for the preview');
+  // and when the browser does give the new tab: it is filled with the PDF (a blob address) once it is made, not before
+  await page.evaluate(() => { window.__w = []; window.__keep = window.open; window.open = () => { const w = { closed: false, document: { write(x) { window.__w.push('write:' + String(x).length); } }, location: { set href(v) { window.__w.push(String(v)); } }, close() { w.closed = true; } }; return w; }; });
+  await page.click('#qsend-preview-pdf'); await page.waitForFunction(() => window.__w.some((x) => x.startsWith('blob:')), null, { timeout: 60000 });
+  const wlog = await page.evaluate(() => { const l = window.__w.slice(); window.open = window.__keep; return l; });
+  assert.ok(wlog[0].startsWith('write:') && wlog.at(-1).startsWith('blob:'), 'the new tab is opened at once with a waiting note, then pointed at the PDF: ' + JSON.stringify(wlog));
+  for (const p of page.context().pages()) if (p !== page) await p.close().catch(() => {});
   await page.click('#qsend-go');
   await page.waitForSelector('#qsend-done:not([hidden])', { timeout: 60000 });
   assert.match(await page.textContent('#qsend-done-text'), /EK-0034 v1 is marked sent[\s\S]*Anna Murphy moved from New lead to Quoted/);
@@ -149,13 +176,14 @@ function savePages(buf, prefix) {
   const downloaded = Buffer.from(await page.evaluate(async () => { const r = await fetch(document.getElementById('qsend-download').href); return Array.from(new Uint8Array(await r.arrayBuffer())); }));
   assert.ok(downloaded.equals(stored), 'the downloaded PDF is byte-for-byte the stored copy');
   assert.equal(await page.getAttribute('#qsend-download', 'download'), 'EliteKitchens-EK-0034-v1.pdf');
-  assert.equal(pagesOf(stored), previewPages + 1, 'the pages of the preview, plus a page for the render');
+  assert.ok(pagesOf(stored) >= previewPages && pagesOf(stored) <= previewPages + 1, 'the pages of the preview, at most one more for the render');
+  assert.equal(pagesOf(stored), pagesOf(sendPreview), 'the Preview PDF had exactly as many pages as the PDF that was sent');
   savePages(stored, 'quote-pdf-sent-page');
   assert.equal((await conv(ph.anna)).inboxStatus, 'quoted');
   assert.equal((await contact(ph.anna)).quoteValue, dearest.incVat);
   assert.deepEqual(v1.customer, { name: 'Anna Murphy', email: 'anna@example.com', address: '12 Main Street, Swords, K67 AB12', phone: ph.anna });
   assert.equal(graph.length, 0, 'nothing went to WhatsApp');
-  ok(`Send makes the PDF (${pagesOf(stored)} pages, with the render), stores it, and the file offered for download is byte-for-byte the stored copy; New lead -> Quoted, value set to the dearest option`);
+  ok(`Preview PDF in the Send box (with the render) sent and stored nothing; Send makes the PDF (${pagesOf(stored)} pages, with the render), stores it, and the file offered for download is byte-for-byte the stored copy; New lead -> Quoted, value set to the dearest option`);
 
   // ---- the email draft ----
   await page.click('#qsend-email');
