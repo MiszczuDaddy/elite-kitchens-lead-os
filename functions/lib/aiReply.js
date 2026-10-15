@@ -13,21 +13,21 @@ const MESSAGES = 40, MESSAGE_CHARS = 400, DRAFT_MAX = 700, FACT_MAX = 120;
 const FIELD_LABEL = { name: 'Name', projectType: 'Project', location: 'Area', address: 'Home address', eircode: 'Eircode', budget: 'Budget', timing: 'Preferred time', email: 'Email' };
 const NEW_FACT_FIELDS = Object.keys(FIELD_LABEL);
 const REQUIRED = ['name', 'projectType', 'address', 'timing'];                     // what a home consultation needs; budget and email are helpful, not required
-const INTENTS = ['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general', 'asking_price', 'asking_info', 'complaint', 'other'];
+const INTENTS = ['greeting', 'new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general', 'asking_price', 'asking_info', 'complaint', 'other'];
 const TZ = 'Europe/Dublin';
 const clip = (s, n) => S.one(s, n);
 
 const SYSTEM = [
   'You write WhatsApp replies for Elite Kitchens (kitchens and fitted wardrobes, Ireland) as "we", the team, never as a named person. You are drafting for a member of staff who will read, edit and send it. You never send anything.',
-  'Goal: handle a new kitchen enquiry and arrange an initial consultation, which normally takes place at the customer\'s home.',
+  'Goal: be helpful and natural with a new kitchen enquiry. A home visit (we call out and have a look at the customer\'s space) is only ever OFFERED, once, after what the customer said has been dealt with: it is never assumed, and nobody is asked about days until they have agreed to a visit.',
   'Read the whole conversation and the lead details. Never ask for anything listed under KNOWN, anything the customer already answered in the chat, or anything already asked recently. Ask for at most two missing things, the most useful first, in a natural way.',
   'Style: simple, friendly and natural, like a real person texting on WhatsApp in Irish English. SHORT: one or two sentences, never more than three. Plain words, no corporate phrases ("we would be delighted", "do not hesitate", "in particular"), no lists, no headings, no links, no phone numbers, no emojis unless the customer uses them. Say hello and thanks only in the FIRST message of a conversation. In an ongoing chat do not open with "Hi", "thanks for getting back" or "thanks for your message": just answer. Usually under 20 words. Do not repeat details the customer already knows (their own booking, their own message). Ask ONE question, the most useful missing one.',
-  'If the customer wants to change or cancel a consultation that is already booked, reply in one short line asking whether any day next week would suit better (use exactly "No problem, would any day next week suit you better?"; consultations are always arranged for next week, so never say or accept today, tomorrow or any other date), set handover.needed to true with the reason "wants to change booking" (a person changes bookings), and do not mention dates, times or availability.',
-  'Examples of the tone (adapt, never copy blindly): "Hi Anna, thanks for getting in touch! What kind of project do you have in mind?" (project not known) / "Hi Anna, thanks for getting in touch. Would any day next week suit you for a home visit?" (kitchen project known, wants a consultation) / "No problem, would the following week suit you?" (next week did not work).',
+  'If CONSULTATION ALREADY BOOKED shows a date and the customer talks about that booking, set the field change: cancel (they want to cancel it), move (they want another day or time, with no specific date or time in mind), move_specific (they ask for a specific time or date, today, tomorrow, the same day, or sooner), confirm (they ask you to confirm it or tell them the time) or late (they are running late). Leave reply empty: the system writes the line. Never say a booking is cancelled, moved or confirmed.',
+  'Examples of the tone (adapt, never copy blindly): "Hi Anna, thanks for getting in touch! What kind of project do you have in mind?" (project not known) / "Lovely, a shaker kitchen with an island sounds great." (they described their project).',
   'If the project type is already in KNOWN or the customer already said it, NEVER ask what kind of project it is: use it ("your new kitchen") or just move on.',
   'A GENERAL question about what kitchens cost or the usual price range (for example "how much is a kitchen?", "what are your prices like?") is answered by the SYSTEM with the owner\'s own wording: just set intent to asking_price_general, write no reply about money and do not hand over. For anything more specific (the price of THIS kitchen, a quote, a discount, a deposit or payment, a comparison with another quote) set intent to asking_price and hand over.',
   'Never state or estimate prices, discounts, timelines, availability or process details that are not in the records, and never promise anything. If the customer asks about those, say a member of the team will come back to them, and hand over.',
-  'Arranging a consultation is handled by the SYSTEM with fixed wording, not by you. Do NOT write any question or line about days, times, weeks or availability, and never offer, choose, promise or confirm a date or time, never say availability exists, never say anything is booked or confirmed. Your only jobs here: (1) set wantsConsultation to true when the customer is interested in a consultation or home visit, and (2) put what they said about when they are free into schedule.preference (the week counted from TIME NOW, the days, anyDay, a time of day, and their own words). If they have not said, leave the preference empty. In the first message of a conversation you may add a short friendly opener in schedule.opener, with no question. If the customer only wants to arrange a consultation, leave reply empty; use reply for anything else they asked.',
+  'A home visit is handled by the SYSTEM with fixed wording, not by you. Do NOT write any question or line about visits, days, times, weeks or availability, and never offer, choose, promise or confirm a date or time, never say availability exists, never say anything is booked or confirmed. Your jobs: (1) set visit: "asked" if the customer explicitly asks for a visit, a consultation or for someone to come and look or measure; "agreed" ONLY if our most recent message offered or asked about a visit (for example "Would you like us to call out and have a look at your space?") and they say yes; "declined" if they say no, not now or not interested; otherwise "none". General interest in a kitchen, "yes" or "yes please" to our first welcome message, hello, thanks, ok, an emoji, confusion about who is writing, and questions about price are NOT agreement to a visit: set "none". (2) set hasQuestion true if the customer\'s latest message asks something that needs an answer (other than a plain general price question, which the system answers). (3) put what they said about when they are free into schedule.preference: only days, times or weeks they OFFERED, never inferred (working all day does not mean evenings are free), their own words, and a status: available (a day, any day, a time of day or a named week they can do), unavailable (they cannot or will not in the near term and named no alternative, for example abroad), tentative (they will check or let us know), unknown. If they have not said, leave the preference empty. (4) In the first message of a conversation you may add a short friendly opener in schedule.opener, with no question. Leave reply empty unless the customer asked something you can answer.',
   'If CONSULTATION ALREADY BOOKED shows a date, do not arrange another one: do not ask about days, and do not say you will check availability. Answer what the customer actually said, or briefly refer to the booked visit.',
   'Do not introduce yourself as an AI. If the customer asks whether they are talking to a person or an AI, do not answer that question yourself (the system answers it truthfully): hand over with the reason "asked if AI".',
   'Hand over (handover.needed true; the reply may be empty or a short holding line) for: a complaint or an upset customer, price, quote or discount questions, a request to speak to a person, anything legal or about safety, photos, voice notes or files you cannot see, anything unclear or outside kitchens and wardrobes, messages not in English, or whenever you are unsure.',
@@ -37,19 +37,23 @@ const SYSTEM = [
 
 // Added to the instructions ONLY when the automatic receptionist asks (nobody reads the reply before the customer does). The system still writes every line about days and times.
 const RECEPTIONIST_NOTE = [
-  'AUTOMATIC MODE: this reply is sent to the customer straight away and no member of staff reads it first. The customer came from our Meta kitchen enquiry form and is replying to our welcome message, so a home consultation is the natural next step unless they clearly say otherwise.',
-  'Write ONE short, natural sentence that acknowledges what the customer just said (for example "Thanks for the details, Aoife." or "Lovely, a shaker kitchen sounds great."). No question, nothing about days, times, prices or availability, no promises, no links. The system adds the question about a consultation itself.',
+  'AUTOMATIC MODE: this reply is sent to the customer straight away and no member of staff reads it first. The customer came from our Meta kitchen enquiry form and is replying to our welcome message. Do NOT push a consultation: the system offers a home visit once, and asks about days only after the customer has agreed to a visit.',
+  'Write ONE short, natural sentence that acknowledges what the customer just said (for example "Thanks for the details, Aoife." or "Lovely, a shaker kitchen sounds great."). If they seem confused about who is writing, say in one sentence that this is Elite Kitchens following up on their kitchen enquiry. No question, nothing about visits, days, times, prices or availability, no promises, no links. The system adds anything else itself.',
   'Set intent honestly. If the customer asks about prices, discounts, delivery or fitting dates, process details, wardrobes or anything you cannot answer from the records, sends photos, voice notes or files, is upset, wants a person, or you are not sure, set handover.needed to true: it is far better to hand over than to guess.',
 ].join('\n');
 
 const TOOL = {
   name: 'reply_decision', description: 'Your decision for this conversation: the draft reply and what you understood. Call it exactly once.',
-  input_schema: { type: 'object', additionalProperties: false, required: ['reply', 'intent', 'wantsConsultation', 'handover'], properties: {
+  input_schema: { type: 'object', additionalProperties: false, required: ['reply', 'intent', 'visit', 'hasQuestion', 'handover'], properties: {
     reply: { type: 'string', description: 'The WhatsApp message to draft for staff to send. Empty only if handing over without a holding line.' },
     intent: { type: 'string', enum: INTENTS, description: 'What the customer\'s latest messages are about.' },
-    wantsConsultation: { type: 'boolean', description: 'True if the customer has said they want to arrange a consultation or visit.' },
+    visit: { type: 'string', enum: ['none', 'asked', 'agreed', 'declined'], description: 'asked = the customer explicitly asks for a visit, consultation or for someone to come and look; agreed = our latest message offered a visit and they said yes; declined = no, not now, not interested; none = anything else (hello, ok, thanks, general interest, confusion, a price question, yes to the welcome message). Interest alone is NOT agreement.' },
+    hasQuestion: { type: 'boolean', description: 'True if the customer\'s latest message asks something that needs an answer (not counting a plain general price question).' },
+    change: { type: 'string', enum: ['none', 'cancel', 'move', 'move_specific', 'confirm', 'late'], description: 'Only when CONSULTATION ALREADY BOOKED shows a date: what they want to do with that booking. none otherwise.' },
+    wantsConsultation: { type: 'boolean', description: 'Legacy: true if visit is asked or agreed. Optional.' },
     schedule: { type: 'object', additionalProperties: false, description: 'Only what the customer said about when they are free, and an optional opener. The system writes every scheduling line itself.', properties: {
       preference: { type: 'object', additionalProperties: false, description: 'Leave out or empty if the customer has not said when they are free.', properties: {
+        status: { type: 'string', enum: ['available', 'unavailable', 'tentative', 'unknown'], description: 'available = they named a day, any day, a time of day or a week they CAN do; unavailable = they cannot or will not in the near term and named no alternative (abroad, away); tentative = they will check or let us know; unknown = nothing usable. Never infer availability that was not offered.' },
         weeks: { type: 'string', enum: ['this', 'next', 'following', 'other'], description: 'Which week, counted from TIME NOW: this week, next week, the week after next, or another time (a date or month).' },
         days: { type: 'array', maxItems: 7, items: { type: 'string', enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] } },
         anyDay: { type: 'boolean', description: 'True if any day suits them.' }, times: { type: 'string', description: 'Time of day, such as mornings, afternoons, evenings, after 5pm.' }, text: { type: 'string', description: 'Their own words about when they are free.' } } },
@@ -96,12 +100,14 @@ async function buildSheet(db, phone, nowMs) {
   const upcoming = appts.docs.map((d) => d.data()).filter((a) => a.status !== 'cancelled' && ms(a.start) >= nowMs).sort((a, b) => ms(a.start) - ms(b.start))[0] || null;
   const window = WS.windowStatus(cv, nowMs);
   return { phone, known: knownFacts(ct, cv), lead: leadAnswers(ct), messages, nextAppointment: upcoming ? S.when(ms(upcoming.start)) : null, stage: cv.inboxStatus || 'inbox',
-    window: { state: window.state, openUntil: window.openUntil || null }, consult: cv.consult && typeof cv.consult === 'object' ? { stage: String(cv.consult.stage || ''), asks: Number.isInteger(cv.consult.asks) ? cv.consult.asks : 0 } : null, now: S.when(nowMs), customerName: ct.name || cv.name || null, lastInboundMs: ms(cv.lastInboundAt) };
+    window: { state: window.state, openUntil: window.openUntil || null }, consult: cv.consult && typeof cv.consult === 'object' ? { stage: String(cv.consult.stage || ''), asks: Number.isInteger(cv.consult.asks) ? cv.consult.asks : 0, offered: cv.consult.offered === true } : null, now: S.when(nowMs), customerName: ct.name || cv.name || null, lastInboundMs: ms(cv.lastInboundAt) };
 }
 function schedulingText(sh) {
   const asks = SCH.asksSoFar(sh.consult, sh.messages);
   if (sh.consult && sh.consult.stage === 'preference_given') return 'the customer\'s preference was received and passed to the team';
-  return asks === 0 ? 'no scheduling question asked yet' : asks === 1 ? 'we asked whether next week suits' : 'we asked about next week and the following week';
+  const offered = !!(sh.consult && sh.consult.offered) || sh.messages.some((m) => m.direction === 'out' && String(m.body || '').includes(SCH.LINES.visit_offer));
+  const visit = offered ? 'we have already offered to call out and have a look at their space' : 'we have NOT offered a home visit yet';
+  return visit + '; ' + (asks === 0 ? 'no question about days asked yet' : asks === 1 ? 'we asked whether next week suits' : 'we asked about next week and the following week');
 }
 function sheetText(sh) {
   return [
@@ -121,7 +127,8 @@ function cleanDecision(args) {
   const a = args && typeof args === 'object' ? args : {};
   const facts = Array.isArray(a.newFacts) ? a.newFacts.filter((f) => f && NEW_FACT_FIELDS.includes(f.field) && typeof f.value === 'string' && f.value.trim()).slice(0, 6).map((f) => ({ field: f.field, label: FIELD_LABEL[f.field], value: clip(f.value, FACT_MAX) })) : [];
   const h = a.handover && typeof a.handover === 'object' ? a.handover : {};
-  return { reply: typeof a.reply === 'string' ? a.reply.replace(/\r\n?/g, '\n').trim().slice(0, DRAFT_MAX) : '', intent: INTENTS.includes(a.intent) ? a.intent : 'other', wantsConsultation: bool(a.wantsConsultation),
+  const visit = ['none', 'asked', 'agreed', 'declined'].includes(a.visit) ? a.visit : (bool(a.wantsConsultation) ? 'asked' : 'none');       // an older answer with only wantsConsultation still works
+  return { reply: typeof a.reply === 'string' ? a.reply.replace(/\r\n?/g, '\n').trim().slice(0, DRAFT_MAX) : '', intent: INTENTS.includes(a.intent) ? a.intent : 'other', visit, hasQuestion: bool(a.hasQuestion), change: ['cancel', 'move', 'move_specific', 'confirm', 'late'].includes(a.change) ? a.change : 'none', wantsConsultation: visit === 'asked' || visit === 'agreed',
     schedule: { preference: SCH.cleanPreference(a.schedule && a.schedule.preference), opener: clip(a.schedule && a.schedule.opener, 90) }, newFacts: facts,
     handover: { needed: bool(h.needed), reason: typeof h.reason === 'string' && h.reason.trim() ? clip(h.reason, 80) : null } };
 }
@@ -138,13 +145,17 @@ function lint(reply, known, asked) {
   if (/\b(as an ai|language model|artificial intelligence|i am a bot|i\'m a bot)\b/i.test(r)) w.push('mentions AI');
   if (r.length > 240) w.push('is long for WhatsApp: shorten it');
   const knownFields = new Set(known.map((k) => k.field));
-  if (/\?/.test(r)) for (const [field, re] of Object.entries(ASKS)) {
-    if (!re.test(r)) continue;
+  // Only the QUESTIONS the reply actually asks are checked: a statement that mentions the Eircode ("Thanks for the Eircode") is not a request for it. The owner's fixed scheduling lines are exempt from the
+  // "asked earlier" check, because how often they are asked is controlled by the flow itself (at most two questions), not by wording.
+  const FIXED = Object.values(SCH.LINES);
+  const questions = r.split(/(?<=[.!?])\s+/).filter((s) => s.includes('?'));
+  for (const q of questions) for (const [field, re] of Object.entries(ASKS)) {
+    if (!re.test(q)) continue;
     const have = field === 'address' ? (knownFields.has('address') || knownFields.has('eircode')) : knownFields.has(field);
     if (have) w.push(`asks for ${FIELD_LABEL[field].toLowerCase()}, which is already in the records`);
-    else if ((asked || new Set()).has(field)) w.push(`asks for ${FIELD_LABEL[field].toLowerCase()} again (it was asked earlier)`);
+    else if ((asked || new Set()).has(field) && !FIXED.some((l) => l.includes(q))) w.push(`asks for ${FIELD_LABEL[field].toLowerCase()} again (it was asked earlier)`);
   }
-  return w;
+  return [...new Set(w)];
 }
 // Which fields our earlier messages in this chat already asked about (a rough, wording-based guess, used only for the warning above).
 function askedFields(messages) {
@@ -167,6 +178,10 @@ function analyse(sheet, d, plan) {
   else if (d.handover.needed) { state = 'handover'; label = 'Hand over to you'; }
   else if (sheet.nextAppointment) { state = 'booked'; label = 'Consultation already booked'; }
   else if (!d.wantsConsultation) { state = 'not_yet'; label = 'Not asking for a consultation yet'; }
+  else if (plan.step === 'offer_visit' || plan.step === 'price_offer') { state = 'almost'; label = 'Offering a home visit (no dates asked until they agree)'; }
+  else if (plan.step === 'ack_only') { state = 'not_yet'; label = 'Friendly reply only: not asking for a visit'; }
+  else if (plan.step === 'tentative') { state = 'handover'; label = 'They will let us know: no booking request'; }
+  else if (plan.step === 'cancel_ask') { state = 'handover'; label = 'Booked customer wants to cancel: asking if they want to move it'; }
   else if (plan.step === 'price_general') { state = 'almost'; label = 'General price question: answered with your usual range'; }
   else if (plan.step === 'ask_next_week') { state = 'almost'; label = 'Wants a consultation: asking about next week'; }
   else if (plan.step === 'ask_following_week') { state = 'almost'; label = 'Wants a consultation: asking about the following week'; }

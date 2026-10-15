@@ -21,7 +21,6 @@ const TZ = 'Europe/Dublin';
 const DEADLINE_MS = 100000;                    // no new model call is started once a question has run this long (the function itself may run 240 s; one call is limited to 40 s, 3 tries)
 const MAX_STEPS = 6, MAX_TOOLS_PER_STEP = 4, MAX_MESSAGE = 2000, MAX_HISTORY = 12, MAX_HISTORY_CHARS = 12000, MAX_TURN_CHARS = 4000;
 const RATE_PER_MINUTE = 8, RATE_PER_HOUR = 60;
-const LEAD_INTENTS = ['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general'];        // R3: what the receptionist may treat as an ordinary enquiry
 const CUSTOMER_ID = /^\d{9,15}$/, QUOTE_ID = /^q_[0-9a-f]{24}$/, PROJECT_ID = /^[pm]_[0-9a-f]{24}$/;
 
 // ---- settings: everything that can stop or limit the AI. A missing document means OFF. ----
@@ -235,10 +234,10 @@ function createDemoModel() {
     const last = messages[messages.length - 1], used = (t) => ({ input: Math.ceil(t.length / 4), output: Math.ceil(t.length / 4), cacheRead: 0, cacheWrite: 0 });
     if ((tools || []).some((t) => t.name === 'reply_decision')) {          // demo only: a canned receptionist decision from the customer's last line
       const body = String(last.text || ''), line = body.split('\n').filter((l) => l.startsWith('[customer')).pop() || '';
-      const wants = /consultation|visit|measure|come out|appointment/i.test(line), angry = /complaint|angry|terrible|solicitor/i.test(line), timing = /(?:monday|tuesday|wednesday|thursday|friday|saturday|morning|afternoon|evening)[a-z ]*/i.exec(line), known = /- Eircode:/.test(body);
+      const wants = /consultation|visit|measure|come out|appointment/i.test(line), asks = /\?/.test(line) && !wants, angry = /complaint|angry|terrible|solicitor/i.test(line), timing = /(?:monday|tuesday|wednesday|thursday|friday|saturday|morning|afternoon|evening)[a-z ]*/i.exec(line), known = /- Eircode:/.test(body);
       const day = (timing && /(monday|tuesday|wednesday|thursday|friday|saturday)/i.exec(timing[0])) || null;
-      const input = { reply: wants || angry ? '' : 'Thanks for your enquiry. What kind of kitchen are you thinking of?', intent: angry ? 'complaint' : wants ? 'wants_consultation' : 'new_enquiry', wantsConsultation: wants,
-        schedule: { preference: timing ? { weeks: 'next', days: day ? [day[1].toLowerCase()] : [], times: /afternoon|morning|evening/i.test(timing[0]) ? (/afternoon|morning|evening/i.exec(timing[0])[0].toLowerCase() + 's') : undefined, text: timing[0].trim() } : undefined, opener: known ? '' : 'Hi, thanks for getting in touch.' },
+      const input = { reply: wants || angry ? '' : 'Thanks for your enquiry. What kind of kitchen are you thinking of?', intent: angry ? 'complaint' : wants ? 'wants_consultation' : 'new_enquiry', visit: wants ? 'asked' : 'none', hasQuestion: asks,
+        schedule: { preference: timing ? { weeks: 'next', days: day ? [day[1].toLowerCase()] : [], times: /afternoon|morning|evening/i.test(timing[0]) ? (/afternoon|morning|evening/i.exec(timing[0])[0].toLowerCase() + 's') : undefined, text: timing[0].trim(), status: 'available' } : undefined, opener: known ? '' : 'Hi, thanks for getting in touch.' },
         newFacts: [], handover: { needed: angry, reason: angry ? 'upset customer' : null } };
       return { text: '', toolCalls: [{ id: 'tu_demo_reply', name: 'reply_decision', input }], stopReason: 'tool_use', usage: used(body) };
     }
@@ -436,14 +435,15 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   const call = res.toolCalls.find((c) => c.name === R.TOOL.name);
   const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
   // Arranging a consultation is a fixed flow decided by code: the wording of every scheduling line is ours, the model only read the chat (see aiSchedule.js).
-  // The automatic receptionist treats an ordinary enquiry from a Meta lead as interest in a consultation (the goal), unless the model says a person is needed.
-  if (receptionist && !asked.handover.needed && LEAD_INTENTS.includes(asked.intent)) asked.wantsConsultation = true;
-  const plan = SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs, natural: receptionist });
-  const decision = plan.step === 'none' ? asked : { ...asked, reply: plan.reply, handover: plan.handover || asked.handover };
+  // Step A: interest is NOT agreement. Nothing is forced here: the plan asks about days only after the customer asked for a visit or said yes to the offer of one (aiSchedule.plan).
+  const plan = call ? SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs, natural: receptionist }) : { step: 'none', reply: null, handover: null, preference: null };       // an answer without the structure is shown as it is
+  let decision = plan.step === 'none' ? (plan.handover ? { ...asked, handover: plan.handover } : asked) : { ...asked, reply: plan.reply, handover: plan.handover || asked.handover };
+  // The automatic receptionist writes nothing of its own: a question it cannot answer (or a complaint) goes to a person with a reason, never to silence.
+  if (receptionist && plan.step === 'none' && !decision.handover.needed && (asked.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(asked.intent))) decision = { ...decision, handover: { needed: true, reason: asked.intent === 'complaint' ? 'upset customer' : 'a question that needs a person' } };
   const analysis = R.analyse(sheet, decision, plan);
   const draftId = 'ad_' + require('crypto').randomBytes(12).toString('hex');
   await db.doc('aiDrafts/' + draftId).set({ id: draftId, phone, createdBy: actor.id, createdByUid: uid || actor.id, createdAt: Timestamp.fromMillis(nowMs), model: key, intent: decision.intent, handover: decision.handover.needed, wantsConsultation: decision.wantsConsultation,
-    readiness: analysis.readiness.state, step: plan.step, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null, ...(receptionist ? { auto: true } : {}) });                 // no words of the draft or the chat
+    readiness: analysis.readiness.state, step: plan.step, visit: asked.visit, change: asked.change, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate, status: plan.preference.status || 'available' } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call, costEur: Math.round(cost * 1e8) / 1e8, outcome: null, ...(receptionist ? { auto: true } : {}) });                 // no words of the draft or the chat
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,

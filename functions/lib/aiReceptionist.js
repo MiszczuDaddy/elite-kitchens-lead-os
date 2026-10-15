@@ -25,11 +25,12 @@ const TZ = 'Europe/Dublin';
 const WAIT_MS = 45000, DAILY_CAP = 6, QUIET_UNTIL_HOUR = 7, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
 const ACTOR = { kind: 'system', id: 'receptionist' };
 // The only steps whose words are sent by themselves. All of them are written by code (aiSchedule.js); the first may carry a short checked acknowledgement in front.
-const SEND_STEPS = new Set(['price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on']);
+const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on']);
 // After these the chat is the owner's: the receptionist stays out.
 const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on']);
+// Step A: the receptionist offers a home visit ONCE and asks about days only after the customer has agreed; cancel_ask / tentative / ack_only / offer steps do not pause the chat (the customer may answer).
 // An ordinary message that needs no reply and no person (e.g. "thanks" from a customer who is already booked): not answered, not handed over.
-const QUIET_INTENTS = new Set(['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general']);
+const QUIET_INTENTS = new Set(['greeting', 'new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general']);
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : typeof t === 'number' ? t : 0);
 const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...extra }));
 const hourOf = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(new Date(t)));

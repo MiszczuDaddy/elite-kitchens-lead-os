@@ -1,15 +1,21 @@
 'use strict';
-// Phase 9 R2a: arranging an initial consultation, by a FIXED flow decided by code (docs/AI.md). The AI never picks slots, never promises availability and never confirms anything:
-//   1. the customer is interested in a home consultation -> ask "Would any day next week suit you?"
-//   2. if next week does not work -> ask once about the following week and about particular days or times
-//   3. as soon as there is any reasonable preference ("Tuesday", "any day", "mornings") -> record it, acknowledge it, STOP asking and hand over to a person
-//   4. at most two scheduling questions in total; if the customer still gives nothing, hand over with "no preference given"
-//   5. if the customer already said when they are free, nothing is asked: straight to the acknowledgement
-// The wording of every scheduling line is below, written by code. The model only reads the chat: it says whether the customer wants a consultation and extracts what they said about
-// days and times; it may add one short friendly opener ("Hi Anna, thanks for getting in touch.") to the first message of a conversation. Everything else is decided here.
+// Phase 9: arranging a home consultation, by a FIXED flow decided by code (docs/AI.md). The AI never picks slots, never promises availability and never confirms anything.
+// Step A (consent first): the conversation policy is  answer -> offer a home visit ONCE -> wait for agreement -> ask about days -> record what they say -> hand over.
+//   * General interest, "hello", "ok", thanks, confusion, "yes" to our welcome message and price questions are NOT agreement to a visit. The system never asks about days until the customer has asked for a
+//     visit, or said yes to our offer of one (or volunteered when they are free).
+//   * The offer is made once per conversation, after the customer's message has been dealt with ("Would you like us to call out and have a look at your space?"), never together with a question about days.
+//   * After agreement: "Would any day next week suit you?"; if not, ONCE the following week; at most two questions. A customer who says they will let us know gets "just let us know when suits" and no booking request.
+//   * What the customer says about when they are free keeps its meaning: AVAILABLE (a day, "any day", a time of day, a named week) can become a booking request; UNAVAILABLE ("I'm abroad", "I work all day")
+//     and TENTATIVE ("I'll let you know on Friday") never do, and a time the customer did not offer is never invented.
+//   * A booked customer who wants to CANCEL is asked once "do you want to move it to any other date?" (nothing is said as done); a customer who wants a change is handled as before; anything specific
+//     (tomorrow, earlier the same day, confirm, running late) goes to a person with the request.
+//   * A preference given together with a question that needs a person is still recorded (the question is noted for the person).
+// The wording of every line is below, written by code (the owner's own words). The model only reads the chat: it says what the customer wants (visit, change, question, availability and its status).
 const TZ = 'Europe/Dublin';
 const MAX_ASKS = 2;
 const LINES = {
+  // The offer of a home visit: one direct question, no dates (owner's wording, 15 Oct 2026).
+  visit_offer: 'Would you like us to call out and have a look at your space?',
   ask_next_week: 'Would any day next week suit you for a home consultation?',
   ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
   acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
@@ -17,10 +23,15 @@ const LINES = {
   // The owner's own words for a GENERAL price question (how much do kitchens cost): the only price statement the system ever makes. Nothing about a specific kitchen, a quote or a discount.
   price_general: 'All our kitchens are different, so each project is priced individually, but most of our kitchens range from €10k to €20k.',
   change_ask: 'No problem, would any day next week suit you better?',
+  // A booked customer who wants to cancel (owner's wording, 15 Oct 2026): it offers to move it, says nothing is done, and never claims the cancellation happened.
+  cancel_ask: 'No problem, do you want to move it to any other date?',
+  // A customer who will check or let us know (owner's wording, 15 Oct 2026).
+  tentative: 'No problem at all, just let us know when suits.',
   no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.',
 };
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const WEEKS = ['this', 'next', 'following', 'other'];
+const STATUSES = ['available', 'unavailable', 'tentative', 'unknown'];
 const SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const clip = (s, n) => { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; };
 
@@ -38,13 +49,18 @@ function weekOf(nowMs, which) {
 }
 
 // ---- what the customer said about when they are free ----
+// status: available (a day, "any day", a time of day or a named week they CAN do), unavailable (they cannot / will not in the near term and gave no alternative), tentative (they will check or let us know),
+// unknown (nothing usable). The model says it; when it does not, it is worked out from what was extracted. The days and times are ONLY what they offered, never inferred.
 function cleanPreference(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const days = [...new Set((Array.isArray(raw.days) ? raw.days : []).map((d) => String(d).toLowerCase()).filter((d) => WEEKDAYS.includes(d)))];
-  return { weeks: WEEKS.includes(raw.weeks) ? raw.weeks : null, days, anyDay: raw.anyDay === true, times: typeof raw.times === 'string' && raw.times.trim() ? clip(raw.times, 60) : null, text: clip(raw.text, 160) };
+  const weeks = WEEKS.includes(raw.weeks) ? raw.weeks : null, anyDay = raw.anyDay === true, times = typeof raw.times === 'string' && raw.times.trim() ? clip(raw.times, 60) : null;
+  const offered = !!(days.length || anyDay || times || (weeks && weeks !== 'other'));
+  const status = STATUSES.includes(raw.status) ? raw.status : (offered ? 'available' : 'unknown');
+  return { weeks, days, anyDay, times, text: clip(raw.text, 160), status };
 }
-// "Reasonable": a week, some days, "any day", or a time of day. "Not sure" and silence are not.
-const reasonable = (p) => !!(p && (p.weeks || p.days.length || p.anyDay || p.times));
+// "Reasonable" = something a person can book from: the customer is AVAILABLE and named a day, "any day", a time of day, or a week. "Not sure", "I'll let you know", "I'm abroad" and "another time" alone are not.
+const reasonable = (p) => !!(p && p.status === 'available' && (p.days.length || p.anyDay || p.times || (p.weeks && p.weeks !== 'other')));
 // A clear summary for the person who will book it, with the real dates.
 function describe(pref, nowMs) {
   if (!reasonable(pref)) return null;
@@ -56,7 +72,12 @@ function describe(pref, nowMs) {
   const iso = (x) => `${x.y}-${String(x.m).padStart(2, '0')}-${String(x.d).padStart(2, '0')}`;
   const firstIdx = pref.days.length ? Math.min(...pref.days.map((d) => WEEKDAYS.indexOf(d))) : -1;
   const firstDate = week ? iso(firstIdx >= 0 ? week.days[firstIdx] : week.monday) : null;
-  return { weeks: pref.weeks, days: pref.days, anyDay: pref.anyDay, times: pref.times, customerWords: pref.text, weekLabel, dayLabels: days, text: parts.join(' · '), firstDate };
+  return { weeks: pref.weeks, days: pref.days, anyDay: pref.anyDay, times: pref.times, customerWords: pref.text, weekLabel, dayLabels: days, text: parts.join(' · '), firstDate, status: 'available' };
+}
+// What a customer who is not available (or will let us know) said: kept as a NOTE in their own words. It has no days or times and is never a booking request.
+function noteOf(pref) {
+  if (!pref || !['tentative', 'unavailable'].includes(pref.status) || !pref.text) return null;
+  return { weeks: pref.weeks, days: [], anyDay: false, times: null, customerWords: pref.text, weekLabel: null, dayLabels: [], text: (pref.status === 'tentative' ? 'Will let us know' : 'Not available') + ': "' + pref.text + '"', firstDate: null, status: pref.status };
 }
 
 // ---- how many scheduling questions have already been asked ----
@@ -66,12 +87,12 @@ function asksSoFar(consult, messages) {
   for (const m of messages || []) {
     if (m.direction !== 'out') continue;
     if (/\bfollowing week\b/i.test(m.body || '')) n = Math.max(n, 2);
-    else if (/\bany day next week\b|\bnext week suits?\b/i.test(m.body || '')) n = Math.max(n, 1);
+    else if (/\bany day next week suit you for\b|\bnext week suits?\b(?!\s+you better)/i.test(m.body || '')) n = Math.max(n, 1);
   }
   return n;
 }
-// R3 (automatic receptionist): the model's one-sentence acknowledgement of what the customer said, put in front of the fixed first question ("Thanks for the details, Aoife. Would any day next week suit you
-// for a home consultation?"). Short, no question, no number, nothing about days, times, prices or promises. Anything else is dropped and only the fixed line is sent.
+// R3 (automatic receptionist): the model's one-sentence acknowledgement of what the customer said, put in front of a fixed line ("Thanks for the details, Aoife. Would you like us to call out and have a look
+// at your space?"). Short, no question, no number, nothing about days, times, prices or promises. Anything else is dropped and only the fixed line is sent.
 const RISKY = /\b(book|booked|booking|confirm|confirmed|available|availability|slot|date|time|times|day|days|week|weeks|today|tomorrow|tonight|tuesday|monday|wednesday|thursday|friday|saturday|sunday|promise|guarantee|guaranteed|price|prices|cost|costs|quote|quoted|discount|free|cheap|cheaper|€|euro|euros|deposit|ai|bot|robot|assistant|automated)\b/i;
 function acknowledgement(text) {
   const t = clip(text, 120);
@@ -87,46 +108,104 @@ function opener(text, hasOutbound) {
 }
 
 // The plan for this message. Returns { step, reply, handover, preference }:
-//   step 'none'                       nothing about scheduling is said by the system (the model's own reply is used)
-//   step ask_next_week / ask_following_week / acknowledge / no_preference     a fixed line; the last two hand over
+//   step 'none'     nothing is said by the system (a person takes over if handover.needed; otherwise the model's own reply is only a draft for staff)
+//   offer_visit / price_offer / price_general / ack_only / ask_next_week / ask_following_week / acknowledge / no_preference / tentative / cancel_ask / change_ask / change_given / change_pass_on / asked_ai   a fixed line
 function plan({ decision, consult, messages, booked, nowMs, natural = false }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
-  // A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself).
-  if (decision.handover && decision.handover.needed && /asked if ai/i.test(decision.handover.reason || '')) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
-  // A customer who already has a consultation booked and wants it changed: a person moves the booking. We ask about next week once; if they already said when (or we already asked), we only pass it on.
-  if (booked && decision.handover && decision.handover.needed && /change booking/i.test(decision.handover.reason || '')) {
-    const given = describe(decision.schedule && decision.schedule.preference, nowMs), asked = (messages || []).some((m) => m.direction === 'out' && /any day next week suit you better/i.test(m.body || ''));
-    if (given) return { step: 'change_given', reply: LINES.acknowledge, handover: { needed: true, reason: 'wants to change booking: preference received' }, preference: given };
-    return asked ? { step: 'change_pass_on', reply: LINES.no_preference, handover: { needed: true, reason: 'wants to change booking' }, preference: null } : { step: 'change_ask', reply: LINES.change_ask, handover: { needed: true, reason: 'wants to change booking' }, preference: null };
+  const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
+  const visit = d.visit || (d.wantsConsultation ? 'asked' : 'none');
+  const change = d.change && d.change !== 'none' ? d.change : (hand && /change booking/i.test(reason) ? 'move' : 'none');
+  const out = (messages || []).filter((m) => m.direction === 'out'), said = (line) => out.some((m) => String(m.body || '').includes(line));
+  const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, given = describe(prefRaw, nowMs);
+  const person = (why) => ({ step: 'none', reply: null, handover: { needed: true, reason: why }, preference: null });
+  const offered = !!(consult && consult.offered) || said(LINES.visit_offer), agreed = visit === 'asked' || visit === 'agreed';
+  const question = hand || !!d.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(d.intent);          // something a person has to answer (nothing is offered or asked meanwhile)
+
+  // 1. A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself).
+  if (hand && /asked if ai/i.test(reason)) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
+
+  // 2. A customer who already has a consultation booked. The booking is only ever changed by a person; nothing is said as done.
+  if (booked && change !== 'none') {
+    if (change === 'cancel') {
+      if (!said(LINES.cancel_ask)) return { step: 'cancel_ask', reply: LINES.cancel_ask, handover: { needed: true, reason: 'wants to cancel booking' }, preference: null };
+      return person('wants to cancel booking');                                          // they answered our one question (no / just cancel): a person takes it from here, silently
+    }
+    if (change === 'move') {
+      const asked = said(LINES.change_ask);
+      if (given) return { step: 'change_given', reply: LINES.acknowledge, handover: { needed: true, reason: 'wants to move booking: preference received' }, preference: given };
+      return asked ? { step: 'change_pass_on', reply: LINES.no_preference, handover: { needed: true, reason: 'wants to move booking' }, preference: null } : { step: 'change_ask', reply: LINES.change_ask, handover: { needed: true, reason: 'wants to move booking' }, preference: null };
+    }
+    if (change === 'move_specific') return person('wants the booking moved to a specific time (tomorrow, earlier, a date): needs you');
+    if (change === 'confirm') return person('asks you to confirm the booking');
+    if (change === 'late') return person('running late for the booking');
   }
-  // A general question about what kitchens cost is answered with the owner's fixed line, followed by the next consultation question when one is due (never for a specific price, a quote or a discount: those are handed over).
-  if (decision.intent === 'asking_price_general' && !(decision.handover && decision.handover.needed)) {
-    const next = plan({ decision: { ...decision, intent: 'new_enquiry' }, consult, messages, booked, nowMs, natural: false });
-    if (next.step === 'none') return { step: 'price_general', reply: LINES.price_general, handover: null, preference: null };
-    return { ...next, reply: LINES.price_general + ' ' + (next.step === 'ask_next_week' || next.step === 'ask_following_week' ? LINES[next.step] : next.reply) };
+
+  // 3. A general question about what kitchens cost is answered with the owner's fixed line; then, once, the offer of a visit (never a question about days before they agree).
+  if (d.intent === 'asking_price_general' && !hand) {
+    if (booked || visit === 'declined' || (consult && consult.stage === 'preference_given')) return { step: 'price_general', reply: LINES.price_general, handover: null, preference: null };
+    if (given) return { step: 'acknowledge', reply: LINES.price_general + ' ' + LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received: over to you to book' }, preference: given };
+    if (agreed) { const next = askNext(consult, messages, null); return { ...next, reply: LINES.price_general + ' ' + next.reply }; }
+    return offered ? { step: 'price_general', reply: LINES.price_general, handover: null, preference: null } : { step: 'price_offer', reply: LINES.price_general + ' ' + LINES.visit_offer, handover: null, preference: null };
   }
-  if (!decision.wantsConsultation || booked || (decision.handover && decision.handover.needed)) return none;
-  const pref = describe(decision.schedule && decision.schedule.preference, nowMs);
-  if (pref) return { step: 'acknowledge', reply: LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received: over to you to book' }, preference: pref };
-  if (consult && consult.stage === 'preference_given') return none;                       // already handed over; nothing new to ask
-  const asks = asksSoFar(consult, messages), hasOutbound = (messages || []).some((m) => m.direction === 'out');
+  if (booked) return none;                                                                 // booked and nothing about the booking: no consultation questions at all
+  if (visit === 'declined') return person('customer declined or wants to wait');
+
+  // 4. They said when they are free: that is agreement. Record it (also when they ALSO asked something that needs a person: the question goes to the person together with the preference).
+  if (given && d.intent !== 'complaint') {
+    const extra = hand || !!d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent);
+    return { step: 'acknowledge', reply: LINES.acknowledge, handover: { needed: true, reason: extra ? 'consultation preference received; they also asked something that needs you' + (reason ? ': ' + reason : '') : 'consultation preference received: over to you to book' }, preference: given };
+  }
+  if (consult && consult.stage === 'preference_given') return none;                       // already handed over; nothing new to ask or offer (a corrected preference was handled above)
+  if (question) return none;                                                               // a question we cannot answer: a person answers it; nothing is offered or asked meanwhile
+
+  // 5. They will check / are not available: no booking request, no pushing.
+  const asks = asksSoFar(consult, messages);
+  if (prefRaw && prefRaw.status === 'tentative') return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer will let us know' }, preference: noteOf(prefRaw) };
+  if (prefRaw && prefRaw.status === 'unavailable') {
+    if (asks === 1) return { step: 'ask_following_week', reply: LINES.ask_following_week, handover: null, preference: null };
+    if (asks >= MAX_ASKS) return { step: 'no_preference', reply: LINES.no_preference, handover: { needed: true, reason: 'no preference given after two questions' }, preference: noteOf(prefRaw) };
+    return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer not available: ' + (prefRaw.text || 'no detail') }, preference: noteOf(prefRaw) };
+  }
+
+  // 6. Agreement: ask about days (the first question may carry a short acknowledgement).
+  if (agreed) {
+    const lead = natural ? acknowledgement(d.reply) : '', o = lead || opener(d.schedule && d.schedule.opener, hasOutbound), next = askNext(consult, messages, null);
+    return next.step === 'ask_next_week' ? { ...next, reply: (o ? o + ' ' : '') + next.reply } : next;
+  }
+
+  // 7. No agreement. A greeting, "ok", an emoji or confusion gets a friendly acknowledgement only; an enquiry or interest gets the offer of a visit, once.
+  //    In the STAFF flow (a person reads the draft) a reply the model wrote itself is kept as the draft: the person adds the offer if they want it.
+  if (!natural && String(d.reply || '').trim()) return none;
+  const ack = natural ? acknowledgement(d.reply) : '', op = ack || opener(d.schedule && d.schedule.opener, hasOutbound);
+  if (d.intent === 'greeting') {                                                          // only the FIRST reply: after that, "ok" and "thanks" need no answer
+    const first = !out.some((m) => m.type !== 'template');
+    return first ? (ack ? { step: 'ack_only', reply: ack, handover: null, preference: null } : person('could not write a safe reply to the greeting')) : none;
+  }
+  if (offered) return none;                                                                // the offer was made: never repeated, never turned into a question about days
+  if (!['new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling'].includes(d.intent)) return none;     // unclear or off-topic: nothing is offered
+  return { step: 'offer_visit', reply: (op ? op + ' ' : '') + LINES.visit_offer, handover: null, preference: null };
+}
+// The next scheduling question, counting what was already asked (at most two).
+function askNext(consult, messages) {
+  const asks = asksSoFar(consult, messages);
   if (asks >= MAX_ASKS) return { step: 'no_preference', reply: LINES.no_preference, handover: { needed: true, reason: 'no preference given after two questions' }, preference: null };
   const step = asks === 0 ? 'ask_next_week' : 'ask_following_week';
-  // natural (the automatic receptionist, which nobody reads first): the first question is preceded by a short, safe acknowledgement of what the customer said, instead of the greeting.
-  const lead = natural && step === 'ask_next_week' ? acknowledgement(decision.reply) : '', o = lead || opener(decision.schedule && decision.schedule.opener, hasOutbound);
-  return { step, reply: (o ? o + ' ' : '') + LINES[step], handover: null, preference: null };
+  return { step, reply: LINES[step], handover: null, preference: null };
 }
 
-// What to remember on the conversation once a person has sent the suggested message.
+// What to remember on the conversation once a person (or the receptionist) has sent the message.
 function advance(consult, step, preference, nowMs) {
   const cur = consult && typeof consult === 'object' ? consult : {};
   if (cur.stage === 'preference_given' && step !== 'acknowledge') return null;            // never move back
-  if (step === 'ask_next_week') return { stage: 'asked_next_week', asks: Math.max(1, cur.asks || 0) };
-  if (step === 'ask_following_week') return { stage: 'asked_following_week', asks: 2 };
+  if (step === 'offer_visit' || step === 'price_offer') return cur.asks > 0 ? null : { stage: cur.stage || 'offered_visit', offered: true };
+  if (step === 'ask_next_week') return { stage: 'asked_next_week', asks: Math.max(1, cur.asks || 0), offered: true };
+  if (step === 'ask_following_week') return { stage: 'asked_following_week', asks: 2, offered: true };
   // R2b: from here the consultation is waiting for a person to book it (needsBooking), until an appointment exists or the person says it is not needed.
   if (step === 'acknowledge') return { stage: 'preference_given', asks: cur.asks || 0, preference: preference || null, at: nowMs, needsBooking: true };
-  if (step === 'no_preference') return { stage: 'no_preference', asks: 2, at: nowMs, needsBooking: true };
+  if (step === 'no_preference') return { stage: 'no_preference', asks: 2, at: nowMs, needsBooking: true, ...(preference ? { note: preference } : {}) };
+  // They will let us know / are not available: the customer's words are kept as a NOTE; no booking request is created.
+  if (step === 'tentative') return { stage: 'tentative', note: preference || null, at: nowMs };
   return null;
 }
 
-module.exports = { LINES, MAX_ASKS, WEEKDAYS, WEEKS, cleanPreference, reasonable, describe, weekOf, asksSoFar, opener, acknowledgement, plan, advance };
+module.exports = { LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, cleanPreference, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, plan, advance };

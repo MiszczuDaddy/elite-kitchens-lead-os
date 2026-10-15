@@ -73,7 +73,7 @@ test('SEND: the first question goes out once, in the fixed words, marked as auto
   assert.equal(await REC.processChat(deps(m, w, p), PH, NOW), 'sent:ask_next_week');
   assert.deepEqual(w.sent, [{ to: PH, body: SCH.LINES.ask_next_week }], 'exactly the fixed line (the chat already has messages from us, so no greeting)');
   const out = (await msgs()).filter((x) => x.direction === 'out' && x.auto); assert.equal(out.length, 1); assert.equal(out[0].body, SCH.LINES.ask_next_week);
-  assert.deepEqual(await consult(), { stage: 'asked_next_week', asks: 1 }); const r = await rec(); assert.deepEqual([r.on, r.paused, r.count, r.last.step], [true, null, 1, 'ask_next_week']);
+  assert.deepEqual(await consult(), { stage: 'asked_next_week', asks: 1, offered: true }); const r = await rec(); assert.deepEqual([r.on, r.paused, r.count, r.last.step], [true, null, 1, 'ask_next_week']);
   assert.equal(p.events.length, 0, 'asking a question needs nobody');
   assert.equal(await REC.processChat(deps(m, w, p), PH, NOW + 60e3), 'handled', 'the same customer message is never answered twice'); assert.equal(w.sent.length, 1); assert.equal(m.calls.length, 1);
   assert.equal((await db.collection('appointments').get()).size, apptsBefore, 'nothing was booked');
@@ -176,5 +176,5 @@ test('ERASURE AND SAFETY: the receptionist state goes with the customer; the mod
   const src = fs.readFileSync(path.join(__dirname, '../lib/aiReceptionist.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   assert.equal(/sendTemplate|sendMedia|createAppointment|updateAppointment|appointments|quotes|projects|updateContact|setConversationStatus/.test(src), false, 'no booking, quote, project or contact change');
   assert.equal((src.match(/wa\.sendText\(/g) || []).length, 1, 'exactly one place sends, after the claim'); assert.ok(src.indexOf('outbound.begin(') < src.indexOf('wa.sendText('));
-  assert.ok(src.includes("SEND_STEPS = new Set(['price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on'])"));
+  assert.ok(src.includes("SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on'])"));
 });
