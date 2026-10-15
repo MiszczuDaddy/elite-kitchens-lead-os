@@ -72,18 +72,14 @@ window.QuoteDocument = (() => {
   .sign{font-size:11px;line-height:1.7;padding-top:4px}
   .sign .nm{font-family:'Faustina',Georgia,serif;font-size:14px;font-weight:600}
   .soft{color:var(--soft)}
-  .rend{width:calc(100% + 18px);margin:0 -9px;border-collapse:separate;border-spacing:9px 0;table-layout:fixed}
-  .rend-cell{vertical-align:top}
-  .rend-img{width:100%;height:auto;display:block;border:1px solid var(--rule)}
-  .rend.one .rend-img{width:auto;max-width:100%;max-height:88mm;margin:0 auto}
-  .rend-cap{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:4px}
-  .blk.rend-next{padding-top:7px}
+  /* a render is as wide as the page allows, in its own proportions (never cropped or stretched); no taller than 118 mm, so that two of them, one above the other, always fit on one page */
+  .rend-img{display:block;max-width:100%;max-height:118mm;width:auto;height:auto;margin:0 auto;border:1px solid var(--rule)}
+  .blk.rend-next{padding-top:8px}
   .render-note{font-size:9.5px;color:var(--faint);margin-top:7px}
   .draft-band{margin:0 0 6mm;padding:5px 10px;background:#f7f0dc;color:#655420;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
   .tight .blk{padding-top:10px}
   .tight .blk.first{padding-top:0}
   .tight .blk.rend-next{padding-top:5px}
-  .tight .rend-cap{margin-top:2px}
   .tight .contact{line-height:1.5}
   .tight .rule{margin:7px 0}
   .tight .meta .ref{line-height:1.25}
@@ -140,7 +136,7 @@ window.QuoteDocument = (() => {
   // data: { ref, issueDate, validUntil, customer:{name,address,email,phone}, business:{tradingName,signatureName,phone,email,web,
   //         address,vatNumber}, sheet (the frozen price sheet), renders:[image data URLs], draft:boolean }
   // The document is a .doc element of sections (".blk"), in order: the introduction, the specification, the options, what is
-  // included, the design renders (side by side, in the flow of the quote), and the closing section (not included, the terms and the sign-off together, always last).
+  // included, the design renders (full width, one above the other, in the flow of the quote), and the closing section (not included, the terms and the sign-off together, always last).
   function build(doc, data) {
     const h = maker(doc), s = data.sheet, d = s.document, b = data.business || {}, c = data.customer || {};
     const w = wording(d.project);
@@ -218,26 +214,19 @@ window.QuoteDocument = (() => {
     if (d.items.length) { row.append(col(w.items, d.items, '49%')); const gap = h('td'); gap.style.width = '2%'; row.append(gap); }
     row.append(col('Work included', d.workIncluded, d.items.length ? '49%' : '100%'));
     it.append(h('tbody', null, row));
-    blk('', h('div', 'rule-ink'), h('div', 'sec-h', many ? 'Every option includes' : 'Included'), it);
+    blk('includes', h('div', 'rule-ink'), h('div', 'sec-h', many ? 'Every option includes' : 'Included'), it);
 
-    // Design renders: laid out in the flow of the quote, not a page each. One render is shown wide and centred; two or four sit side by side in two columns, three or five or more in three; a row is never split
-    // across pages. The note about indicative renders follows the last row.
+    // Design renders: in the flow of the quote, not a page each. Each render is its own section, full width in its own proportions, one above the other; the pages are chosen by paginate() below
+    // (a render goes on the page with the quote details when it fits, two fit on one page, a render is never split). The note about indicative renders follows the last one.
     const renders = data.renders || [];
-    if (renders.length) {
-      const cols = renders.length === 1 ? 1 : renders.length <= 4 ? 2 : 3, rows = [];
-      for (let i = 0; i < renders.length; i += cols) rows.push(renders.slice(i, i + cols));
-      rows.forEach((row, ri) => {
-        const tr = h('tr');
-        row.forEach((url, ci) => { const img = h('img', 'rend-img'); img.src = url; img.alt = 'Design render'; const td = h('td', 'rend-cell', img, renders.length > 1 ? h('div', 'rend-cap', 'Render ' + (ri * cols + ci + 1)) : null); td.style.width = colWidth(cols); tr.append(td); });
-        for (let k = row.length; k < cols; k++) { const td = h('td', 'rend-cell'); td.style.width = colWidth(cols); tr.append(td); }
-        const t = h('table', 'rend' + (cols === 1 ? ' one' : '')); t.style.width = '100%'; t.append(h('tbody', null, tr));
-        const kids = [];
-        if (ri === 0) kids.push(h('div', 'rule-ink'), h('div', 'sec-h', renders.length > 1 ? 'Design renders' : 'Design render'));
-        kids.push(t);
-        if (ri === rows.length - 1) kids.push(h('div', 'render-note', (renders.length > 1 ? 'Indicative renders' : 'Indicative render') + '. Final design confirmed at detailed design stage.'));
-        blk(ri === 0 ? '' : 'rend-next', ...kids);
-      });
-    }
+    renders.forEach((url, i) => {
+      const img = h('img', 'rend-img'); img.src = url; img.alt = 'Design render ' + (i + 1);
+      const kids = [];
+      if (i === 0) kids.push(h('div', 'rule-ink'), h('div', 'sec-h', renders.length > 1 ? 'Design renders' : 'Design render'));
+      kids.push(img);
+      if (i === renders.length - 1) kids.push(h('div', 'render-note', (renders.length > 1 ? 'Indicative renders' : 'Indicative render') + '. Final design confirmed at detailed design stage.'));
+      blk('rend-blk' + (i === 0 ? '' : ' rend-next'), ...kids);
+    });
 
     // The closing section: not included and the terms side by side, then the sign-off. One section, so the sign-off always
     // stays with the terms.
@@ -274,20 +263,32 @@ window.QuoteDocument = (() => {
     if (last >= 2 && starts.includes(last) && !starts.includes(last - 1) && heights[last - 1] + heights[last] <= PAGE_PX) starts.splice(starts.indexOf(last), 1, last - 1);
     return starts;
   }
+  // The pages are chosen, not just filled in order. The candidates are: the normal spacing or the slightly closer one, and (with design renders) "Every option includes" before the renders or after them. The layout with the
+  // fewest pages wins; among those, the one whose pages (except the last) are fullest, so a render is never left with a big gap above or below it. Ties keep the normal spacing and the original order.
+  function pageFills(hs, starts) {
+    const fills = []; let y = 0; const cut = new Set(starts);
+    hs.forEach((ht, i) => { if (cut.has(i)) { fills.push(y / PAGE_PX); y = 0; } y += ht; });
+    fills.push(y / PAGE_PX);
+    return fills;
+  }
   function paginate(doc) {
-    const root = doc.querySelector('.doc'), blocks = [...root.querySelectorAll(':scope > .blk')];
-    const measure = (tight) => { root.classList.toggle('tight', tight); return blocks.map((n) => n.getBoundingClientRect().height); };
-    const total = (hs) => hs.reduce((a, x) => a + x, 0);
-    blocks.forEach((n) => n.classList.remove('pb'));
-    const normal = measure(false);
-    if (total(normal) <= PAGE_PX) return 1;
-    const tight = measure(true);
-    if (total(tight) <= PAGE_PX) return 1;
-    const pn = plan(normal), pt = plan(tight);
-    if (pt.length < pn.length) { pt.forEach((i) => blocks[i].classList.add('pb')); return pt.length + 1; }      // the closer setting saves a page: keep it
-    measure(false);
-    pn.forEach((i) => blocks[i].classList.add('pb'));
-    return pn.length + 1;
+    const root = doc.querySelector('.doc'), all = [...root.querySelectorAll(':scope > .blk')];
+    const closing = all.find((n) => n.classList.contains('closing')), inc = all.find((n) => n.classList.contains('includes')), rends = all.filter((n) => n.classList.contains('rend-blk'));
+    const orders = [all];
+    if (inc && rends.length && closing) { const o = all.filter((n) => n !== inc), at = o.indexOf(closing); o.splice(at, 0, inc); orders.push(o); }        // "includes" after the renders, just before the terms
+    const total = (hs) => hs.reduce((x, y) => x + y, 0);
+    all.forEach((n) => n.classList.remove('pb'));
+    let best = null; const less = (x, y) => { for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i]; return false; };
+    orders.forEach((order, oi) => [false, true].forEach((tight) => {
+      root.classList.toggle('tight', tight); root.replaceChildren(...order);
+      const hs = order.map((n) => n.getBoundingClientRect().height);
+      const starts = total(hs) <= PAGE_PX ? [] : plan(hs), fills = pageFills(hs, starts), nonLast = fills.slice(0, -1);
+      const score = [starts.length + 1, nonLast.length ? -Math.round(Math.min(...nonLast) * 20) : 0, tight ? 1 : 0, oi];       // pages, then the emptiest page (in steps of 5%), then normal spacing, then the original order
+      if (!best || less(score, best.score)) best = { score, order, tight, starts };
+    }));
+    root.classList.toggle('tight', best.tight); root.replaceChildren(...best.order);
+    best.starts.forEach((i) => best.order[i].classList.add('pb'));
+    return best.starts.length + 1;
   }
   // The preview: the same pages, each shown as a sheet of A4 paper.
   function sheets(doc, draft) {

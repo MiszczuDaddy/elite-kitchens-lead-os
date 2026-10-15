@@ -486,7 +486,7 @@ How it works:
 
 * **Send** (a draft) and **Send again** (a sent quote, also an expired one: the next version with the same content and
   prices, then sent) open the Send dialog. It shows the customer, address, email, the date, the validity and the options,
-  warns when there is no address or email, takes up to 5 design renders (each made at most 2,000 px, laid out side by side in the quote), proposes the pipeline value (the dearest option; a €0 quote proposes none) and, for a Closed customer, an unticked
+  warns when there is no address or email, takes up to 5 design renders (each made at most 2,000 px, full width, one above the other, in the quote), proposes the pipeline value (the dearest option; a €0 quote proposes none) and, for a Closed customer, an unticked
   "Reopen: move to Quoted". It says what will happen to the stage and the value.
 * **Make PDF and mark sent**: the PDF is made in the browser from the frozen draft and the customer's and business details
   read fresh, uploaded to the sender's private upload folder, and `sendQuote` stores it and marks the quote Sent (or refuses,
@@ -517,7 +517,7 @@ pages and the exact wording and terms before M4 is approved.
   PDF"). Checked with nine sample quotes: every one-option quote (a plain kitchen; a full kitchen with worktop, sink,
   extractor, glazed doors and extras; wardrobes; a utility room) and a two-option wardrobe quote are one page; two-option
   kitchens are two pages (introduction, specification and options; then what is included, the terms and the sign-off); a
-  three-option kitchen with two renders is also two pages (since 15 Oct 2026 the renders are laid out in the quote instead of one page each). To make this work the business's contact details in
+  three-option kitchen with two renders is three pages (since 15 Oct 2026 the renders are laid out in the quote instead of one page each, which made it four). To make this work the business's contact details in
   the header are three lines (phone · email; address; web · VAT number) instead of five, so they are no taller than the
   logo, and a single option is one wide card with its price on the right.
 * **Preview** shows the same pages as sheets of A4 paper, with the draft label in the top margin (so it moves nothing),
@@ -717,7 +717,7 @@ customer; AI.
 [PHASE6_1_PLAN.md](PHASE6_1_PLAN.md). Not part of Phase 6: nothing in it changes what Phase 6 does.
 
 ## PDF layout and Preview PDF (15 Oct 2026, branch `quote-pdf-improvements`)
-* **Layout.** The design renders are no longer a page each. They are laid out in the flow of the quote, after "Every option includes" and before the terms and sign-off: one render wide and centred, two or four in two columns, three or five in three; a row is never split across pages; one note ("Indicative renders...") follows the last row. A three-option kitchen with two renders is **two pages** (it was four, two of them mostly empty). Pagination is unchanged in kind (whole sections, the closing section never alone, the sign-off last); in addition, the slightly closer setting is used whenever it needs fewer pages, not only when it makes one page. A little less space between sections.
+* **Layout.** The design renders are no longer a page each, and never side by side. Each render is its own section, **full width, one above the other**, in its own proportions (never cropped or stretched; no taller than 118 mm, so a 4:3 or tall render is scaled down to that height, and two renders always fit on one page). Pages are chosen, not just filled in order: the candidates are the normal or slightly closer spacing, and "Every option includes" before or after the renders; the layout with the fewest pages wins, then the one whose pages (except the last) are fullest. A render goes on the page with the quote details only when it fits there, otherwise it continues on the next page. Terms and sign-off stay together at the end, with what is included. A three-option kitchen with two renders is **three pages**: the quote details; the two renders; what is included, not included, the terms and the sign-off (it was four pages, two of them mostly empty). With one render and three options it is two pages. No renders: unchanged.
 * **Preview PDF.** A "Preview PDF" button on the quote page (the saved draft; design renders are added in the Send box, so they are not in this one) and in the Send box (with the renders chosen there). It calls the same `QuoteDocument.toPdf` with the same data as a real send (`pdfDataFor`), then opens the PDF in a new tab (opened at once so the browser allows it, filled when ready; if blocked, the PDF is downloaded). It uploads nothing, sends nothing, marks nothing and does not touch the PDF made for a real send. The older on-screen preview is now called "Quick preview".
 * **Number fields.** In the Quotes screens a number field is selected when entered and leading zeros are removed as you type ("085" becomes "85"; "0.5" and "0" are left alone). Only what is shown changes; the calculator reads the same number and nothing saved is touched (`public/quote-numbers.js`).
 * **Tests.** `test-ui/quote-pdf.e2e.js` (layout with 0, 1, 2, 3, 5 renders; the PDF has the preview's pages; number fields), and Preview PDF checks in `test-ui/quote-send.e2e.js`.

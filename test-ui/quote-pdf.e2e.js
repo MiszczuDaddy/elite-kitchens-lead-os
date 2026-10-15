@@ -45,35 +45,46 @@ function savePages(buf, prefix) {                                              /
         const host = document.createElement('div'); Object.assign(host.style, { position: 'fixed', left: '-5000px', top: '0' }); document.body.append(host);
         const f = await QuoteDocument.show(host, H.data(renders, three)), doc = f.contentDocument;
         const sheets = [...doc.querySelectorAll('.sheet')].map((s) => { const top = s.getBoundingClientRect().top, kids = [...s.querySelectorAll(':scope > .blk')], last = kids[kids.length - 1];
-          return { blocks: kids.map((b) => [...b.classList].filter((c) => c !== 'blk').join(' ') || 'section'), used: Math.round(((last.getBoundingClientRect().bottom - top) / s.getBoundingClientRect().height) * 100) }; });
-        const r = { pages: sheets.length, sheets, tight: doc.querySelector('.doc, .sheet') && !!doc.querySelector('.tight'), rendImgs: doc.querySelectorAll('.rend-img').length, text: doc.body.innerText }; f.remove(); host.remove(); return r;
+          return { blocks: kids.map((b) => (b.classList.contains('closing') ? 'closing' : b.classList.contains('includes') ? 'includes' : b.classList.contains('rend-blk') ? 'render' : 'section')), used: Math.round(((last.getBoundingClientRect().bottom - top) / s.getBoundingClientRect().height) * 100) }; });
+        const sheetEls = [...doc.querySelectorAll('.sheet')], px = (mm) => mm * 96 / 25.4;
+        const rends = [...doc.querySelectorAll('.rend-img')].map((im) => { const b = im.getBoundingClientRect(), si = sheetEls.findIndex((s) => s.contains(im)), sr = sheetEls[si] ? sheetEls[si].getBoundingClientRect() : null; return { w: b.width, h: b.height, top: b.top, bottom: b.bottom, nw: im.naturalWidth, nh: im.naturalHeight, sheet: si, inSheet: !!sr && b.top >= sr.top && b.bottom <= sr.bottom && b.left >= sr.left - 1 && b.right <= sr.right + 1, capPx: px(118), fullPx: px(182) }; });
+        const r = { pages: sheets.length, sheets, rends, text: doc.body.innerText }; f.remove(); host.remove(); return r;
       },
     };
   }, PRICE_LIST);
 
-  // ------------------------------------------------------------------ 1. the owner's quote: 3 options and 2 renders
+  // ------------------------------------------------------------------ 1. the owner's quote: 3 options and 2 renders: full-width renders, one above the other
   const two = await page.evaluate(async () => H.layout([H.render(0), H.render(1)]));
-  assert.equal(two.pages, 2, 'three options with two renders: two pages (it was four): ' + JSON.stringify(two.sheets));
-  assert.equal(two.rendImgs, 2); assert.match(two.text, /Design renders[\s\S]*Render 1[\s\S]*Render 2[\s\S]*Indicative renders\. Final design confirmed/i);
-  assert.ok(two.sheets[0].used >= 70, 'page 1 is well filled (' + two.sheets[0].used + '%): ' + JSON.stringify(two.sheets)); assert.ok(two.sheets[1].used >= 45, 'page 2 is not mostly empty (' + two.sheets[1].used + '%)');
-  assert.equal(two.sheets[1].blocks.at(-1), 'closing', 'the terms and the sign-off are last, with the renders before them');
-  assert.equal(two.sheets.flatMap((s) => s.blocks).filter((b) => b === 'closing').length, 1);
-  ok(`3 options + 2 renders = ${two.pages} pages (page 1 ${two.sheets[0].used}% full, page 2 ${two.sheets[1].used}%), the renders in the flow before the terms and sign-off, the sign-off last`);
+  const stacked = (lay, label) => {                                            // every render: whole, in its own proportions, full width unless the height cap applies, in a page of its own flow
+    for (const r of lay.rends) { assert.ok(Math.abs(r.w / r.h - r.nw / r.nh) / (r.nw / r.nh) < 0.015, label + ': a render is not stretched or cropped: shown ' + (r.w / r.h).toFixed(3) + ' vs ' + (r.nw / r.nh).toFixed(3)); assert.ok(r.h <= r.capPx + 1, label + ': no taller than the cap'); assert.ok(r.w >= r.fullPx * 0.99 || Math.abs(r.h - r.capPx) < 2, label + ': full width unless the height cap applies: ' + r.w + ' of ' + r.fullPx); assert.ok(r.inSheet, label + ': inside its page'); }
+    for (let i = 1; i < lay.rends.length; i++) if (lay.rends[i].sheet === lay.rends[i - 1].sheet) assert.ok(lay.rends[i].top >= lay.rends[i - 1].bottom, label + ': one above the other');
+  };
+  assert.equal(two.pages, 3, '3 options with 2 full-width renders: ' + JSON.stringify(two.sheets));
+  assert.equal(two.rends.length, 2); stacked(two, 'sample');
+  assert.equal(two.rends[0].sheet, two.rends[1].sheet, 'both renders are on one page, one above the other'); assert.ok(two.rends[1].top > two.rends[0].bottom, 'the second is below the first');
+  assert.match(two.text, /Design renders[\s\S]*Indicative renders\. Final design confirmed/i);
+  assert.ok(two.sheets[0].used >= 70, 'page 1 (the quote details) is well filled (' + two.sheets[0].used + '%): ' + JSON.stringify(two.sheets)); assert.ok(two.sheets[1].used >= 75, 'page 2 (the two renders) is well filled (' + two.sheets[1].used + '%)');
+  assert.ok(two.sheets[2].used >= 35, 'the last page is not nearly empty (' + two.sheets[2].used + '%)');
+  ok('3 options + 2 renders = ' + two.pages + ' pages: ' + two.sheets.map((s, i) => 'page ' + (i + 1) + ' ' + s.used + '%').join(', ') + '; the two full-width renders sit one above the other on one page, never cropped or stretched; the terms and sign-off end the quote with what is included');
 
-  // ------------------------------------------------------------------ 2. other numbers of renders
+  // ------------------------------------------------------------------ 2. other numbers of renders: placement
   const cases = {};
   for (const [name, c, three] of [['none3', 0, true], ['one3', 1, true], ['three3', 3, true], ['five3', 5, true], ['one1', 1, false], ['two1', 2, false]]) cases[name] = await page.evaluate(async ([c, three]) => H.layout(Array.from({ length: c }, (_, i) => H.render(i)), three), [c, three]);
-  for (const [k, v] of Object.entries(cases)) assert.equal(v.rendImgs, { none3: 0, one3: 1, three3: 3, five3: 5, one1: 1, two1: 2 }[k], k + ': every render is in the document');
-  assert.equal(cases.none3.pages, 2, 'no renders: the quote is the same two pages'); assert.ok(cases.one3.pages <= 2, 'one wide render still two pages: ' + JSON.stringify(cases.one3.sheets)); assert.ok(cases.three3.pages <= 3, 'three renders: ' + cases.three3.pages);
-  assert.ok(cases.five3.pages <= 3, 'five renders (the most): ' + JSON.stringify(cases.five3.sheets));
-  assert.ok(cases.two1.pages <= 2, 'a one-option quote with two renders is at most two pages: ' + JSON.stringify(cases.two1.sheets) + ' pages=' + cases.two1.pages);
-  for (const [k, v] of Object.entries(cases)) { v.sheets.forEach((s, i) => { if (i < v.pages - 1) assert.ok(s.used >= 55, `${k}: page ${i + 1} is ${s.used}% full: ${JSON.stringify(v.sheets)}`); }); assert.equal(v.sheets.flatMap((s) => s.blocks).filter((b) => b === 'closing').length, 1, k); assert.equal(v.sheets.at(-1).blocks.at(-1), 'closing', k + ': the sign-off is last'); }
-  ok(`renders: none ${cases.none3.pages}, one ${cases.one3.pages}, three ${cases.three3.pages}, five ${cases.five3.pages} pages (3 options); one option + two renders ${cases.two1.pages} page; no page except the last is less than 55% full; the sign-off is always last`);
+  for (const [k, v] of Object.entries(cases)) { assert.equal(v.rends.length, { none3: 0, one3: 1, three3: 3, five3: 5, one1: 1, two1: 2 }[k], k + ': every render is in the document'); stacked(v, k); }
+  assert.equal(cases.none3.pages, 2, 'no renders: the quote is the same two pages');
+  assert.equal(cases.one3.pages, 2, 'one render, three options: two pages: ' + JSON.stringify(cases.one3.sheets)); assert.equal(cases.one3.rends[0].sheet, 1, 'the render goes onto the next page when it does not fit after the quote details');
+  assert.equal(cases.three3.pages, 3, 'three renders: ' + JSON.stringify(cases.three3.sheets)); assert.ok(cases.five3.pages <= 4, 'five renders (the most): ' + JSON.stringify(cases.five3.sheets));
+  assert.ok(cases.one1.rends[0].sheet === 0 || cases.one1.pages <= 2, 'a one-option quote: the render goes on the first page if it fits, else the second');
+  for (const [k, v] of Object.entries(cases)) { assert.equal(v.sheets.flatMap((s) => s.blocks).filter((b) => b === 'closing').length, 1, k); assert.equal(v.sheets.at(-1).blocks.at(-1), 'closing', k + ': the sign-off is last'); assert.notEqual(v.sheets.at(-1).blocks[0], 'closing', k + ': never alone');
+    v.sheets.forEach((s, i) => { if (i < v.pages - 1) assert.ok(s.used >= 50, k + ': page ' + (i + 1) + ' is ' + s.used + '% full: ' + JSON.stringify(v.sheets)); }); }
+  ok('placement: renders (0, 1, 3, 5) ' + [cases.none3, cases.one3, cases.three3, cases.five3].map((c) => c.pages).join(', ') + ' pages with 3 options; a render goes on the first page only when it fits there; no page except the last is less than 50% full; the sign-off is last and never alone');
 
-  // ------------------------------------------------------------------ 3. a row of renders is never cut, and the headings never sit alone
-  const rowsSplit = await page.evaluate(async () => { const r = []; for (const c of [2, 3, 4, 5]) { const l = await H.layout(Array.from({ length: c }, (_, i) => H.render(i))); r.push(l.sheets.map((s) => s.blocks)); } return r; });
-  for (const sheets of rowsSplit) { const flat = sheets.flat(); assert.ok(flat.filter((b) => b === 'section').length >= 3); assert.ok(flat.filter((b) => b === 'rend-next').length >= 0); for (const s of sheets) assert.notEqual(s[0], 'closing', 'the closing section never starts a page alone'); }
-  ok('rows of renders are separate sections: a page break can fall between rows, never inside one');
+  // ------------------------------------------------------------------ 3. proportions: wide, 4:3 and tall renders are never cropped or stretched; two still fit on one page
+  const odd = await page.evaluate(async () => { const out = {}; for (const [k, w, h] of [['wide', 2000, 1150], ['fourthree', 1600, 1200], ['tall', 1200, 1600], ['square', 1400, 1400]]) out[k] = await H.layout([H.render(0, w, h), H.render(1, w, h)], false); return out; });
+  for (const [k, v] of Object.entries(odd)) { stacked(v, k); assert.equal(v.rends[0].sheet, v.rends[1].sheet, k + ': two renders fit on one page, one above the other'); }
+  assert.ok(odd.fourthree.rends[0].h <= odd.fourthree.rends[0].capPx + 1 && odd.fourthree.rends[0].w < odd.fourthree.rends[0].fullPx, '4:3 renders are scaled down to the height cap, not cropped');
+  assert.ok(odd.tall.rends[0].h <= odd.tall.rends[0].capPx + 1, 'a tall render is no taller than the cap');
+  ok('proportions: wide, 4:3, square and tall renders keep their shape (no crop, no stretch), full width when the cap allows, and two always fit on one page');
 
   // ------------------------------------------------------------------ 4. the real PDF has the preview's pages; look at it
   const pdf = await page.evaluate(async () => { const d = H.data([H.render(0), H.render(1)]); const blob = await QuoteDocument.toPdf(d, { filename: 'x.pdf' }); const buf = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < buf.length; i += 8192) s += String.fromCharCode(...buf.subarray(i, i + 8192)); return { b64: btoa(s), size: blob.size }; });
