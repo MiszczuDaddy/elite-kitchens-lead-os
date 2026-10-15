@@ -45,7 +45,7 @@ const num = (v, lo, hi, fallback) => (typeof v === 'number' && Number.isFinite(v
 async function loadSettings(db) {
   const s = await db.doc('aiSettings/current').get(), d = s.exists ? s.data() : {};
   return { ...DEFAULTS, enabled: d.enabled === true, customerDataApproved: d.customerDataApproved === true,
-    replyAssistant: d.replyAssistant === true, autoReply: d.autoReply === true, autoReplySince: d.autoReplySince && d.autoReplySince.toMillis ? d.autoReplySince.toMillis() : 0, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
+    replyAssistant: d.replyAssistant === true, autoReply: d.autoReply === true, replyDelaySeconds: num(d.replyDelaySeconds, 5, 90, 30), autoReplySince: d.autoReplySince && d.autoReplySince.toMillis ? d.autoReplySince.toMillis() : 0, actionsEnabled: d.actionsEnabled === true, actionKinds: Object.fromEntries(Object.keys(A.KINDS).map((k) => [k, !!(d.actionKinds && d.actionKinds[k] === true)])),
     monthlyCapEur: num(d.monthlyCapEur, 0, 1000, DEFAULTS.monthlyCapEur), dailyCapEur: num(d.dailyCapEur, 0, 1000, DEFAULTS.dailyCapEur),
     defaultModel: modelKey(d.defaultModel) || DEFAULTS.defaultModel, replyModel: modelKey(d.replyModel) || 'sonnet',
     maxOutputTokens: num(d.maxOutputTokens, 64, 4096, DEFAULTS.maxOutputTokens), prices: { ...DEFAULTS.prices, ...(d.prices && typeof d.prices === 'object' ? d.prices : {}) },

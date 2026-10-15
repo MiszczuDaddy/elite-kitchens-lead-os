@@ -184,5 +184,25 @@ Order, one command at a time from Cloud Shell, each verified from outside:
 * `test-ui/assistant.e2e.js` (real page + functions + emulators, demo model): screens and states, "Check models", the Haiku/Sonnet selector and "Retry with Sonnet", the owner-only data box, settings and the data-gate confirmation, a lookup, the open customer, HTML shown as text, the tab-only conversation, the kill switch and a used-up budget, the phone layout.
 * Planted-error checks (14 deliberate breakages of the cap, switch, data gate, reservation, timeout handling, rate limit, logging, read-only, injection labelling, history and context rules): 12 caught at once; 2 exposed one real test gap (the hourly speed limit, now tested) and one harmless equivalent change (the open customer is read but still never shown to the model while the gate is closed).
 
+## Event-driven receptionist (branch `phase-9-receptionist-events`; not merged or deployed)
+
+**What changed:** the receptionist no longer waits for a one-minute check. A Firestore trigger (`receptionistOnMessage`) fires the moment a **customer** message is saved. It waits the **reply delay** (30 s by default), and if the customer wrote again meanwhile only the run for the *last* message goes on, so a burst gets one answer. The scheduled job (`receptionistSweep`) now runs **every 5 minutes** as a backup (missed events, and everything that arrived in quiet hours). Expected reply time: about 30 s + 5-15 s for the AI and WhatsApp = roughly 35-45 s.
+
+**Nothing always-on:** no `minInstances`; the function only runs when a message arrives (`retry: false`, `maxInstances: 10`, 180 s timeout; the backup covers a lost event).
+
+**Safeguards kept (same `processChat` for both paths):** master/AI switches, per-chat switch, new-Meta-leads-only (never retroactive), quiet hours 00:00-07:00 Dublin, 24 h WhatsApp window, daily cap, budget and kill switch, handover rules, consent-first conversation (Step A).
+
+**No duplicate replies:** per-chat lock (state re-read inside the transaction), "already answered" record, the outbound claim `auto_<lastInboundMessage>`, inbound dedupe. Tested: event + backup at the same time, the same event twice, and later runs, all give exactly one message.
+
+**A person is never talked over:** the chat is read again just before sending. If a person replied (during the delay or while the answer was being written), the owner paused the chat, or the customer wrote again, nothing is sent, the draft is discarded, and the conversation state does not move on. A person reply hands the chat over (receptionist stops until reactivated); a newer customer message gets its own single answer.
+
+**Reply delay setting:** `aiSettings/current.replyDelaySeconds` (5 to 90, default 30), read on every run, so it can be changed **without redeploying**. A field in Assistant > Settings for it is not built yet (small, owner-only). Above ~90 s would also need a higher function timeout (redeploy).
+
+**First deploy caveat:** a Firestore trigger must be in the same region as the Firestore database (the function is set to `europe-west1`); the first deploy may ask to enable Eventarc / take a retry.
+
+**Cost:** pennies per month (one cheap function start per customer message, mostly exiting at once for chats that are not the receptionist's; the backup reads less often than before).
+
+**Tests:** `functions/test/ai-receptionist-events.test.js` (9: one message, burst, never twice, person not talked over, newer message, quiet hours, not-ours chats and switches, reply delay setting, wiring).
+
 ## Not built (needs your approval, in this order)
 9.2 AI-prepared proposals (e.g. a quote revision) applied only after you press Approve · 9.3 push-to-talk voice (browser speech recognition first, fallback where unsupported) · 9.4 WhatsApp receptionist in **suggest-only** mode · 9.5 receptionist that replies by itself (after the disclosure question above, with a per-lead opt-out and a human hand-over).

@@ -672,9 +672,9 @@ test('Phase 9: the ai stage names exactly the three new callables (each bound to
   assert.match(live, /serving_revision aichat[\s\S]*Deploy the AI assistant backend first/); assert.ok(live.indexOf('aichat') < live.indexOf('confirm "'));
 });
 
-test('Phase 9 R3: the receptionist stage deploys only the every-minute check and pushReceipt, needs the AI backend first, asks before deploying, never makes the check public, and the screen waits for it', () => {
+test('Phase 9 R3: the receptionist stage deploys only the message-arrival trigger, the 5-minute backup and pushReceipt, needs the AI backend first, asks before deploying, never makes the check public, and the screen waits for it', () => {
   const s = fs.readFileSync(path.join(SCRIPTS, 'deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n');
-  assert.match(s, /^REC_FUNCS="receptionistSweep pushReceipt"/m);
+  assert.match(s, /^REC_FUNCS="receptionistSweep receptionistOnMessage pushReceipt"/m);
   const idx = fs.readFileSync(path.join(ROOT, 'functions', 'index.js'), 'utf8');
   assert.match(idx, /^exports\.receptionistSweep\s*=\s*onSchedule\(/m, 'the check is a scheduled job, not a callable'); assert.match(idx, /^exports\.setReceptionist\s*=\s*onCall\(\{\}/m);
   const i = s.indexOf('\n  receptionist)\n'); assert.ok(i >= 0); const stage = s.slice(i, s.indexOf('\n    ;;', i));

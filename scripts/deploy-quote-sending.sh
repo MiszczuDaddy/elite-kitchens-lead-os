@@ -31,7 +31,7 @@
 #                                                projects and renders) and the 7 new project functions. Run it BEFORE "live" (the screen); screens that do not know projects keep working.
 #   ./scripts/deploy-quote-sending.sh ai         Phase 9 (AI assistant) backend: the assistant functions (aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult). Needs the ANTHROPIC_API_KEY secret first; asks for the owner account (the only one that may switch real customer data on). Switched OFF until the owner
 #                                                switches it on in the screen. Run it BEFORE "live". No existing function is touched.
-#   ./scripts/deploy-quote-sending.sh receptionist  Phase 9 R3: the automatic receptionist's every-minute check (receptionistSweep) and pushReceipt. Run it after "ai" and BEFORE "live". It does nothing until the owner switches
+#   ./scripts/deploy-quote-sending.sh receptionist  Phase 9 R3: the automatic receptionist (receptionistOnMessage answers when a message arrives; receptionistSweep is the 5-minute backup) and pushReceipt. Run it after "ai" and BEFORE "live". It does nothing until the owner switches
 #                                                it on in Assistant > Settings AND for a chat. Switch it off there at any time.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
@@ -65,7 +65,7 @@ PUSH_CHANGED="webhook leadIntake"                                               
 PUSH_FUNCS="$PUSH_NEW $PUSH_CHANGED"
 AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
 AI_FUNCS="$AI_NEW"
-REC_FUNCS="receptionistSweep pushReceipt"                                                      # Phase 9 R3: the every-minute receptionist check (not callable from outside) and pushReceipt (it now knows the "handover" notification)
+REC_FUNCS="receptionistSweep receptionistOnMessage pushReceipt"                                                      # Phase 9 R3: the receptionist (a message-arrival trigger plus a 5-minute backup; neither callable from outside) and pushReceipt (it now knows the "handover" notification)
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
 default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo off ;; *) echo "" ;; esac; }
@@ -347,9 +347,9 @@ case "${1:-}" in
     [ -f functions/lib/aiReceptionist.js ] || { echo "This checkout has no Phase 9 R3 (receptionist) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
     [ -n "$(serving_revision setreceptionist)" ] || { echo "Deploy the AI backend first: $0 ai"; exit 1; }
     check_settings; check_access
-    echo "Functions: $REC_FUNCS. receptionistSweep is NEW and runs every minute; it cannot be called from outside. pushReceipt only learns the new 'handover' notification."
+    echo "Functions: $REC_FUNCS. receptionistOnMessage (NEW) answers about 30 seconds after a customer message; receptionistSweep (NEW) is the 5-minute backup; neither can be called from outside. pushReceipt only learns the new 'handover' notification."
     echo "It does NOTHING until the owner switches 'Automatic receptionist' on in Assistant > Settings (then it handles only NEW Meta leads that arrive after that moment, never existing chats). It never runs between midnight and 7:00."
-    confirm "Deploy the receptionist check to the LIVE project?"
+    confirm "Deploy the receptionist to the LIVE project?"
     install
     deploy_functions $REC_FUNCS
     echo "Done. Next: $0 live (the screen). To stop it: switch 'Automatic receptionist' off in Assistant > Settings, or firebase functions:delete receptionistSweep --region $REGION --project $PROJECT"
