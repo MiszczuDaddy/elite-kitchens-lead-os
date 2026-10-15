@@ -204,5 +204,28 @@ Order, one command at a time from Cloud Shell, each verified from outside:
 
 **Tests:** `functions/test/ai-receptionist-events.test.js` (9: one message, burst, never twice, person not talked over, newer message, quiet hours, not-ours chats and switches, reply delay setting, wiring).
 
+## AI Knowledge Centre (Step C, branch `phase-9-ai-knowledge`; not merged or deployed)
+
+**What it is:** Assistant → Settings → "AI Knowledge Centre…". What the receptionist (and "Suggest reply") may say about the business lives in Firestore, edited by the owner in Elite OS, no redeploy.
+- `aiKnowledge/draft` (what the owner edits; customers never see it), `aiKnowledge/live` (published; read on every message), `aiKnowledgeVersions/vNNNN` (every published version). Callables: `aiKnowledge` (get / save / import / reset / publish / rollback; staff read, **owner only** writes) and `aiKnowledgeTest` (owner only).
+- Content: sections of entries marked **Approved**, **Never promise** or **Open (not confirmed)**; portfolio links (name + address); contact details; "how to write" instructions; the system's own lines (holding, partly, human, outside area, declined job, other language, links intro); example questions.
+- **Draft → Try it → Publish → Rollback.** The starting knowledge (the approved PDF, `aiKnowledgeSeed.js`) is loaded into the DRAFT only, never published by itself. A rollback publishes an old version again as a new version. An empty knowledge cannot be published. The audit log records who did what, never the text.
+
+**How the receptionist uses it** (only when a version is published; with none it behaves exactly as before Step C)
+1. The live knowledge is added to the model's instructions. The model answers from it and reports `answerState` (answered / partly / none), `special` (wants_person / outside_area / declined_job / other_language), the portfolio link ids and the entries it used.
+2. **Step A is unchanged:** the answer comes first, then the same code decides: offer a visit once, ask about days only after agreement, record a preference, hand over. The model never writes a line about visits, days or times.
+3. **Answer checker (code, every answer, before sending):** reads each sentence in context. Amounts, durations, percentages, numbers, email addresses, web addresses and phone numbers must come from the approved knowledge (or be a figure the customer gave); blocks "booked/confirmed" for a visit, days and dates, guarantees/warranties other than the approved one, discounts, "solid oak/wood", "family-run", arranging skips/gas/electrics/plumbing or supplying appliances, "free" things the knowledge does not say are free, a price for wardrobes/utility rooms or for a specific kitchen, claiming to be a person. Words like "free", "confirmed", "guarantee" are fine when used safely ("I can't confirm that yet", "Blum's lifetime mechanical guarantee"). A failed answer is never sent: the holding line goes and a person takes over (the reason is recorded as fixed phrases, no words).
+4. A question the knowledge does not answer, an Open item, or a failed answer → the holding line + handover. Part answered → the answer + the "partly" line + handover. Asks for a person / outside the areas / a job we decline / not in English → the owner's own line + handover. Complaints stay a silent handover (unchanged).
+5. Portfolio links: the model picks ids, the addresses are typed only in the Knowledge Centre, shown once per chat and only when asked. Email/website only when asked; the WhatsApp number is not repeated.
+6. "Suggest reply" (staff) also gets the knowledge; the draft stays the model's own wording; checker findings are shown as warnings ("check: …").
+
+**Try it:** a pretend customer ("Aoife", welcome message, optional state: new / visit offered / days asked / visit booked), on the DRAFT or the published knowledge. Shows what would be sent, hand-over reason, answer state, entries used, blocked reasons, warnings, cost. Nothing is sent and no chat, draft record or appointment is written; the cost counts against the AI budget (own rate limit: 40/min, 300/hour). Example questions can be run all at once (about 1 cent each).
+
+**Deployment:** no new infrastructure. Order as usual: `ai` (two new callables), `receptionist` (the receptionist functions contain the new code), `live`. Nothing changes for customers until the owner publishes a version. Switching the AI off still stops everything; to stop using the knowledge, roll back to an older version.
+
+**Wording the owner has not yet approved (editable defaults):** "I'll check the rest with the team and get back to you." (partly), "Of course, I'll get one of the team to message you." (person), the outside-area and declined-job lines, the other-language line. The holding line is the owner's.
+
+**Tests:** `functions/test/ai-knowledge.test.js` (13), `test-ui/knowledge.e2e.js` (11), plus the existing AI suites. Demo with the real model (draft knowledge, 36 questions, about EUR 0.28): `tools/knowledge-demo/run-demo.js` (emulator only).
+
 ## Not built (needs your approval, in this order)
 9.2 AI-prepared proposals (e.g. a quote revision) applied only after you press Approve · 9.3 push-to-talk voice (browser speech recognition first, fallback where unsupported) · 9.4 WhatsApp receptionist in **suggest-only** mode · 9.5 receptionist that replies by itself (after the disclosure question above, with a per-lead opt-out and a human hand-over).

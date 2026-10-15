@@ -194,7 +194,7 @@ test('NEVER A GUESS: a question the knowledge does not answer, an open item, an 
   // part answered, part not
   await chat([['in', 'Is the kitchen delivered in a week and do you do wardrobes?']]);
   ({ r } = await ask(dec({ answerState: 'partly', unknown: 'delivery', handover: { needed: true, reason: 'part not covered' } }, 'We do wardrobes too.')));
-  assert.equal(r.schedule.step, 'answer_holding'); assert.equal(r.draft, 'We do wardrobes too. ' + H); assert.equal(r.handover.needed, true);
+  assert.equal(r.schedule.step, 'answer_holding'); assert.equal(r.draft, 'We do wardrobes too. ' + K.partly); assert.equal(r.handover.needed, true);
   // a promise of a visit, a made-up price and a discount are all blocked
   for (const bad of ['Your visit is booked for Tuesday morning.', 'That would be about €13,500.', 'I can take 10% off if you sign this week.', 'It\'s solid oak.']) { ({ r } = await ask(dec({}, bad))); assert.equal(r.draft, H, bad); assert.equal(r.schedule.step, 'holding'); }
   // an answer with no structure (the model did not call the tool) is shown as it is, as before
@@ -217,7 +217,7 @@ test('THE OWNER\'S DECISIONS: a request for a person, outside our area, a job we
 test('LINKS: the model only picks ids; the addresses come from the owner\'s settings, once per chat, and only when the customer asked; a made-up address is blocked', async () => {
   await publishSeed(); await chat([['in', 'Can I see photos of your work?']]);
   let { r } = await ask(dec({ links: ['website', 'instagram', 'nope'], intent: 'asking_info' }, 'Of course.'));
-  assert.equal(r.draft, 'Of course. ' + K.links_intro + ' elitekitchens.ie and instagram.com/elite_kitchens_ie ' + L.visit_offer); assert.equal(r.schedule.step, 'offer_visit');
+  assert.equal(r.draft, 'Of course.\n' + K.links_intro + ' elitekitchens.ie and instagram.com/elite_kitchens_ie\n' + L.visit_offer); assert.equal(r.schedule.step, 'offer_visit');
   // sent already: not sent again
   await chat([['in', 'Can I see photos of your work?']], { state: 'offered' }); const sent = await store.storeOutbound(db, PH, { wamid: 'wamid.LINKS', type: 'text', body: 'See elitekitchens.ie and instagram.com/elite_kitchens_ie' });
   await db.doc(`conversations/${PH}/messages/wamid.LINKS`).update({ createdAt: ts(NOW - 60e3) }); await store.storeInbound(db, { wamid: 'wamid.IN2', from: PH, type: 'text', body: 'any more photos?', name: 'A', createdAt: new Date(NOW - 30e3) });
@@ -293,4 +293,23 @@ test('WIRING: two new callables, owner and staff gates in the code; nothing in t
   assert.match(idx, /^exports\.aiKnowledge = onCall\(\{\}/m); assert.match(idx, /^exports\.aiKnowledgeTest = onCall\(\{ secrets: \[ANTHROPIC_API_KEY\]/m); assert.match(sh, /^AI_NEW="[^"]*\baiKnowledge aiKnowledgeTest"/m);
   const src = fs.readFileSync(path.join(__dirname, '../lib/aiKnowledge.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   assert.equal(/sendText|sendTemplate|storeOutbound|collection\('conversations'\)|collection\('contacts'\)|appointments|messages/.test(src), false);
+});
+
+test('A CUSTOMER\'S OWN FIGURE MAY BE REPEATED BACK, nothing else about it is trusted: "7k" is fine in the answer, a price built on it is not', async () => {
+  await publishSeed(); await chat([['in', 'My budget is about 7k, is that enough?']]);
+  let { r } = await ask(dec({ intent: 'asking_info' }, 'Most of our kitchens start around €10,000, so 7k is a bit under, but we can still have a look at what\'s possible.'));
+  assert.equal(r.schedule.step, 'offer_visit'); assert.match(r.draft, /^Most of our kitchens start around €10,000, so 7k is a bit under/);
+  ({ r } = await ask(dec({ intent: 'asking_info' }, 'Yes, we can do your kitchen for 7k.'))); assert.equal(r.schedule.step, 'holding', 'a price promise is still blocked');
+  assert.equal(KN.checkAnswer('That works out at 8k.', await KN.loadLive(db), { extra: 'about 7k' }).ok, false, 'a figure the customer did not give');
+});
+
+test('NO DOUBLE TALK: a "the team will come back" or "here are some photos" the model adds on its own is taken out (the system adds those lines), nothing else is changed; "free visit" is fine when the knowledge says "free home visit"', async () => {
+  await publishSeed(); await chat([['in', 'Do you do wardrobes, what do they cost, and can I see photos?']]);
+  let { r } = await ask(dec({ answerState: 'partly', links: ['website'], handover: { needed: true, reason: 'wardrobe price' } }, 'Yes, we do fitted wardrobes. The team will come back to you on prices. Here are some of our work.'));
+  assert.equal(r.draft, 'Yes, we do fitted wardrobes.\n' + K.links_intro + ' elitekitchens.ie\n' + K.partly);
+  await chat([['in', 'photos please']]); ({ r } = await ask(dec({ links: ['website', 'instagram'] }, 'Of course, here\'s a look at some of our work.')));
+  assert.equal(r.draft, 'Of course.\n' + K.links_intro + ' elitekitchens.ie and instagram.com/elite_kitchens_ie\n' + L.visit_offer);
+  await chat([['in', 'is the visit free?']]); ({ r } = await ask(dec({}, 'Yes, the free visit has no obligation.'))); assert.equal(r.schedule.step, 'offer_visit', 'free visit = free home visit');
+  assert.equal(KN.checkAnswer('You get a free design and free delivery.', await KN.loadLive(db)).ok, false);
+  await chat([['in', 'what is the price of wardrobes?']]); ({ r } = await ask(dec({ answerState: 'partly' }, 'The team will come back to you on that.'))); assert.equal(r.schedule.step, 'holding', 'nothing left to say but the follow-up: just the holding line');
 });

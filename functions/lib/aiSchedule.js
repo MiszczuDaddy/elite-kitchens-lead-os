@@ -110,6 +110,14 @@ function opener(text, hasOutbound) {
 // The plan for this message. Returns { step, reply, handover, preference }:
 //   step 'none'     nothing is said by the system (a person takes over if handover.needed; otherwise the model's own reply is only a draft for staff)
 //   offer_visit / price_offer / price_general / ack_only / ask_next_week / ask_following_week / acknowledge / no_preference / tentative / cancel_ask / change_ask / change_given / change_pass_on / asked_ai   a fixed line
+// The model is told to write only the answer, but it sometimes adds a "the team will come back to you" (the system adds that line itself) or "here are some photos" (the system adds the links). Those sentences are
+// taken out, so the customer is not told the same thing twice. Nothing is added or reworded; a reply that is only such sentences is not used.
+const FOLLOWUP = /\b(?:the team|a member of the team|one of the team|someone|we(?:'ll| will)|i(?:'ll| will))\b[^.?!]*\b(?:come back|get back|be in touch|follow up|check|confirm|go through|call you|ring you)\b/i;
+const SHOWING = /\bhere(?:'s| is| are)\b[^.?!]*\b(?:work|photos?|pictures?|kitchens?|projects?|links?|look)\b/i;
+function tidy(text, { partly = false, links = false } = {}) {
+  const parts = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean), keep = parts.filter((s) => !(partly && FOLLOWUP.test(s)) && !(links && SHOWING.test(s)));
+  return keep.join(' ').trim();
+}
 function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
@@ -146,24 +154,25 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   if (kn && natural) {
     const special = { wants_person: ['human', kn.lines.human, 'asked for a person'], outside_area: ['outside_area', kn.lines.outside_area, 'outside the areas we cover: please review'], declined_job: ['declined_job', kn.lines.declined_job, 'a job we usually decline: please review'], other_language: ['other_language', kn.lines.other_language, 'message not in English'] }[d.special];
     if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
-    const text = String(d.reply || '').trim(), asking = d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent) || (d.intent === 'asking_price_general' && !!text);
+    const raw = String(d.reply || '').trim(), asking = d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent) || (d.intent === 'asking_price_general' && !!raw);
     if (asking && d.intent !== 'complaint') {
+      const linkLine = kn.linksText(d.links), text = tidy(raw, { partly: hand || d.answerState === 'partly', links: !!linkLine }) || (linkLine ? 'Of course.' : '');
       const has = !!text && d.answerState !== 'none', chk = has ? kn.check(text) : { ok: true, reasons: [] }, ok = has && chk.ok;
       const state = ok ? (hand || d.answerState === 'partly' ? 'partly' : 'answered') : 'none', unknown = d.unknown ? ': ' + d.unknown : '';
-      const links = ok ? kn.linksText(d.links) : '', first = !out.some((m) => m.type !== 'template'), op = ok && first ? opener(d.schedule && d.schedule.opener, hasOutbound) : '';
-      const answer = ok ? (op ? op + ' ' : '') + text + (links ? ' ' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
+      const links = ok ? linkLine : '', first = !out.some((m) => m.type !== 'template'), op = ok && first ? opener(d.schedule && d.schedule.opener, hasOutbound) : '';
+      const sep = links ? '\n' : ' ', answer = ok ? (op ? op + ' ' : '') + text + (links ? '\n' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
       if (!ok) return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
       if (state === 'partly') {
         const why = (reason || 'part of the question needs the team') + unknown;
-        if (given && !booked) return { step: 'acknowledge', reply: answer + ' ' + LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + why }, preference: given, kn: info };
-        return { step: 'answer_holding', reply: answer + ' ' + kn.lines.holding, handover: { needed: true, reason: why }, preference: null, kn: info };
+        if (given && !booked) return { step: 'acknowledge', reply: answer + sep + LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + why }, preference: given, kn: info };
+        return { step: 'answer_holding', reply: answer + sep + (kn.lines.partly || kn.lines.holding), handover: { needed: true, reason: why }, preference: null, kn: info };
       }
       // fully answered: the answer goes first, then whatever the consultation flow would have said, with the question taken out of the picture
       const neutral = { ...d, hasQuestion: false, reply: '', answerState: null, special: 'none', links: [], handover: { needed: false, reason: null }, schedule: { preference: d.schedule && d.schedule.preference, opener: '' },
         intent: ['asking_info', 'asking_price'].includes(d.intent) ? 'answering_questions' : d.intent };
       const core = plan({ decision: neutral, consult, messages, booked, nowMs, natural, kn: null });
       if (core.step === 'none') return { step: 'answer', reply: answer, handover: core.handover, preference: core.preference, kn: info };
-      return { ...core, reply: answer + ' ' + core.reply, kn: info };
+      return { ...core, reply: answer + sep + core.reply, kn: info };
     }
   }
 

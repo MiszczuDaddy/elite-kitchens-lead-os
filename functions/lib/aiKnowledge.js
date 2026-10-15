@@ -21,13 +21,14 @@ const rid = () => 'k' + require('crypto').randomBytes(5).toString('hex');
 // The lines the SYSTEM sends by itself (the model never writes these). Defaults are the owner's wording where he gave it; the rest are plain first drafts he can edit.
 const DEFAULT_LINES = {
   holding: 'Good question, I\'ll check with the team and get back to you.',
+  partly: 'I\'ll check the rest with the team and get back to you.',
   human: 'Of course, I\'ll get one of the team to message you.',
   outside_area: 'Thanks for getting in touch. That\'s outside the areas we cover, but I\'ll pass your message to the team to have a look.',
   declined_job: 'Thanks for getting in touch. That\'s not something we usually take on, but I\'ll pass your message to the team to have a look.',
   other_language: 'Thanks for your message, I\'ll pass this to the team and they\'ll get back to you.',
   links_intro: 'You can see some of our work here:',
 };
-const LINE_LABELS = { holding: 'Not sure / need to check', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', links_intro: 'Before the portfolio links' };
+const LINE_LABELS = { holding: 'Not sure / need to check', partly: 'Part answered, the rest needs checking', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', links_intro: 'Before the portfolio links' };
 const URLISH = /@|https?:|www\.|\.(?:ie|com|net|org|co|uk)\b|€|\d/i;
 
 const emptyData = () => ({ sections: [], links: [], contact: { email: '', website: '', whatsapp: '' }, lines: { ...DEFAULT_LINES }, instructions: '', examples: [] });
@@ -147,7 +148,8 @@ const hostsIn = (t) => { const s = String(t), e = [...s.matchAll(EMAIL)].map((m)
 const phonesIn = (t) => [...String(t).matchAll(/\+?\d[\d\s().-]{6,}\d/g)].map((m) => m[0].replace(/\D/g, '')).filter((d) => d.length >= 7);
 function allowedFrom(hay, d) {
   const wp = hay.split(/(?<=[.!?])\s+/).some((x) => /\b(wardrobes?|utility|utilities)\b/.test(x) && /€\s?\d|\b\d[\d,.]*\s?(?:k|euro|euros)\b/.test(x));
-  const a = { wardrobePrice: wp, numbers: numbersIn(hay), durations: durationsIn(hay), percents: percentsIn(hay), emails: new Set(), hosts: new Set(), phones: new Set(phonesIn(hay)) };
+  const freeWords = new Set(); for (const m of hay.matchAll(/\bfree\b((?:\s+[a-z-]+){1,3})/g)) m[1].trim().split(/\s+/).forEach((w) => freeWords.add(w));
+  const a = { freeWords, wardrobePrice: wp, numbers: numbersIn(hay), durations: durationsIn(hay), percents: percentsIn(hay), emails: new Set(), hosts: new Set(), phones: new Set(phonesIn(hay)) };
   const h = hostsIn(hay); h.emails.forEach((x) => a.emails.add(x)); h.hosts.forEach((x) => a.hosts.add(x));
   for (const l of d.links) a.hosts.add(norm(l.url));
   if (d.contact.email) a.emails.add(norm(d.contact.email)); if (d.contact.website) a.hosts.add(norm(d.contact.website));
@@ -158,7 +160,8 @@ const NEG = /\b(not|no|never|cannot|can't|cant|won't|isn't|aren't|don't|doesn't|
 const HEDGE = /\b(?:i'?ll|we'?ll|i will|we will|the team will|the team can|can|could|let me|need to|going to|happy to|to|will)\s+(?:\w+\s+){0,3}?(?:check|confirm|find out|come back|get back|let you know)\b|\b(?:check with|confirm with|not sure|don't know|do not know)\b/i;
 const sentencesOf = (t) => String(t).split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
 
-function checkAnswer(text, K) {
+// `extra` is what the CUSTOMER wrote (and their lead details): figures they gave may be repeated back ("7k"), nothing else about them is trusted.
+function checkAnswer(text, K, { extra = '' } = {}) {
   const r = [], t = String(text == null ? '' : text).trim();
   if (!t) return { ok: true, reasons: [] };
   const A = K && K.allowed ? K.allowed : allowedFrom('', emptyData()), hay = K && K.haystack ? K.haystack : '';
@@ -167,9 +170,10 @@ function checkAnswer(text, K) {
   if (sentencesOf(t).length > 5) add('too many sentences');
   if (/\b(approved knowledge|knowledge base|system prompt|reply_decision|the document|my instructions)\b/i.test(t)) add('mentions its instructions');
   // amounts, durations, percentages and every other number must come from the knowledge
-  const nums = numbersIn(t); for (const n of nums) if (!A.numbers.has(n)) { add('a number that is not in the approved knowledge'); break; }
-  for (const d of durationsIn(t)) if (!A.durations.has(d)) { add('a time period that is not in the approved knowledge'); break; }
-  for (const p of percentsIn(t)) if (!A.percents.has(p)) { add('a percentage that is not in the approved knowledge'); break; }
+  const X = extra ? { n: numbersIn(extra), d: durationsIn(extra), p: percentsIn(extra) } : { n: new Set(), d: new Set(), p: new Set() };
+  const nums = numbersIn(t); for (const n of nums) if (!A.numbers.has(n) && !X.n.has(n)) { add('a number that is not in the approved knowledge'); break; }
+  for (const d of durationsIn(t)) if (!A.durations.has(d) && !X.d.has(d)) { add('a time period that is not in the approved knowledge'); break; }
+  for (const p of percentsIn(t)) if (!A.percents.has(p) && !X.p.has(p)) { add('a percentage that is not in the approved knowledge'); break; }
   // addresses
   const h = hostsIn(t);
   for (const e of h.emails) if (!A.emails.has(e)) { add('an email address that is not in the approved knowledge'); break; }
@@ -195,7 +199,7 @@ function checkAnswer(text, K) {
     if (money && /\b(wardrobes?|utility|utilities)\b/i.test(s) && !A.wardrobePrice) add('gives a price for wardrobes or utility rooms');
     if (money && /\b(your|yours|this|that|specific|island|\d+\s?m\b)/i.test(s) && !/\b(typical|most|range|between|guide|generally|usually|around|start|starts|from|extra|stone|worktops?|deposit)\b/i.test(s)) add('gives a price for a specific kitchen');
     if (/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(s) && !(/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(hay))) add('says something is free that the knowledge does not');
-    for (const m of s.matchAll(/\bfree\s+([a-z]+)/gi)) if (!hay.includes('free ' + m[1].toLowerCase()) && !neg) { add('says something is free that the knowledge does not'); break; }
+    for (const m of s.matchAll(/\bfree\s+([a-z]+)/gi)) if (!A.freeWords.has(m[1].toLowerCase()) && !neg) { add('says something is free that the knowledge does not'); break; }
   }
   return { ok: r.length === 0, reasons: r };
 }

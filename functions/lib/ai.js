@@ -150,8 +150,8 @@ async function settle(db, { worstEur, actualEur, feature, model, usage, ok, ms, 
   await Promise.all([mRef.set(body(), { merge: true }), dRef.set(body(), { merge: true }),
     db.collection('aiLog').add({ feature, model, inputTokens: (usage && usage.input) || 0, outputTokens: (usage && usage.output) || 0, costEur: Math.round((keep ? worstEur : actualEur) * 1e8) / 1e8, ms, ok, at: Timestamp.fromMillis(nowMs) })]);
 }
-async function checkRate(db, uid, nowMs, { perMinute = RATE_PER_MINUTE, perHour = RATE_PER_HOUR, bucket = '' } = {}) {
-  const ref = db.doc('aiRate/' + bucket + String(uid).replace(/[^\w-]/g, '_').slice(0, 100));
+async function checkRate(db, uid, nowMs, { perMinute = RATE_PER_MINUTE, perHour = RATE_PER_HOUR, pool = '' } = {}) {
+  const ref = db.doc('aiRate/' + pool + String(uid).replace(/[^\w-]/g, '_').slice(0, 100));
   await db.runTransaction(async (tx) => {
     const s = await tx.get(ref), times = ((s.exists && s.data().times) || []).filter((t) => nowMs - t < 3600e3);
     if (times.filter((t) => nowMs - t < 60e3).length >= perMinute || times.length >= perHour) throw new HttpsError('resource-exhausted', 'You are asking quickly. Wait a few seconds and ask again.');
@@ -432,7 +432,8 @@ async function replyCore({ db, model, settings, key, sheet, knowledge, reception
   const call = res.toolCalls.find((c) => c.name === R.TOOL.name);
   const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
   // What the system itself may say about knowledge: the owner's lines, the portfolio links (the model only picks ids), and the answer checker.
-  const kn = knowledge ? { lines: knowledge.lines, check: (x) => KN.checkAnswer(x, knowledge), linksText(ids) {
+  const customerSaid = sheet.messages.filter((m) => m.direction === 'in').map((m) => m.body || '').join(' ') + ' ' + (sheet.lead || '') + ' ' + sheet.known.map((k) => k.value).join(' ');
+  const kn = knowledge ? { lines: knowledge.lines, check: (x) => KN.checkAnswer(x, knowledge, { extra: customerSaid }), linksText(ids) {
     const sent = (u) => sheet.messages.some((m) => m.direction === 'out' && String(m.body || '').toLowerCase().includes(u.toLowerCase()));
     const list = (ids || []).map((id) => knowledge.links.find((l) => l.id === id)).filter((l) => l && !sent(l.url));
     return list.length ? knowledge.lines.links_intro + ' ' + list.map((l) => l.url).join(' and ') : '';
@@ -494,7 +495,7 @@ async function testKnowledge({ db, model, owners }, actor, data, { uid, nowMs = 
   const out = [];
   for (const c of cases) {
     if (!c || typeof c !== 'object') throw bad('A test question is not valid.');
-    await checkRate(db, uid || actor.id, nowMs, { perMinute: 40, perHour: 300, bucket: 'kt_' });                // the owner's own tests: a higher limit of its own (the budget cap still applies)
+    await checkRate(db, uid || actor.id, nowMs, { perMinute: 40, perHour: 300, pool: 'kt_' });                // the owner's own tests: a higher limit of its own (the budget cap still applies)
     const text = S.one(c.text, 400); if (!text) throw bad('A test question is empty.');
     const state = ['new', 'offered', 'asked_days', 'booked'].includes(c.state) ? c.state : 'new';
     const sheet = R.testSheet({ nowMs, messages: [{ who: 'customer', text }], state });
