@@ -486,8 +486,7 @@ How it works:
 
 * **Send** (a draft) and **Send again** (a sent quote, also an expired one: the next version with the same content and
   prices, then sent) open the Send dialog. It shows the customer, address, email, the date, the validity and the options,
-  warns when there is no address or email, takes up to 5 design renders (each made at most 2,000 px and put on its own
-  page), proposes the pipeline value (the dearest option; a €0 quote proposes none) and, for a Closed customer, an unticked
+  warns when there is no address or email, takes up to 5 design renders (each made at most 2,000 px, laid out side by side in the quote), proposes the pipeline value (the dearest option; a €0 quote proposes none) and, for a Closed customer, an unticked
   "Reopen: move to Quoted". It says what will happen to the stage and the value.
 * **Make PDF and mark sent**: the PDF is made in the browser from the frozen draft and the customer's and business details
   read fresh, uploaded to the sender's private upload folder, and `sendQuote` stores it and marks the quote Sent (or refuses,
