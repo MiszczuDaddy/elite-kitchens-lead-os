@@ -347,6 +347,11 @@ case "${1:-}" in
     [ -f functions/lib/aiReceptionist.js ] || { echo "This checkout has no Phase 9 R3 (receptionist) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
     [ -n "$(serving_revision setreceptionist)" ] || { echo "Deploy the AI backend first: $0 ai"; exit 1; }
     check_settings; check_access
+    # A Firestore trigger must run in the same region as the Firestore database, or the deploy fails (or the trigger never fires). Look it up and stop on a mismatch.
+    DB_LOC="$(gcloud firestore databases describe --database="(default)" --project "$PROJECT" --format="value(locationId)" 2>/dev/null || true)"
+    if [ -z "$DB_LOC" ]; then echo "Could not read the Firestore database location. Check you are logged in (gcloud auth list) and try again."; exit 1; fi
+    echo "   Firestore database location: $DB_LOC (trigger region: $REGION)"
+    if [ "$DB_LOC" != "$REGION" ]; then echo "STOP: the database is in $DB_LOC but the receptionist trigger is set for $REGION. Nothing was deployed. Tell Claude this location so the trigger can be set to match."; exit 1; fi
     echo "Functions: $REC_FUNCS. receptionistOnMessage (NEW) answers about 30 seconds after a customer message; receptionistSweep (NEW) is the 5-minute backup; neither can be called from outside. pushReceipt only learns the new 'handover' notification."
     echo "It does NOTHING until the owner switches 'Automatic receptionist' on in Assistant > Settings (then it handles only NEW Meta leads that arrive after that moment, never existing chats). It never runs between midnight and 7:00."
     confirm "Deploy the receptionist to the LIVE project?"

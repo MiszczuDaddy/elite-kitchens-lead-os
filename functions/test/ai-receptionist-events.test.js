@@ -151,3 +151,20 @@ test('WIRING: the event function fires on a new message in any chat and goes on 
   assert.equal(/createAppointment|updateAppointment|cancelAppointment|collection\('appointments'\)|sendTemplate|sendMedia/.test(src), false); assert.equal((src.match(/wa\.sendText\(/g) || []).length, 1, 'still exactly one place that sends, after the claim');
   assert.ok(src.indexOf("limit(12).get()]), fc =") < src.indexOf('outbound.begin('), 'the chat is read again before anything is claimed or sent');
 });
+
+test('THE DELAY SETTING: only the owner can change it; whole seconds from 5 to 90; it is saved, shown in the status, written to the audit log and used by the next run without a redeploy', async () => {
+  const owner = { kind: 'staff', id: OWNERS }, staff = { kind: 'staff', id: 'helper@example.com' }, d = { db, owners: OWNERS };
+  const rejects = async (p, code) => assert.rejects(p, (e) => e.code === code, code);
+  assert.equal((await ai.status(d, owner, {}, { nowMs: NOW })).replyDelaySeconds, 30, 'default 30');
+  await rejects(ai.saveSettings(d, staff, { replyDelaySeconds: 20 }, { nowMs: NOW }), 'permission-denied');
+  for (const bad of [4, 91, 0, -5, 20.5, '20', NaN, null, true]) await rejects(ai.saveSettings(d, owner, { replyDelaySeconds: bad }, { nowMs: NOW }), 'invalid-argument');
+  assert.equal((await db.doc('aiSettings/current').get()).data().replyDelaySeconds, undefined, 'nothing saved by the refused ones');
+  for (const ok of [5, 90]) assert.equal((await ai.saveSettings(d, owner, { replyDelaySeconds: ok }, { nowMs: NOW })).replyDelaySeconds, ok);
+  const r = await ai.saveSettings(d, owner, { replyDelaySeconds: 12 }, { nowMs: NOW }); assert.equal(r.replyDelaySeconds, 12); assert.equal((await ai.status(d, owner, {}, { nowMs: NOW })).replyDelaySeconds, 12);
+  const log = (await db.collection('auditLog').where('action', '==', 'aiSettings').get()).docs.map((x) => x.data()).filter((x) => x.changed.includes('replyDelaySeconds')); assert.equal(log.length, 3); assert.equal(log[0].by, OWNERS);
+  // the next event waits the new time
+  await newLead(PH); const t = await says(PH, 'Hi, interested in a kitchen', NOW), c = clock(t + 2 * SEC);
+  assert.equal(await event(model(decision({ reply: 'Thanks.' })), waFake(), pushFake(), PH, t, c), 'sent:offer_visit'); assert.deepEqual(c.sleeps, [12000]);
+  // the other settings are untouched by it
+  assert.equal((await ai.loadSettings(db)).enabled, true); assert.equal((await ai.loadSettings(db)).autoReply, true);
+});

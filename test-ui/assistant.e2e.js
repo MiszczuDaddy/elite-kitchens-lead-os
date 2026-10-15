@@ -308,6 +308,16 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await saveSettings(async () => { assert.equal(await page.locator('#as-set-auto').isChecked(), false); assert.equal(await page.locator('#as-set-auto').isDisabled(), false); await page.check('#as-set-auto'); });
   for (let i = 0; i < 40 && (await settingsDoc().get()).data().autoReply !== true; i++) await page.waitForTimeout(150);
   assert.equal((await settingsDoc().get()).data().autoReply, true, 'the owner switched automatic replies on');
+  // the reply delay: 30 seconds until the owner changes it; 5 to 90 whole seconds; saved in the settings document the receptionist reads on every run
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent));
+  assert.equal(await page.locator('#as-set-delay').inputValue(), '30', 'the default delay is 30 seconds'); assert.equal(await page.locator('#as-set-delay').isDisabled(), false, 'the owner can change it');
+  await page.fill('#as-set-delay', '3'); await page.click('#as-set-save'); await page.waitForFunction(() => /5 to 90/.test(document.getElementById('as-set-err').textContent));
+  assert.equal((await settingsDoc().get()).data().replyDelaySeconds, undefined, 'a delay outside 5 to 90 is refused and nothing is saved');
+  await page.fill('#as-set-delay', '45'); await page.click('#as-set-save'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
+  for (let i = 0; i < 40 && (await settingsDoc().get()).data().replyDelaySeconds !== 45; i++) await page.waitForTimeout(150);
+  assert.equal((await settingsDoc().get()).data().replyDelaySeconds, 45, 'the new delay is saved');
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => document.getElementById('as-set-delay').value === '45'); await page.click('#as-set-cancel'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
+  await db.doc('aiSettings/current').update({ replyDelaySeconds: 30 });
   await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.evaluate(() => { REPLY.checkedAt = 0; REPLY.onSelect(null); }); await page.evaluate((id) => { REPLY.onSelect(id); }, ph.anna); await page.waitForSelector('#recep-btn', { state: 'visible' });
   assert.equal(await page.locator('#recep-btn').innerText(), 'Receptionist: off');
   const recOf = async () => (await db.doc('conversations/' + ph.anna).get()).data().receptionist || null;

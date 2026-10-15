@@ -60,7 +60,7 @@ function onlyKeys(data, allowed) {
 }
 // Staff change the switch and the caps from the screen. The data gate needs an explicit confirmation that the provider's data terms were checked.
 async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.now() } = {}) {
-  onlyKeys(data, ['enabled', 'monthlyCapEur', 'dailyCapEur', 'customerDataApproved', 'confirmDataTerms', 'actionsEnabled', 'actionKinds', 'replyAssistant', 'autoReply']);
+  onlyKeys(data, ['enabled', 'monthlyCapEur', 'dailyCapEur', 'customerDataApproved', 'confirmDataTerms', 'actionsEnabled', 'actionKinds', 'replyAssistant', 'autoReply', 'replyDelaySeconds']);
   const patch = {};
   if ('enabled' in data) { if (typeof data.enabled !== 'boolean') throw bad('Switch must be on or off.'); patch.enabled = data.enabled; }
   for (const k of ['monthlyCapEur', 'dailyCapEur']) if (k in data) { if (typeof data[k] !== 'number' || !Number.isFinite(data[k]) || data[k] < 0 || data[k] > 200) throw bad('A spending cap must be between 0 and 200 euro.'); patch[k] = Math.round(data[k] * 100) / 100; }
@@ -80,6 +80,13 @@ async function saveSettings({ db, model, owners }, actor, data, { nowMs = Date.n
     if (typeof data.autoReply !== 'boolean') throw bad('Automatic replies must be on or off.');
     if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can change automatic replies.');
     patch.autoReply = data.autoReply;
+  }
+  // How long the receptionist waits after the customer's last message before it answers (5 to 90 seconds, whole seconds). Read on every run, so no redeploy is needed. Owner only.
+  if ('replyDelaySeconds' in data) {
+    const v = data.replyDelaySeconds;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 5 || v > 90) throw bad('The reply delay must be a whole number of seconds from 5 to 90.');
+    if (!isOwner(owners, actor)) throw new HttpsError('permission-denied', 'Only the owner account can change the reply delay.');
+    patch.replyDelaySeconds = v;
   }
   if ('actionsEnabled' in data || 'actionKinds' in data) {
     if ('actionsEnabled' in data && typeof data.actionsEnabled !== 'boolean') throw bad('AI actions must be on or off.');
@@ -155,7 +162,7 @@ async function status({ db, model, owners }, actor, data, { nowMs = Date.now() }
   return { enabled: s.enabled, customerDataApproved: s.customerDataApproved, monthlyCapEur: s.monthlyCapEur, dailyCapEur: s.dailyCapEur, monthSpentEur: Math.round((mm.costEur || 0) * 100) / 100, daySpentEur: Math.round((dd.costEur || 0) * 100) / 100,
     monthCalls: mm.calls || 0, keyConfigured: !!model, month: monthId(nowMs), defaultModel: s.defaultModel, replyModel: s.replyModel,
     models: Object.entries(MODELS).map(([key, m]) => ({ key, label: m.label, id: m.id, ready: modelReady(check, key), reason: (check[key] && check[key].ok === false && check[key].reason) || null, checkedAt: check[key] && check[key].at && check[key].at.toMillis ? check[key].at.toMillis() : null })),
-    replyAssistant: s.replyAssistant, autoReply: s.autoReply, actions: { enabled: s.actionsEnabled, kinds: s.actionKinds, labels: A.KINDS }, canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
+    replyAssistant: s.replyAssistant, autoReply: s.autoReply, replyDelaySeconds: s.replyDelaySeconds, actions: { enabled: s.actionsEnabled, kinds: s.actionKinds, labels: A.KINDS }, canApproveData: isOwner(owners, actor), ownerConfigured: String(owners || '').trim() !== '' };
 }
 
 // ---- the model interface: complete({ model, system, messages, tools, maxTokens }) -> { text, toolCalls, stopReason, usage } ----

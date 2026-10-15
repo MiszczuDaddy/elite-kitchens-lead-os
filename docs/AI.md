@@ -196,9 +196,9 @@ Order, one command at a time from Cloud Shell, each verified from outside:
 
 **A person is never talked over:** the chat is read again just before sending. If a person replied (during the delay or while the answer was being written), the owner paused the chat, or the customer wrote again, nothing is sent, the draft is discarded, and the conversation state does not move on. A person reply hands the chat over (receptionist stops until reactivated); a newer customer message gets its own single answer.
 
-**Reply delay setting:** `aiSettings/current.replyDelaySeconds` (5 to 90, default 30), read on every run, so it can be changed **without redeploying**. A field in Assistant > Settings for it is not built yet (small, owner-only). Above ~90 s would also need a higher function timeout (redeploy).
+**Reply delay setting:** Assistant > Settings > "Receptionist reply delay (seconds)" (owner account only; whole seconds 5 to 90, default 30). It is saved as `aiSettings/current.replyDelaySeconds` (audited) and read on every run, so changing it needs **no redeploy**. More than ~90 s would also need a higher function timeout (redeploy).
 
-**First deploy caveat:** a Firestore trigger must be in the same region as the Firestore database (the function is set to `europe-west1`); the first deploy may ask to enable Eventarc / take a retry.
+**Region check:** a Firestore trigger must run in the same region as the Firestore database. The `receptionist` deploy stage looks up the database location with `gcloud firestore databases describe` and stops (nothing deployed) if it is not the trigger's region (`europe-west1`).
 
 **Cost:** pennies per month (one cheap function start per customer message, mostly exiting at once for chats that are not the receptionist's; the backup reads less often than before).
 
