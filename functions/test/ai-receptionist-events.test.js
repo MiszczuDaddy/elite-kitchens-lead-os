@@ -48,9 +48,9 @@ const event = (m, w, p, phone, messageMs, c) => REC.onInbound(deps(m, w, p), pho
 beforeEach(async () => { await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' }); await on(); seq = 0; });
 
 test('ONE MESSAGE: the event starts the receptionist, which waits the reply delay (30 seconds) and then answers; a new Meta lead is switched on by the event itself; the reply comes about 30 seconds after the message', async () => {
-  await newLead(PH); const t = await says(PH, 'Hi, I am looking for a new kitchen', NOW); const c = clock(t + 2 * SEC), m = model(decision({ intent: 'new_enquiry', reply: 'Lovely, thanks Aoife.' })), w = waFake(), p = pushFake();
+  await newLead(PH); const t = await says(PH, 'Hi, I am looking for a new kitchen', NOW); const c = clock(t + 2 * SEC), m = model(decision({ intent: 'new_enquiry', ack: 'thanks', reply: 'Lovely, thanks Aoife.' })), w = waFake(), p = pushFake();
   const r = await event(m, w, p, PH, t, c);
-  assert.equal(r, 'sent:offer_visit'); assert.deepEqual(c.sleeps, [30000], 'it waited the full reply delay'); assert.equal(m.calls, 1); assert.deepEqual(w.sent.map((x) => x.body), ['Lovely, thanks Aoife. ' + L.visit_offer]);
+  assert.equal(r, 'sent:offer_visit'); assert.deepEqual(c.sleeps, [30000], 'it waited the full reply delay'); assert.equal(m.calls, 1); assert.deepEqual(w.sent.map((x) => x.body), ['Thanks, Aoife. ' + L.visit_offer]);
   const rec = (await conv()).receptionist; assert.equal(rec.auto, true, 'switched on by the event, because it is a new Meta lead');
   assert.ok(rec.last.delayMs >= 30000 && rec.last.delayMs <= 45000, 'about 30 to 45 seconds after the customer\'s message: ' + rec.last.delayMs);
 });

@@ -26,7 +26,7 @@ function fake(script) {
   const m = { name: 'fake', calls: [], async complete(req) { m.calls.push(JSON.parse(JSON.stringify(req))); const s = script[Math.min(m.calls.length - 1, script.length - 1)], r = typeof s === 'function' ? await s(req) : s; return { text: '', toolCalls: [], stopReason: 'end_turn', usage: USAGE, ...r }; } };
   return m;
 }
-const decision = (over = {}) => ({ toolCalls: [{ id: 'd1', name: 'reply_decision', input: { reply: '', intent: 'wants_consultation', wantsConsultation: true, schedule: { preference: { weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }, opener: 'Hi Aoife, thanks for getting in touch.' },
+const decision = (over = {}) => ({ toolCalls: [{ id: 'd1', name: 'reply_decision', input: { reply: '', intent: 'wants_consultation', wantsConsultation: true, schedule: { preference: { status: 'available', weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }, opener: 'Hi Aoife, thanks for getting in touch.' },
   newFacts: [], handover: { needed: false, reason: null }, ...over } }], stopReason: 'tool_use' });
 const SCH = require('../lib/aiSchedule'), ACK = SCH.LINES.acknowledge;
 const checked = () => db.doc('aiSettings/modelCheck').set(Object.fromEntries(Object.entries(ai.MODELS).map(([k, m]) => [k, { id: m.id, ok: true, name: m.label, lifecycle: 'active', at: ts(NOW) }])));
@@ -62,25 +62,25 @@ test('LINT: drafts get warnings for links, money, phone numbers, promises, AI wo
 });
 
 test('DECISION: what the model returns is cleaned: unknown fields dropped, lengths capped, wrong types ignored, nothing trusted', () => {
-  assert.deepEqual(R.cleanDecision(null), { reply: '', intent: 'other', visit: 'none', hasQuestion: false, change: 'none', wantsConsultation: false, answerState: null, special: 'none', links: [], topics: [], unknown: '', schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null } });
+  assert.deepEqual(R.cleanDecision(null), { reply: '', intent: 'other', visit: 'none', hasQuestion: false, change: 'none', wantsConsultation: false, answerState: null, special: 'none', ack: 'none', links: [], topics: [], unknown: '', schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null } });
   // Step A fields: the visit, the question, the change to a booking and the status of what they said about when they are free; anything unknown is ignored, an older answer with only wantsConsultation still works
   const v = R.cleanDecision({ intent: 'greeting', visit: 'agreed', hasQuestion: true, change: 'cancel', schedule: { preference: { status: 'tentative', text: 'I will know on Friday' } } });
   assert.deepEqual([v.intent, v.visit, v.hasQuestion, v.change, v.wantsConsultation, v.schedule.preference.status], ['greeting', 'agreed', true, 'cancel', true, 'tentative']);
   assert.deepEqual([R.cleanDecision({ visit: 'maybe', change: 'explode', hasQuestion: 'yes' }).visit, R.cleanDecision({ change: 'explode' }).change, R.cleanDecision({ hasQuestion: 'yes' }).hasQuestion], ['none', 'none', false]);
   assert.deepEqual([R.cleanDecision({ wantsConsultation: true }).visit, R.cleanDecision({ visit: 'declined', wantsConsultation: true }).visit, R.cleanDecision({ visit: 'none', wantsConsultation: true }).wantsConsultation], ['asked', 'declined', false], 'the visit field wins over the old flag');
-  const d = R.cleanDecision({ reply: '  Hello\r\nthere  ', intent: 'wants_consultation', wantsConsultation: 'yes', schedule: { preference: { weeks: 'next', days: ['Tuesday', 'funday', 'tuesday'], anyDay: 'yes', times: ' mornings ', text: 'x'.repeat(500) }, opener: ' Hi! ' },
+  const d = R.cleanDecision({ reply: '  Hello\r\nthere  ', intent: 'wants_consultation', wantsConsultation: 'yes', schedule: { preference: { status: 'available', weeks: 'next', days: ['Tuesday', 'funday', 'tuesday'], anyDay: 'yes', times: ' mornings ', text: 'x'.repeat(500) }, opener: ' Hi! ' },
     newFacts: [{ field: 'eircode', value: 'K67 X123' }, { field: 'password', value: 'x' }, { field: 'eircode', value: '' }, 'junk', { field: 'budget', value: 5 }], handover: { needed: true, reason: 'x'.repeat(200) } });
   assert.equal(d.reply, 'Hello\nthere'); assert.equal(d.wantsConsultation, false, 'only a real true counts'); assert.deepEqual(d.newFacts, [{ field: 'eircode', label: 'Eircode', value: 'K67 X123' }]);
   assert.deepEqual([d.schedule.preference.weeks, d.schedule.preference.days, d.schedule.preference.anyDay, d.schedule.preference.times, d.schedule.preference.text.length <= 160, d.schedule.opener], ['next', ['tuesday'], false, 'mornings', true, 'Hi!']);
   assert.equal(d.handover.needed, true); assert.ok(d.handover.reason.length <= 80); assert.equal(R.cleanDecision({ intent: 'hacking' }).intent, 'other'); assert.equal(R.cleanDecision({ reply: 'x'.repeat(2000) }).reply.length, 700);
-  assert.equal(R.cleanDecision({ schedule: { preference: { weeks: 'someday' } } }).schedule.preference.weeks, null); assert.equal(R.cleanDecision({ schedule: 'x' }).schedule.preference, null);
+  assert.equal(R.cleanDecision({ schedule: { preference: { status: 'available', weeks: 'someday' } } }).schedule.preference.weeks, null); assert.equal(R.cleanDecision({ schedule: 'x' }).schedule.preference, null);
 });
 
 test('READINESS: decided by code from the records, the chat and the scheduling flow, never by the model', () => {
   const sheet = (known, extra = {}) => ({ known: known.map((f) => ({ field: f, label: R.FIELD_LABEL[f], value: 'x' })), messages: [], consult: null, nextAppointment: null, window: { state: 'open' }, ...extra });
   const dec = (o = {}) => R.cleanDecision({ reply: 'ok', wantsConsultation: true, handover: { needed: false }, ...o });
   const an = (sh, o) => { const d = dec(o), plan = SCH.plan({ decision: d, consult: sh.consult, messages: sh.messages, booked: !!sh.nextAppointment, nowMs: NOW }); return R.analyse(sh, plan.step === 'none' ? d : { ...d, reply: plan.reply, handover: plan.handover || d.handover }, plan); };
-  const all = ['name', 'projectType', 'eircode'], pref = { schedule: { preference: { days: ['tuesday'] } } };
+  const all = ['name', 'projectType', 'eircode'], pref = { schedule: { preference: { status: 'available', days: ['tuesday'] } } };
   const got = an(sheet(all), pref); assert.equal(got.readiness.state, 'preference'); assert.deepEqual(got.missing, []); assert.match(got.fromChat.at(-1).value, /Tuesday/);
   const ask1 = an(sheet(all), {}); assert.deepEqual([ask1.readiness.state, ask1.readiness.label, ask1.missing], ['almost', 'Wants a consultation: asking about next week', [{ field: 'timing', label: 'Preferred time' }]]);
   assert.equal(an(sheet(all, { consult: { stage: 'asked_next_week', asks: 1 } }), {}).readiness.label, 'Wants a consultation: asking about the following week');
@@ -269,7 +269,7 @@ test('R2a FLOW: ask next week, then the following week, then acknowledge and han
   await run(noPref, 2, 'discarded'); assert.equal(await consult(), null, 'a discarded draft changes nothing');
   const sent1 = await run(noPref, 3, 'used_unchanged'); assert.equal(sent1.schedule.step, 'ask_next_week'); assert.deepEqual(await consult(), { stage: 'asked_next_week', asks: 1, offered: true });
   const a2 = await run(noPref, 4, 'used_edited'); assert.deepEqual([a2.draft, a2.schedule.step], [SCH.LINES.ask_following_week, 'ask_following_week']); assert.deepEqual(await consult(), { stage: 'asked_following_week', asks: 2, offered: true });
-  const given = await run(decision({ schedule: { preference: { weeks: 'following', days: ['wednesday', 'thursday'], times: 'mornings', text: 'Wed or Thu morning the week after' } } }), 5);
+  const given = await run(decision({ schedule: { preference: { status: 'available', weeks: 'following', days: ['wednesday', 'thursday'], times: 'mornings', text: 'Wed or Thu morning the week after' } } }), 5);
   assert.deepEqual([given.draft, given.schedule.step, given.readiness.state, given.handover], [SCH.LINES.acknowledge, 'acknowledge', 'preference', { needed: true, reason: 'consultation preference received: over to you to book' }]);
   assert.equal(given.schedule.preference.text, 'The week after next (Mon 26 Oct to Sun 1 Nov) · Wednesday 28 Oct, Thursday 29 Oct · mornings'); assert.equal(given.schedule.preference.customerWords, 'Wed or Thu morning the week after');
   assert.deepEqual(given.fromChat.at(-1), { field: 'timing', label: 'Preferred time', value: given.schedule.preference.text });
@@ -285,7 +285,7 @@ test('R2a FLOW: ask next week, then the following week, then acknowledge and han
 
 test('R2a FLOW: the customer already said when they are free, so nothing is asked; and nothing is asked a third time', async () => {
   await on();
-  const direct = await suggest(fake([decision({ schedule: { preference: { days: ['thursday'], text: 'Thursday suits me' } } })]));
+  const direct = await suggest(fake([decision({ schedule: { preference: { status: 'available', days: ['thursday'], text: 'Thursday suits me' } } })]));
   assert.deepEqual([direct.schedule.step, direct.draft, direct.schedule.preference.text], ['acknowledge', SCH.LINES.acknowledge, 'Thursday']);
   await db.doc('conversations/' + PH).update({ consult: { stage: 'asked_following_week', asks: 2 } });
   const third = await suggest(fake([decision({ schedule: { preference: { text: 'I do not know yet' } } })]), { phone: PH }, { uid: 't3' });
@@ -299,7 +299,7 @@ test('R2a: Haiku and Sonnet cannot differ on the scheduling lines, the summary o
   const h1 = await suggest(fake([sneaky]), { phone: PH, model: 'haiku' }), s1 = await suggest(fake([sneaky]), { phone: PH, model: 'sonnet' }, { uid: 'p2' });
   assert.equal(h1.draft, SCH.LINES.ask_next_week); assert.equal(s1.draft, h1.draft); assert.doesNotMatch(h1.draft, /Tuesday|booked|see you|\d/);
   const strip = ({ draftId, model, costEur, monthSpentEur, ...rest }) => rest; assert.deepEqual(strip(h1), strip(s1));
-  const pref = decision({ schedule: { preference: { weeks: 'next', anyDay: true, text: 'any day' } } });
+  const pref = decision({ schedule: { preference: { status: 'available', weeks: 'next', anyDay: true, text: 'any day' } } });
   const h2 = await suggest(fake([pref]), { phone: PH, model: 'haiku' }, { uid: 'p3' }), s2 = await suggest(fake([pref]), { phone: PH, model: 'sonnet' }, { uid: 'p4' });
   assert.deepEqual(strip(h2), strip(s2)); assert.equal(h2.schedule.preference.text, 'Next week (Mon 19 Oct to Sun 25 Oct) · any day');
 });
@@ -311,16 +311,16 @@ test('R2b: a hand-over that a person SENT leaves the customer waiting for a book
   const noPref = decision({ schedule: { preference: null } });
   const q = await suggest(fake([noPref]), { phone: PH }, { uid: 'w1' }); await ai.draftOutcome({ db }, actor, { draftId: q.draftId, outcome: 'used_unchanged' }, { uid: 'w1' });
   assert.equal((await cv()).consult.needsBooking, undefined, 'only asking: not waiting for a booking yet');
-  const got = await suggest(fake([decision({ schedule: { preference: { weeks: 'next', days: ['tuesday'], text: 'Tuesday' } } })]), { phone: PH }, { uid: 'w2' });
+  const got = await suggest(fake([decision({ schedule: { preference: { status: 'available', weeks: 'next', days: ['tuesday'], text: 'Tuesday' } } })]), { phone: PH }, { uid: 'w2' });
   await ai.draftOutcome({ db }, actor, { draftId: got.draftId, outcome: 'discarded' }, { uid: 'w2' }); assert.equal((await cv()).consult.needsBooking, undefined, 'a draft nobody sent changes nothing');
-  await ai.draftOutcome({ db }, actor, { draftId: (await suggest(fake([decision({ schedule: { preference: { weeks: 'next', days: ['tuesday'], text: 'Tuesday' } } })]), { phone: PH }, { uid: 'w3' })).draftId, outcome: 'used_edited' }, { uid: 'w3' });
+  await ai.draftOutcome({ db }, actor, { draftId: (await suggest(fake([decision({ schedule: { preference: { status: 'available', weeks: 'next', days: ['tuesday'], text: 'Tuesday' } } })]), { phone: PH }, { uid: 'w3' })).draftId, outcome: 'used_edited' }, { uid: 'w3' });
   let c = (await cv()).consult; assert.deepEqual([c.stage, c.needsBooking, c.preference.firstDate], ['preference_given', true, got.schedule.preference.firstDate]); assert.match(c.preference.firstDate, /^\d{4}-\d{2}-\d{2}$/);
   const before = await db.collection('conversations/' + PH + '/messages').get(), apptsBefore = (await db.collection('appointments').get()).size;
   assert.deepEqual(await ai.dismissConsult({ db }, actor, { phone: PH }), { ok: true });
   c = (await cv()).consult; assert.deepEqual([c.needsBooking, c.stage, c.preference.summary.length > 0, !!c.dismissedAt, c.dismissedBy], [false, 'preference_given', true, true, actor.id], 'cleared, the record of what they asked is kept');
   assert.deepEqual(await ai.dismissConsult({ db }, actor, { phone: PH }), { ok: true, repeat: true });
   assert.equal((await db.collection('conversations/' + PH + '/messages').get()).size, before.size, 'nothing was sent'); assert.equal((await db.collection('appointments').get()).size, apptsBefore, 'nothing was booked');
-  const again = await suggest(fake([decision({ schedule: { preference: { weeks: 'following', anyDay: true, text: 'any day the week after' } } })]), { phone: PH }, { uid: 'w4' });
+  const again = await suggest(fake([decision({ schedule: { preference: { status: 'available', weeks: 'following', anyDay: true, text: 'any day the week after' } } })]), { phone: PH }, { uid: 'w4' });
   await ai.draftOutcome({ db }, actor, { draftId: again.draftId, outcome: 'used_unchanged' }, { uid: 'w4' });
   assert.equal((await cv()).consult.needsBooking, true, 'a new hand-over raises the request again');
 });

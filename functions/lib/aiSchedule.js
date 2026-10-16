@@ -52,14 +52,29 @@ function weekOf(nowMs, which) {
 
 // ---- what the customer said about when they are free ----
 // status: available (a day, "any day", a time of day or a named week they CAN do), unavailable (they cannot / will not in the near term and gave no alternative), tentative (they will check or let us know),
-// unknown (nothing usable). The model says it; when it does not, it is worked out from what was extracted. The days and times are ONLY what they offered, never inferred.
+// unknown (nothing usable). The model must say it: a missing or unknown status is 'unknown', never 'available' (audit 16 Oct 2026, finding 5). The days and times are ONLY what they offered, never inferred.
 function cleanPreference(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const days = [...new Set((Array.isArray(raw.days) ? raw.days : []).map((d) => String(d).toLowerCase()).filter((d) => WEEKDAYS.includes(d)))];
   const weeks = WEEKS.includes(raw.weeks) ? raw.weeks : null, anyDay = raw.anyDay === true, times = typeof raw.times === 'string' && raw.times.trim() ? clip(raw.times, 60) : null;
-  const offered = !!(days.length || anyDay || times || (weeks && weeks !== 'other'));
-  const status = STATUSES.includes(raw.status) ? raw.status : (offered ? 'available' : 'unknown');
+  const status = STATUSES.includes(raw.status) ? raw.status : 'unknown';
   return { weeks, days, anyDay, times, text: clip(raw.text, 160), status };
+}
+// The days and times the model read must be in what the customer actually wrote (their latest messages), not only in the model's summary of it. A day or a time of day that is not there is dropped
+// (the model once turned "I work all day though" into "evenings"). Weeks and "any day" are kept as they are.
+const DAY_WORDS = { monday: 'mon', tuesday: 'tues?', wednesday: 'weds?', thursday: 'thu(?:rs?)?', friday: 'fri', saturday: 'sat', sunday: 'sun' };
+const TIME_STOP = new Set(['the', 'any', 'and', 'after', 'before', 'from', 'around', 'about', 'time', 'ish', 'between', 'until', 'til', 'till', 'only', 'are', 'best', 'free', 'suit', 'work']);
+function heard(pref, said) {
+  if (!pref) return null;
+  const s = String(said || '').toLowerCase();
+  const days = pref.days.filter((d) => new RegExp(`\\b(?:${d}|${DAY_WORDS[d]})s?\\b`).test(s));
+  let times = pref.times;
+  if (times) {
+    const words = (times.toLowerCase().match(/[a-z]{2,}|\d+/g) || []).map((w) => (/^[a-z]{4,}s$/.test(w) ? w.slice(0, -1) : w)).filter((w) => !TIME_STOP.has(w));
+    const ok = words.length ? words.some((w) => (/^\d+$/.test(w) ? new RegExp(`(?:^|\\D)${w}(?:\\D|$)`) : new RegExp(`\\b${w}`)).test(s)) : /\bany ?time\b|\bwhenever\b|\bflexible\b/.test(s);
+    if (!ok) times = null;
+  }
+  return { ...pref, days, times };
 }
 // "Reasonable" = something a person can book from: the customer is AVAILABLE and named a day, "any day", a time of day, or a week. "Not sure", "I'll let you know", "I'm abroad" and "another time" alone are not.
 const reasonable = (p) => !!(p && p.status === 'available' && (p.days.length || p.anyDay || p.times || (p.weeks && p.weeks !== 'other')));
@@ -93,8 +108,7 @@ function asksSoFar(consult, messages) {
   }
   return n;
 }
-// R3 (automatic receptionist): the model's one-sentence acknowledgement of what the customer said, put in front of a fixed line ("Thanks for the details, Aoife. Would you like us to call out and have a look
-// at your space?"). Short, no question, no number, nothing about days, times, prices or promises. Anything else is dropped and only the fixed line is sent.
+// R3 (before the audit of 16 Oct 2026): a word filter for a model-written acknowledgement. The receptionist no longer sends model-written acknowledgements at all (see ackLine below); kept as a filter only.
 const RISKY = /\b(book|booked|booking|confirm|confirmed|available|availability|slot|date|time|times|day|days|week|weeks|today|tomorrow|tonight|tuesday|monday|wednesday|thursday|friday|saturday|sunday|promise|guarantee|guaranteed|price|prices|cost|costs|quote|quoted|discount|free|cheap|cheaper|€|euro|euros|deposit|ai|bot|robot|assistant|automated)\b/i;
 function acknowledgement(text) {
   const t = clip(text, 120);
@@ -108,6 +122,45 @@ function opener(text, hasOutbound) {
   if (!/\b(hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening))\b/i.test(t)) return '';
   return t;
 }
+// The automatic receptionist (audit 16 Oct 2026, finding 1): the words in front of a fixed line are WRITTEN BY CODE. The model only picks one of these by id (decision.ack); the customer's first name and project come
+// from the records, cleaned. A sentence the model wrote itself never reaches a customer on this path (the staff flow, where a person reads the draft, still uses the model's opener).
+const ACKS = ['hello', 'thanks', 'details', 'project', 'confused'];
+function firstName(name) {
+  const t = String(name || '').trim().split(/\s+/)[0] || '';
+  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,20}$/.test(t)) return '';
+  return t === t.toLowerCase() || t === t.toUpperCase() ? t[0].toUpperCase() + t.slice(1).toLowerCase() : t;
+}
+function projectOf(type) {
+  const t = String(type || '').toLowerCase(), k = /kitchen/.test(t), w = /wardrobe/.test(t);
+  return k && w ? ['a new kitchen and wardrobes', 'sound'] : k ? ['a new kitchen', 'sounds'] : w ? ['new wardrobes', 'sound'] : /utility/.test(t) ? ['a new utility room', 'sounds'] : null;
+}
+function ackLine(id, who, first) {
+  const n = firstName(who && who.name), p = projectOf(who && who.projectType);
+  if (id === 'hello') return first ? (n ? `Hi ${n}, thanks for getting back to us.` : 'Hi, thanks for getting back to us.') : ackLine('thanks', who, false);
+  if (id === 'thanks') return n ? `Thanks, ${n}.` : 'Thanks.';
+  if (id === 'details') return n ? `Thanks for the details, ${n}.` : 'Thanks for the details.';
+  if (id === 'project') return p ? `Lovely, ${p[0]} ${p[1]} great.` : 'Lovely, that sounds great.';
+  if (id === 'confused') return first && n ? `Hi ${n}, this is Elite Kitchens following up on your kitchen enquiry.` : 'This is Elite Kitchens following up on your kitchen enquiry.';
+  return '';
+}
+
+// ---- what the customer's latest messages say, read by code (consent and disclosure never rest on the model's labels alone: audit 16 Oct 2026, finding 5) ----
+// The customer's messages since our last one (the burst being answered). The automatic receptionist only runs for a new customer message, so when none sorts after ours (customer times come from WhatsApp,
+// ours from the server clock, and the two can disagree by a little) it is their most recent message.
+function latestMessages(messages, { natural = false } = {}) {
+  const list = messages || [];
+  let i = list.length; while (i > 0 && list[i - 1].direction !== 'out') i--;
+  const got = list.slice(i).filter((m) => m.direction === 'in').map((m) => String(m.body || ''));
+  if (got.length || !natural) return got;
+  const last = list.filter((m) => m.direction === 'in').pop();
+  return last ? [String(last.body || '')] : [];
+}
+// They ask for someone to come out (a visit, a measure, a consultation) in their own words.
+const ASKS_VISIT = /\b(visit|call (?:out|over|round|around|to the house)|calling out|come (?:out|over|round|around|to the house|and (?:see|look|measure|have a look))|pop (?:out|over|round)|have a look|take a look|measure|measuring|survey|consultation|appointment|someone (?:to )?(?:come|call|look))\b/i;
+// They ask whether they are talking to a person, a bot or an AI. Any such question gets the honest line, whatever the model labelled it.
+const ASKS_AI = /\b(bot|robot|chat ?bot|ai|a\.i|automated|automatic|artificial|real person|real human|human|computer|machine)\b/i;
+const QUESTIONISH = /\?|\b(are you|is this|is it|am i (?:talking|speaking|chatting|texting|messaging)|who am i)\b/i;
+const asksIfAi = (text) => ASKS_AI.test(text) && QUESTIONISH.test(text);
 
 // The plan for this message. Returns { step, reply, handover, preference }:
 //   step 'none'     nothing is said by the system (a person takes over if handover.needed; otherwise the model's own reply is only a draft for staff)
@@ -120,19 +173,26 @@ function tidy(text, { partly = false, links = false } = {}) {
   const parts = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean), keep = parts.filter((s) => !(partly && FOLLOWUP.test(s)) && !(links && SHOWING.test(s)));
   return keep.join(' ').trim();
 }
-function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null }) {
+function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null, who = null }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
   const visit = d.visit || (d.wantsConsultation ? 'asked' : 'none');
   const change = d.change && d.change !== 'none' ? d.change : (hand && /change booking/i.test(reason) ? 'move' : 'none');
   const out = (messages || []).filter((m) => m.direction === 'out'), said = (line) => out.some((m) => String(m.body || '').includes(line));
-  const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, given = describe(prefRaw, nowMs);
+  const latest = latestMessages(messages, { natural }), words = latest.join('\n');
+  // Automatic mode (nobody reads it first): the days and times must be in the customer's own latest words, and agreement to a visit counts only if we really offered one or their own words ask for one
+  // (a "yes" to our welcome message labelled as agreement is not). In the staff flow a person reads the draft and the preference summary before anything is sent, so the model's reading stands there.
+  const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, given = describe(natural ? heard(prefRaw, words) : prefRaw, nowMs);
   const person = (why) => ({ step: 'none', reply: null, handover: { needed: true, reason: why }, preference: null });
-  const offered = !!(consult && consult.offered) || said(LINES.visit_offer), agreed = visit === 'asked' || visit === 'agreed';
+  const offered = !!(consult && consult.offered) || said(LINES.visit_offer), agreed = (visit === 'asked' || visit === 'agreed') && (!natural || offered || ASKS_VISIT.test(words));
   const question = hand || !!d.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(d.intent);          // something a person has to answer (nothing is offered or asked meanwhile)
+  // R3: the code-built acknowledgement (see ackLine). With no id from the model, an opener the model offered on the first message only means "say hello".
+  const first = !out.some((m) => m.type !== 'template');
+  const ackOf = () => ackLine(ACKS.includes(d.ack) ? d.ack : (opener(d.schedule && d.schedule.opener, hasOutbound) ? 'hello' : ''), who, first);
 
-  // 1. A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself).
-  if (hand && /asked if ai/i.test(reason)) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
+  // 1. A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself). Decided by the model's
+  //    label, its hand-over reason, OR the customer's own words: a truthful answer never depends on how the model worded a reason.
+  if (d.special === 'asked_if_ai' || (hand && /asked if ai|\b(bot|robot|ai|automated|artificial)\b|\b(?:is|are)\b.*\b(?:real person|human)\b/i.test(reason)) || latest.some(asksIfAi)) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
 
   // 2. A customer who already has a consultation booked. The booking is only ever changed by a person; nothing is said as done.
   if (booked && change !== 'none') {
@@ -164,7 +224,7 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
       const linkLine = kn.linksText(d.links), text = tidy(raw, { partly: hand || d.answerState === 'partly', links: !!linkLine }) || (linkLine ? 'Of course.' : '');
       const has = !!text && d.answerState !== 'none', chk = has ? kn.check(text) : { ok: true, reasons: [] }, ok = has && chk.ok;
       const state = ok ? (hand || d.answerState === 'partly' ? 'partly' : 'answered') : 'none', unknown = d.unknown ? ': ' + d.unknown : '';
-      const links = ok ? linkLine : '', first = !out.some((m) => m.type !== 'template'), op = ok && first ? opener(d.schedule && d.schedule.opener, hasOutbound) : '';
+      const links = ok ? linkLine : '', op = ok && first && (d.ack === 'hello' || opener(d.schedule && d.schedule.opener, hasOutbound)) ? ackLine('hello', who, true) : '';      // a greeting before the first answer: written by code
       const sep = links ? '\n' : ' ', answer = ok ? (op ? op + ' ' : '') + text + (links ? '\n' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
       if (!ok) return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
       if (state === 'partly') {
@@ -211,18 +271,17 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer not available: ' + (prefRaw.text || 'no detail') }, preference: noteOf(prefRaw) };
   }
 
-  // 6. Agreement: ask about days (the first question may carry a short acknowledgement).
+  // 6. Agreement: ask about days (the first question may carry a short acknowledgement: written by code in automatic mode).
   if (agreed) {
-    const lead = natural ? acknowledgement(d.reply) : '', o = lead || opener(d.schedule && d.schedule.opener, hasOutbound), next = askNext(consult, messages, null);
+    const o = natural ? ackOf() : opener(d.schedule && d.schedule.opener, hasOutbound), next = askNext(consult, messages, null);
     return next.step === 'ask_next_week' ? { ...next, reply: (o ? o + ' ' : '') + next.reply } : next;
   }
 
   // 7. No agreement. A greeting, "ok", an emoji or confusion gets a friendly acknowledgement only; an enquiry or interest gets the offer of a visit, once.
   //    In the STAFF flow (a person reads the draft) a reply the model wrote itself is kept as the draft: the person adds the offer if they want it.
   if (!natural && String(d.reply || '').trim()) return none;
-  const ack = natural ? acknowledgement(d.reply) : '', op = ack || opener(d.schedule && d.schedule.opener, hasOutbound);
+  const ack = natural ? ackOf() : '', op = natural ? ack : opener(d.schedule && d.schedule.opener, hasOutbound);
   if (d.intent === 'greeting') {                                                          // only the FIRST reply: after that, "ok" and "thanks" need no answer
-    const first = !out.some((m) => m.type !== 'template');
     return first ? (ack ? { step: 'ack_only', reply: ack, handover: null, preference: null } : person('could not write a safe reply to the greeting')) : none;
   }
   if (offered) return none;                                                                // the offer was made: never repeated, never turned into a question about days
@@ -257,4 +316,4 @@ const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_as
   'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
 // After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
 const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
-module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, cleanPreference, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, plan, advance };
+module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, ACKS, cleanPreference, heard, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, ackLine, firstName, latestMessages, asksIfAi, ASKS_VISIT, plan, advance };

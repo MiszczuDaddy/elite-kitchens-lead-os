@@ -24,7 +24,7 @@ function fake(script) {
   return m;
 }
 const decision = (over = {}) => ({ toolCalls: [{ id: 'd1', name: 'reply_decision', input: { reply: '', intent: 'wants_consultation', wantsConsultation: true, schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null }, ...over } }], stopReason: 'tool_use' });
-const PREF = { preference: { weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }, opener: '' };
+const PREF = { preference: { status: 'available', weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }, opener: '' };
 function fakeWa(fail) { const w = { sent: [], async sendText(to, body) { if (fail) throw fail; w.sent.push({ to, body }); return 'wamid.AUTO' + w.sent.length; } }; return w; }
 function fakePush() { const p = { events: [], async notify(ev) { p.events.push(ev); } }; return p; }
 const checked = () => db.doc('aiSettings/modelCheck').set(Object.fromEntries(Object.entries(ai.MODELS).map(([k, m]) => [k, { id: m.id, ok: true, name: m.label, lifecycle: 'active', at: ts(NOW) }])));
@@ -88,7 +88,7 @@ test('TIMING: not before 45 seconds after the customer\'s last message; not betw
   const night = Date.UTC(2026, 9, 14, 3, 0); await arm(night, 'Are you there?', PH2);
   const w2 = fakeWa(); assert.deepEqual(await REC.sweep(deps(fake([decision()]), w2, fakePush()), night), { skipped: 'quiet hours' }); assert.equal(w2.sent.length, 0, 'nothing is sent at night');
   const morning = Date.UTC(2026, 9, 14, 6, 5);                         // 07:05 in Ireland: the customer's message (03:00) is older than the arming, so use a fresh one
-  await db.collection(`conversations/${PH2}/messages`).add({ direction: 'in', type: 'text', body: 'Hello?', createdAt: ts(morning - 120e3) }); await db.doc('conversations/' + PH2).update({ lastInboundAt: ts(morning - 120e3) });
+  await db.collection(`conversations/${PH2}/messages`).add({ direction: 'in', type: 'text', body: 'Hello? Can someone come out for the consultation?', createdAt: ts(morning - 120e3) }); await db.doc('conversations/' + PH2).update({ lastInboundAt: ts(morning - 120e3) });
   const r = await REC.sweep(deps(fake([decision()]), w2, fakePush()), morning); assert.equal(r['sent:ask_next_week'], 1); assert.equal(w2.sent.length, 1);
 });
 

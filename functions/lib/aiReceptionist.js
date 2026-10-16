@@ -12,8 +12,9 @@
 //   * Only messages the customer sends AFTER the chat was activated are answered; at least 45 seconds after the last one (a burst is answered once); never between midnight and 7:00 Irish time
 //     (it waits and answers after 7:00); WhatsApp's 24-hour window must be open; at most 6 automatic messages to one customer a day.
 //   * Never twice for one customer message: duplicate webhooks are ignored by the inbox, a claim is made before sending (as for staff sends) and a short per-chat lock stops overlapping checks.
-//   * The words: a short natural acknowledgement checked by code (no question, no number, nothing about days, times, prices or promises) followed by the fixed consultation line, or one of the other
-//     fixed lines (ask the following week, "I'll pass that on", "no preference", the honest "automated assistant" line, the booking-change question). A draft with any warning is not sent.
+//   * The words: a short acknowledgement WRITTEN BY CODE (the model only picks which one) followed by the fixed consultation line, or one of the other fixed lines (ask the following week, "I'll pass
+//     that on", "no preference", the honest "automated assistant" line, the booking-change question), or an answer that passed the answer checker. Just before sending, the whole message (fixed lines
+//     aside) is checked once more; a draft with any warning, or with no such check, is not sent.
 //   * It never invents a price, promises availability, books or changes anything. Prices, discounts, delivery and fitting questions, complaints, photos, "are you a person" and anything unsure are handed
 //     over: no reply, a push to the owner.
 // HOW IT RUNS (event-driven, with a backup): a Firestore trigger (functions/index.js receptionistOnMessage) calls onInbound() the moment a customer message is saved. It waits the reply delay (30 seconds by
@@ -102,7 +103,9 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
       if (tries >= MAX_TRIES) { await handOver(deps, ref, phone, 'ai failed ' + tries + ' times', nowMs); return 'failed'; }
       await ref.update({ 'receptionist.tries': tries, 'receptionist.triesFor': lastIn }); return 'retry';
     }
-    const step = res.schedule && res.schedule.step, warnings = res.warnings || [], needs = !!(res.handover && res.handover.needed);
+    const step = res.schedule && res.schedule.step, needs = !!(res.handover && res.handover.needed);
+    // The whole message was checked once more (fixed lines aside) before it may be sent; a missing result counts as a failure (audit 16 Oct 2026, finding 1).
+    const warnings = [...(res.warnings || []), ...(res.draft && !(res.sendCheck && res.sendCheck.ok === true) && !(res.warnings || []).some((w) => w.startsWith('send check:')) ? ['send check: not done'] : [])];
     const report = (outcome) => ai.draftOutcome({ db }, ACTOR, { draftId: res.draftId, outcome }, { uid: 'receptionist' }).catch(() => {});
     if (!SEND_STEPS.has(step) || !res.draft || !res.structured || warnings.length) {
       if (step === 'none' && !needs && !warnings.length && res.structured && QUIET_INTENTS.has(res.intent)) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered

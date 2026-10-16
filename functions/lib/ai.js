@@ -433,23 +433,27 @@ async function replyCore({ db, model, settings, key, sheet, knowledge, reception
   const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
   // What the system itself may say about knowledge: the owner's lines, the portfolio links (the model only picks ids), and the answer checker.
   const customerSaid = sheet.messages.filter((m) => m.direction === 'in').map((m) => m.body || '').join(' ') + ' ' + (sheet.lead || '') + ' ' + sheet.known.map((k) => k.value).join(' ');
-  const kn = knowledge ? { lines: knowledge.lines, check: (x) => KN.checkAnswer(x, knowledge, { extra: customerSaid }), linksText(ids) {
+  const kn = knowledge ? { lines: knowledge.lines, check: (x) => { const c = KN.checkAnswer(x, knowledge, { extra: customerSaid }), more = R.safety(x, { checked: true }).filter((w) => !c.reasons.includes(w)); return { ok: c.ok && !more.length, reasons: [...c.reasons, ...more] }; }, linksText(ids) {
     const sent = (u) => sheet.messages.some((m) => m.direction === 'out' && String(m.body || '').toLowerCase().includes(u.toLowerCase()));
     const list = (ids || []).map((id) => knowledge.links.find((l) => l.id === id)).filter((l) => l && !sent(l.url));
     return list.length ? knowledge.lines.links_intro + ' ' + list.map((l) => l.url).join(' and ') : '';
   } } : null;
   // Arranging a consultation is a fixed flow decided by code: the wording of every scheduling line is ours, the model only read the chat (see aiSchedule.js).
   // Step A: interest is NOT agreement. Nothing is forced here: the plan asks about days only after the customer asked for a visit or said yes to the offer of one (aiSchedule.plan).
-  const plan = call ? SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs, natural: receptionist, kn: receptionist ? kn : null }) : { step: 'none', reply: null, handover: null, preference: null };       // an answer without the structure is shown as it is
+  const who = { name: sheet.customerName, projectType: (sheet.known.find((k) => k.field === 'projectType') || {}).value || null };       // for the code-written acknowledgement only
+  const plan = call ? SCH.plan({ decision: asked, consult: sheet.consult, messages: sheet.messages, booked: !!sheet.nextAppointment, nowMs, natural: receptionist, kn: receptionist ? kn : null, who }) : { step: 'none', reply: null, handover: null, preference: null };       // an answer without the structure is shown as it is
   let decision = plan.step === 'none' ? (plan.handover ? { ...asked, handover: plan.handover } : asked) : { ...asked, reply: plan.reply, handover: plan.handover || asked.handover };
   // Staff ("Suggest reply"): the model's own answer is only a draft. Its links are added by code, and its content is checked and shown as warnings.
   let extra = [];
   if (!receptionist && kn && plan.step === 'none' && decision.reply) { const lt = kn.linksText(asked.links); if (lt) decision = { ...decision, reply: decision.reply + ' ' + lt }; extra = kn.check(asked.reply).reasons.map((x) => 'check: ' + x); }
   // The automatic receptionist writes nothing of its own: a question it cannot answer (or a complaint) goes to a person with a reason, never to silence.
   if (receptionist && plan.step === 'none' && !decision.handover.needed && (asked.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(asked.intent))) decision = { ...decision, handover: { needed: true, reason: asked.intent === 'complaint' ? 'upset customer' : 'a question that needs a person' } };
-  const analysis = R.analyse(sheet, decision, plan, { knowledge: !!knowledge });
+  const analysis = R.analyse(sheet, decision, plan, { knowledge: !!knowledge, fixed: knowledge ? Object.values(knowledge.lines) : [] });
   if (extra.length) analysis.warnings.push(...extra);
-  return { res, call, asked, plan, decision, analysis, cost, modelName };
+  // The automatic receptionist: the WHOLE message it would send is checked once more (audit 16 Oct 2026, finding 1). A failure is a warning, and a draft with a warning is never sent.
+  const sendCheck = receptionist && decision.reply ? R.outgoingCheck(decision.reply, { knowledge, extra: customerSaid }) : { ok: true, reasons: [] };
+  if (!sendCheck.ok) analysis.warnings.push(...sendCheck.reasons.map((x) => 'send check: ' + x));
+  return { res, call, asked, plan, decision, analysis, cost, modelName, sendCheck };
 }
 async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = Date.now(), receptionist = false } = {}) {
   onlyKeys(data, ['phone', 'model']);
@@ -467,7 +471,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   const sheet = await R.buildSheet(db, phone, nowMs);
   if (!sheet) throw new HttpsError('not-found', 'Customer not found.');
   const knowledge = await KN.loadLive(db);                                    // the PUBLISHED knowledge only (none published = the behaviour from before Step C)
-  const { call, asked, plan, decision, analysis, cost } = await replyCore({ db, model, settings, key, sheet, knowledge, receptionist, nowMs });
+  const { call, asked, plan, decision, analysis, cost, sendCheck } = await replyCore({ db, model, settings, key, sheet, knowledge, receptionist, nowMs });
   const draftId = 'ad_' + require('crypto').randomBytes(12).toString('hex');
   await db.doc('aiDrafts/' + draftId).set({ id: draftId, phone, createdBy: actor.id, createdByUid: uid || actor.id, createdAt: Timestamp.fromMillis(nowMs), model: key, intent: decision.intent, handover: decision.handover.needed, wantsConsultation: decision.wantsConsultation,
     readiness: analysis.readiness.state, step: plan.step, visit: asked.visit, change: asked.change, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate, status: plan.preference.status || 'available' } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call,
@@ -475,7 +479,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,
-    schedule: { step: plan.step, preference: plan.preference }, window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur };
+    schedule: { step: plan.step, preference: plan.preference }, window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur, ...(receptionist ? { sendCheck } : {}) };
 }
 // Step C: "Try it" in the Knowledge Centre (owner only). Runs the real receptionist decision on a PRETEND customer with the DRAFT (or the live) knowledge. Nothing is sent, no chat or draft record is written; the cost counts
 // against the AI budget like any other question. It needs the AI switched on and a model that passed "Check models", but not the real-customer-data switch (no real customer is involved).
