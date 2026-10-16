@@ -160,10 +160,10 @@ const latestMessages = (messages, opts) => latestBurst(messages, opts).map((m) =
 const THINKING = /\b(?:think(?:ing)? (?:about )?it|have a think|think it over|come back to (?:you|u)|get back to (?:you|u)|let (?:you|u) know|check with|talk (?:to|with|it over with) (?:my|the)|discuss|sleep on it|mull)\b/i;
 // They ask for someone to come out (a visit, a measure, a consultation) in their own words.
 const ASKS_VISIT = /\b(visit|call (?:out|over|round|around|to the house)|calling out|come (?:out|over|round|around|to the house|and (?:see|look|measure|have a look))|pop (?:out|over|round)|have a look|take a look|measure|measuring|survey|consultation|appointment|someone (?:to )?(?:come|call|look))\b/i;
-// They ask whether they are talking to a person, a bot or an AI. Any such question gets the honest line, whatever the model labelled it.
-const ASKS_AI = /\b(bot|robot|chat ?bot|ai|a\.i|automated|automatic|artificial|real person|real human|human|computer|machine)\b/i;
-const QUESTIONISH = /\?|\b(are you|is this|is it|am i (?:talking|speaking|chatting|texting|messaging)|who am i)\b/i;
-const asksIfAi = (text) => ASKS_AI.test(text) && QUESTIONISH.test(text);
+// They ask whether THEY are talking to a person, a bot or an AI. Only a question put to us counts ("are you a bot", "is this automated", "am I talking to a real person", "u a bot"); the words alone do not
+// ("do you have an automatic opening bin", "is a machine used to cut the doors", "can I see the computer design" are questions about kitchens; audit review of 16 Oct 2026). Any such question gets the honest line.
+const ASKS_AI = /\b(?:are|r|were|is)\s+(?:you|u|ya)\s+(?:(?:a|an|actually|really|just)\s+)*(?:bot|robot|chat ?bot|chatgpt|a\.?i\.?|artificial intelligence|human|real person|real human|actual person|person|automated|machine|computer|virtual assistant)\b|\b(?:is|was)\s+this\s+(?:(?:a|an|actually|really)\s+)*(?:bot|robot|chat ?bot|chatgpt|ai|automated|human|real person|real human|a person)\b|\b(?:am\s+i|are\s+we)\s+(?:talking|speaking|chatting|texting|messaging|writing|typing)\s+(?:to|with)\s+(?:(?:a|an|some)\s+)*(?:real\s+|actual\s+)?(?:person|human|bot|robot|chat ?bot|ai|machine|computer|someone real|somebody real)\b|\b(?:u|you)\s+a\s+(?:bot|robot|ai|real person|human)\b/i;
+const asksIfAi = (text) => ASKS_AI.test(String(text || ''));
 
 // The plan for this message. Returns { step, reply, handover, preference }:
 //   step 'none'     nothing is said by the system (a person takes over if handover.needed; otherwise the model's own reply is only a draft for staff)
@@ -195,7 +195,17 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
 
   // 1. A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself). Decided by the model's
   //    label, its hand-over reason, OR the customer's own words: a truthful answer never depends on how the model worded a reason.
-  if (d.special === 'asked_if_ai' || (hand && /asked if ai|\b(bot|robot|ai|automated|artificial)\b|\b(?:is|are)\b.*\b(?:real person|human)\b/i.test(reason)) || latest.some(asksIfAi)) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
+  if (d.special === 'asked_if_ai' || (hand && /asked if ai|\b(?:asks?|asked|asking|wants to know|wondering)\b[^.]{0,30}\b(?:whether|if)\b[^.]{0,40}\b(?:bot|robot|ai|a\.i|automated|real person|human)\b/i.test(reason)) || latest.some(asksIfAi)) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
+
+  // ORDER (audit 16 Oct 2026, finding 7): what the customer IS (upset, someone who wants a person, writing in another language, outside our area) comes before what they ask about a booking. A booked customer
+  // who is upset and says "cancel" gets the complaint line and a person, not the sales question "do you want to move it?"; one who asks for a person is not asked about days. Order: asked-if-AI, complaint, the
+  // special cases (person, language, area, declined job), a booking change, then everything else.
+  // A complaint (the automatic receptionist only): the owner's one line, then a person takes over at once and the receptionist stops (PAUSE_STEPS). Nothing is answered, offered, asked or promised.
+  if (natural && d.intent === 'complaint') return { step: 'complaint', reply: (kn && kn.lines.complaint) || LINES.complaint, handover: { needed: true, reason: 'complaint: upset customer' }, preference: null, ...(kn ? { kn: { state: 'special', special: 'complaint', blocked: [], topics: [] } } : {}) };
+  if (kn && natural) {
+    const special = { wants_person: ['human', kn.lines.human, 'asked for a person'], outside_area: ['outside_area', kn.lines.outside_area, 'outside the areas we cover: please review'], declined_job: ['declined_job', kn.lines.declined_job, 'a job we usually decline: please review'], other_language: ['other_language', kn.lines.other_language, 'message not in English'] }[d.special];
+    if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
+  }
 
   // 2. A customer who already has a consultation booked. The booking is only ever changed by a person; nothing is said as done.
   if (booked && change !== 'none') {
@@ -215,8 +225,6 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     if (change === 'late') return line('late', 'running late for the booking');
   }
 
-  // 2a. A complaint (the automatic receptionist only): the owner's one line, then a person takes over at once and the receptionist stops (PAUSE_STEPS). Nothing is answered, offered, asked or promised.
-  if (natural && d.intent === 'complaint') return { step: 'complaint', reply: (kn && kn.lines.complaint) || LINES.complaint, handover: { needed: true, reason: 'complaint: upset customer' }, preference: null, ...(kn ? { kn: { state: 'special', special: 'complaint', blocked: [], topics: [] } } : {}) };
 
   // 2a'. A photo, voice note, video or file (the receptionist cannot see or hear them): the owner's short thank-you line, then a person takes over (owner's decision, 16 Oct 2026). Read from the message
   //      types, not from the model. A sticker is not an attachment (it is treated like an emoji).
@@ -229,8 +237,6 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   //     owner's line and a person takes over. A question is ANSWERED from the knowledge first (the answer was checked in code), and only then does the Step A flow go on exactly as before: the visit is offered once,
   //     days are asked only after agreement, a preference is recorded. A question the knowledge does not answer (or an answer that failed the check) gets the holding line and a person takes over: never a guess.
   if (kn && natural) {
-    const special = { wants_person: ['human', kn.lines.human, 'asked for a person'], outside_area: ['outside_area', kn.lines.outside_area, 'outside the areas we cover: please review'], declined_job: ['declined_job', kn.lines.declined_job, 'a job we usually decline: please review'], other_language: ['other_language', kn.lines.other_language, 'message not in English'] }[d.special];
-    if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
     // A reaction to a price ("that's a bit more than I thought") or "just looking at options", with nothing asked: the owner's line, no hand-over, no visit pushed (owner's decision, 16 Oct 2026).
     if ((d.special === 'price_concern' || d.special === 'browsing') && !hand && !d.hasQuestion && kn.lines[d.special]) return { step: d.special, reply: kn.lines[d.special], handover: null, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
     const raw = String(d.reply || '').trim(), asking = d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent) || (d.intent === 'asking_price_general' && !!raw);
