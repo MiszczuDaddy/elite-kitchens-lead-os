@@ -171,7 +171,7 @@ const AFFIRM_NO = /\bno (?:problem|worries|bother|obligation|rush|pressure|hassl
 const NEG_CLAIM = /\b(not|no|never|cannot|can't|cant|won't|isn't|aren't|don't|doesn't|didn't|unable|neither|nor|decline|declines|outside)\b|n't\b/i;
 const unNo = (t) => String(t).replace(AFFIRM_NO, (m) => ' '.repeat(m.length));                    // "no problem" is not a "no" (same length, so positions stay)
 const negClause = (c) => NEG_CLAIM.test(unNo(c));
-const clausesOf = (t) => sentencesOf(t).flatMap((s) => s.split(/\s*;\s*|,?\s+\b(?:but|although|though|however|whereas|while)\b,?\s+/i)).map((x) => x.trim()).filter(Boolean);
+const clausesOf = (t) => sentencesOf(t).flatMap((s) => s.split(/\s*;\s*|,\s+and\s+|,?\s+\b(?:but|although|though|however|whereas|while)\b,?\s+/i)).map((x) => x.trim()).filter(Boolean);       // ", and" starts a new claim ("laminate is included, and stone costs extra")
 // Every place a claim is made in a piece of text, each with whether it is denied: a negative word in the claim itself or in the few words before it. A knowledge sentence that opens with a negative list
 // ("We politely decline: A; B; C", "Not included in any quote: ...") denies every item in it.
 const LEAD_NEG = /^[^:]{0,60}\b(?:decline|declines|not included|never|don't|do not|no)\b[^:]{0,40}:/i;

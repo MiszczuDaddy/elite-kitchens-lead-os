@@ -259,6 +259,8 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     const extra = hand || !!d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent);
     return { step: 'acknowledge', reply: LINES.acknowledge, handover: { needed: true, reason: extra ? 'consultation preference received; they also asked something that needs you' + (reason ? ': ' + reason : '') : 'consultation preference received: over to you to book' }, preference: given };
   }
+  // A customer unsure who is writing ("Who is this?") gets the code's one line saying who we are, whatever intent the model gave it (a real-model run on 16 Oct 2026 labelled it "other" and the chat was handed over in silence).
+  if (natural && d.ack === 'confused' && !hand && ['other', 'greeting'].includes(d.intent)) return { step: 'ack_only', reply: ackLine('confused', who, first), handover: null, preference: null };
   if (consult && consult.stage === 'preference_given') return none;                       // already handed over; nothing new to ask or offer (a corrected preference was handled above)
   if (question) return none;                                                               // a question we cannot answer: a person answers it; nothing is offered or asked meanwhile
 

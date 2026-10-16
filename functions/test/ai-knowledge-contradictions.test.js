@@ -52,6 +52,13 @@ test('CONSULTATIONS: nothing is booked or confirmed by the answer, open items (s
   [['The home visit is free and there is no obligation. At the visit, the layout, measurements and budget are discussed.'], ['When you\'re ready to book, one of the team will arrange it with you.'],
     ['I\'ll check whether samples are brought to the visit.']]));
 
+test('REAL ANSWERS FROM THE PAID RUN OF 16 OCT 2026 PASS (one was wrongly blocked before this test: a claim does not run across ", and" into the next one)', () => table([], [
+  ['Yes, we do wardrobes as well as kitchens and utility rooms. A laminate worktop is included in the price, and stone like quartz, Dekton or granite is optional and costs extra.'],
+  ['No, we don\'t have a showroom. We do the design at a free home visit instead, with no obligation.'], ['No, appliances are bought by you, but we fit the integrated ones into the units for you.'],
+  ['To be honest, most of our kitchens start around €10,000, so 7k would be tight. A free home visit would let us see what\'s possible, though.', 'My budget is about 7k, is that enough?'],
+  ['It\'s a 30% deposit, paid once you accept the quote. The balance is paid when the kitchen is fitted and finished.'], ['We don\'t have a showroom, the design is done at a free home visit.'],
+  ['All our kitchens come with Blum soft-close hinges and drawers as standard, and the Blum hardware carries Blum\'s lifetime mechanical guarantee.']]));
+
 test('THE CHECK FOLLOWS THE KNOWLEDGE: when the owner changes an entry, the same answer is judged by the new entry (no deploy)', () => {
   const edit = (id, text) => { const d = JSON.parse(JSON.stringify(SEED)); for (const s of d.sections) for (const e of s.entries) if (e.id === id) e.text = text; return KN.compile(KN.clean(d), 2); };
   const withShowroom = edit('company-showroom', 'We have a showroom in Balbriggan, open by appointment.');
