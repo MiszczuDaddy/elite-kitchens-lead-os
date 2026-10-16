@@ -147,14 +147,17 @@ function ackLine(id, who, first) {
 // ---- what the customer's latest messages say, read by code (consent and disclosure never rest on the model's labels alone: audit 16 Oct 2026, finding 5) ----
 // The customer's messages since our last one (the burst being answered). The automatic receptionist only runs for a new customer message, so when none sorts after ours (customer times come from WhatsApp,
 // ours from the server clock, and the two can disagree by a little) it is their most recent message.
-function latestMessages(messages, { natural = false } = {}) {
+function latestBurst(messages, { natural = false } = {}) {
   const list = messages || [];
   let i = list.length; while (i > 0 && list[i - 1].direction !== 'out') i--;
-  const got = list.slice(i).filter((m) => m.direction === 'in').map((m) => String(m.body || ''));
+  const got = list.slice(i).filter((m) => m.direction === 'in');
   if (got.length || !natural) return got;
   const last = list.filter((m) => m.direction === 'in').pop();
-  return last ? [String(last.body || '')] : [];
+  return last ? [last] : [];
 }
+const latestMessages = (messages, opts) => latestBurst(messages, opts).map((m) => String(m.body || ''));
+// They want to think about it or will come back to us (rather than a plain no).
+const THINKING = /\b(?:think(?:ing)? (?:about )?it|have a think|think it over|come back to (?:you|u)|get back to (?:you|u)|let (?:you|u) know|check with|talk (?:to|with|it over with) (?:my|the)|discuss|sleep on it|mull)\b/i;
 // They ask for someone to come out (a visit, a measure, a consultation) in their own words.
 const ASKS_VISIT = /\b(visit|call (?:out|over|round|around|to the house)|calling out|come (?:out|over|round|around|to the house|and (?:see|look|measure|have a look))|pop (?:out|over|round)|have a look|take a look|measure|measuring|survey|consultation|appointment|someone (?:to )?(?:come|call|look))\b/i;
 // They ask whether they are talking to a person, a bot or an AI. Any such question gets the honest line, whatever the model labelled it.
@@ -205,13 +208,22 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
       if (given) return { step: 'change_given', reply: LINES.acknowledge, handover: { needed: true, reason: 'wants to move booking: preference received' }, preference: given };
       return asked ? { step: 'change_pass_on', reply: LINES.no_preference, handover: { needed: true, reason: 'wants to move booking' }, preference: null } : { step: 'change_ask', reply: LINES.change_ask, handover: { needed: true, reason: 'wants to move booking' }, preference: null };
     }
-    if (change === 'move_specific') return person('wants the booking moved to a specific time (tomorrow, earlier, a date): needs you');
-    if (change === 'confirm') return person('asks you to confirm the booking');
-    if (change === 'late') return person('running late for the booking');
+    // The automatic receptionist with published knowledge sends the owner's short line first (owner's decision, 16 Oct 2026), then a person takes over; staff drafts and older setups stay silent as before.
+    const line = (k, why) => (natural && kn && kn.lines[k] ? { step: k, reply: kn.lines[k], handover: { needed: true, reason: why }, preference: null } : person(why));
+    if (change === 'move_specific') return line('booking_specific', 'wants the booking moved to a specific time (tomorrow, earlier, a date): needs you');
+    if (change === 'confirm') return line('booking_confirm', 'asks you to confirm the booking');
+    if (change === 'late') return line('late', 'running late for the booking');
   }
 
   // 2a. A complaint (the automatic receptionist only): the owner's one line, then a person takes over at once and the receptionist stops (PAUSE_STEPS). Nothing is answered, offered, asked or promised.
   if (natural && d.intent === 'complaint') return { step: 'complaint', reply: (kn && kn.lines.complaint) || LINES.complaint, handover: { needed: true, reason: 'complaint: upset customer' }, preference: null, ...(kn ? { kn: { state: 'special', special: 'complaint', blocked: [], topics: [] } } : {}) };
+
+  // 2a'. A photo, voice note, video or file (the receptionist cannot see or hear them): the owner's short thank-you line, then a person takes over (owner's decision, 16 Oct 2026). Read from the message
+  //      types, not from the model. A sticker is not an attachment (it is treated like an emoji).
+  if (natural && kn) {
+    const types = latestBurst(messages, { natural }).map((m) => m.type), kind = types.includes('image') ? 'photo' : types.includes('audio') ? 'voice' : types.some((x) => x === 'video' || x === 'document') ? 'file' : null;
+    if (kind && kn.lines[kind]) return { step: 'attachment', reply: kn.lines[kind], handover: { needed: true, reason: { photo: 'customer sent a photo', voice: 'customer sent a voice note', file: 'customer sent a video or file' }[kind] + ': please have a look' }, preference: null };
+  }
 
   // 2b. Step C: the owner has published knowledge, and this is the automatic receptionist. A customer who asks for a person, or whose job is outside our areas, a job we decline, or not in English, gets the
   //     owner's line and a person takes over. A question is ANSWERED from the knowledge first (the answer was checked in code), and only then does the Step A flow go on exactly as before: the visit is offered once,
@@ -219,6 +231,8 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   if (kn && natural) {
     const special = { wants_person: ['human', kn.lines.human, 'asked for a person'], outside_area: ['outside_area', kn.lines.outside_area, 'outside the areas we cover: please review'], declined_job: ['declined_job', kn.lines.declined_job, 'a job we usually decline: please review'], other_language: ['other_language', kn.lines.other_language, 'message not in English'] }[d.special];
     if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
+    // A reaction to a price ("that's a bit more than I thought") or "just looking at options", with nothing asked: the owner's line, no hand-over, no visit pushed (owner's decision, 16 Oct 2026).
+    if ((d.special === 'price_concern' || d.special === 'browsing') && !hand && !d.hasQuestion && kn.lines[d.special]) return { step: d.special, reply: kn.lines[d.special], handover: null, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
     const raw = String(d.reply || '').trim(), asking = d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent) || (d.intent === 'asking_price_general' && !!raw);
     if (asking && d.intent !== 'complaint') {
       const linkLine = kn.linksText(d.links), text = tidy(raw, { partly: hand || d.answerState === 'partly', links: !!linkLine }) || (linkLine ? 'Of course.' : '');
@@ -238,7 +252,8 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
       const core = plan({ decision: neutral, consult, messages, booked, nowMs, natural, kn: null });
       // A plain question of fact (does it include, do you supply, how long, what do you cover) is just answered: the visit is not attached to it. The offer waits for a message where they talk about their own project
       // or ask what kitchens cost, and is still made only once. (Owner's decision, 15 Oct 2026.)
-      if (core.step === 'offer_visit' && d.intent === 'asking_info') return { step: 'answer', reply: answer, handover: null, preference: null, kn: info };
+      // A customer who is just looking at options gets the answer and no offer either.
+      if (core.step === 'offer_visit' && (d.intent === 'asking_info' || d.special === 'browsing')) return { step: 'answer', reply: answer, handover: null, preference: null, kn: info };
       if (core.step === 'none') return { step: 'answer', reply: answer, handover: core.handover, preference: core.preference, kn: info };
       return { ...core, reply: answer + sep + core.reply, kn: info };
     }
@@ -252,7 +267,13 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     return offered ? { step: 'price_general', reply: LINES.price_general, handover: null, preference: null } : { step: 'price_offer', reply: LINES.price_general + ' ' + LINES.visit_offer, handover: null, preference: null };
   }
   if (booked) return none;                                                                 // booked and nothing about the booking: no consultation questions at all
-  if (visit === 'declined') return person('customer declined or wants to wait');
+  // No, not now, maybe later, or "can I think about it?": one friendly line, no hand-over and no booking request (owner's decision, 16 Oct 2026). Said once: after that, a repeat needs nothing.
+  if (visit === 'declined') {
+    if (!(natural && kn && !question)) return person('customer declined or wants to wait');
+    const k = THINKING.test(words) ? 'thinking' : 'declined';
+    if (said(kn.lines.declined) || said(kn.lines.thinking)) return { ...none, quiet: true };
+    return { step: k, reply: kn.lines[k], handover: null, preference: null };
+  }
 
   // 4. They said when they are free: that is agreement. Record it (also when they ALSO asked something that needs a person: the question goes to the person together with the preference).
   if (given && d.intent !== 'complaint') {
@@ -315,7 +336,9 @@ function advance(consult, step, preference, nowMs) {
 
 // The only steps whose words are sent by themselves by the automatic receptionist. All are written by code (the fixed lines above and the owner's knowledge lines) or are an answer that passed the answer checker.
 const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on',
-  'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
+  'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
+  'declined', 'thinking', 'price_concern', 'browsing', 'attachment', 'late', 'booking_confirm', 'booking_specific']);      // the owner's lines added on 16 Oct 2026
 // After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
-const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint']);
-module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, ACKS, cleanPreference, heard, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, ackLine, firstName, latestMessages, asksIfAi, ASKS_VISIT, plan, advance };
+const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
+  'attachment', 'late', 'booking_confirm', 'booking_specific']);      // declined, thinking, price_concern and browsing do NOT pause: the customer may write again
+module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, ACKS, THINKING, cleanPreference, heard, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, ackLine, firstName, latestMessages, latestBurst, asksIfAi, ASKS_VISIT, plan, advance };

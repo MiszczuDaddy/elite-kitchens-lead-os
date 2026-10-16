@@ -38,10 +38,10 @@ const ACTOR = { kind: 'system', id: 'receptionist' };
 const QUIET_INTENTS = new Set(['greeting', 'new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general']);
 // A message that is ONLY a pleasantry ("Thanks", "ok great", "Thanks, see you then", a thumbs-up) needs no answer and no person, whatever intent the model gave it (the audit run of 16 Oct 2026: the model
 // labelled "Thanks" as "other" and the owner was alerted for a thank-you). Read from the customer's own words; anything else in the message (a question, "not now", a photo) is not a pleasantry.
-const COURTESY_ONE = String.raw`(?:ok(?:ay)?|k|kk|grand|great|brilliant|lovely|perfect|super|cool|nice(?: one)?|sound|class|deadly|fab(?:ulous)?|excellent|fantastic|amazing|good|cheers|ta|thanks?|thank you|thx|thank u|ty|many thanks|thanks? (?:a lot|a million|very much|so much|again|for that|for (?:the|your) (?:help|reply|info|message))|thank you (?:very much|so much|again)|no worries|no problem|will do|got it|noted|understood|see you (?:then|soon|on \w+)|talk (?:soon|later)|speak soon|have a (?:good|great|nice) (?:day|one|weekend|evening))`;
+const COURTESY_ONE = String.raw`(?:lol|lols|lolz|ha(?:ha)+h?|he(?:he)+|lmao|xd|ok(?:ay)?|k|kk|grand|great|brilliant|lovely|perfect|super|cool|nice(?: one)?|sound|class|deadly|fab(?:ulous)?|excellent|fantastic|amazing|good|cheers|ta|thanks?|thank you|thx|thank u|ty|many thanks|thanks? (?:a lot|a million|very much|so much|again|for that|for (?:the|your) (?:help|reply|info|message))|thank you (?:very much|so much|again)|no worries|no problem|will do|got it|noted|understood|see you (?:then|soon|on \w+)|talk (?:soon|later)|speak soon|have a (?:good|great|nice) (?:day|one|weekend|evening))`;
 const COURTESY = new RegExp(`^${COURTESY_ONE}(?:\\s+${COURTESY_ONE})*$`, 'i');          // one or more of them: "ok great", "perfect thanks"
 function courtesyOnly(messages) {
-  if (!messages.length || messages.some((m) => m.type && m.type !== 'text')) return false;
+  if (!messages.length || messages.some((m) => m.type && m.type !== 'text' && m.type !== 'sticker')) return false;          // a sticker is like an emoji
   return messages.every((m) => { const parts = String(m.body || '').toLowerCase().replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ').split(/[,.!]+|\s+(?:and|&)\s+/).map((x) => x.trim()).filter(Boolean); return parts.every((p) => COURTESY.test(p)); });
 }
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : typeof t === 'number' ? t : 0);
@@ -117,7 +117,7 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     const report = (outcome) => ai.draftOutcome({ db }, ACTOR, { draftId: res.draftId, outcome }, { uid: 'receptionist' }).catch(() => {});
     if (!SEND_STEPS.has(step) || !res.draft || !res.structured || warnings.length) {
       const burst = []; for (const x of recent.docs.map((d) => d.data())) { if (x.direction !== 'in') break; burst.push(x); }              // the customer's messages since our last one
-      if (step === 'none' && !needs && !warnings.length && res.structured && (QUIET_INTENTS.has(res.intent) || courtesyOnly(burst))) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered
+      if (step === 'none' && !needs && !warnings.length && res.structured && (QUIET_INTENTS.has(res.intent) || courtesyOnly(burst) || (res.schedule && res.schedule.quiet === true))) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered
         await report('discarded'); await ref.update({ 'receptionist.handledMs': lastIn }); return 'quiet_skip';
       }
       await report('discarded');                                                           // not a simple case, or the draft failed a check: nothing is sent, a person takes over

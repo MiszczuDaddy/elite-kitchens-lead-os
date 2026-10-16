@@ -28,8 +28,22 @@ const DEFAULT_LINES = {
   other_language: 'Thanks for your message, I\'ll pass this to the team and they\'ll get back to you.',
   complaint: 'I\'m sorry to hear that. I\'ll pass this on to the team so they can look into it.',
   links_intro: 'You can see some of our work here:',
+  // Added after the 200-conversation audit (owner's decisions of 16 Oct 2026). A knowledge published before these existed gets these defaults until the owner edits them.
+  declined: 'No problem at all, thanks for letting us know. If anything changes, just send us a message here.',
+  thinking: 'No problem at all, just let us know when suits.',
+  price_concern: 'Of course, completely understand. Every kitchen is priced individually, so there may be different options depending on what you\'re looking for.',
+  browsing: 'No problem at all, take your time. If you have any questions, just ask.',
+  photo: 'Thanks for the photo, I\'ll pass it on to the team.',
+  voice: 'Thanks for the voice note, I\'ll pass it on to the team.',
+  file: 'Thanks, I\'ll pass that on to the team.',
+  late: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
+  booking_confirm: 'I\'ll pass this to the team and they\'ll confirm the time with you.',
+  booking_specific: 'I\'ll pass that on to the team and they\'ll come back to you about it.',
 };
-const LINE_LABELS = { holding: 'Not sure / need to check', partly: 'Part answered, the rest needs checking', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', complaint: 'A complaint or an upset customer', links_intro: 'Before the portfolio links' };
+const LINE_LABELS = { holding: 'Not sure / need to check', partly: 'Part answered, the rest needs checking', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', complaint: 'A complaint or an upset customer', links_intro: 'Before the portfolio links',
+  declined: 'Customer says no, not now or maybe later (no hand-over)', thinking: 'Customer wants to think about it (no hand-over)', price_concern: 'Customer finds the price more than expected (no hand-over)', browsing: 'Customer is just looking at options (no hand-over)',
+  photo: 'Customer sends a photo (then a person takes over)', voice: 'Customer sends a voice note (then a person takes over)', file: 'Customer sends a video or file (then a person takes over)',
+  late: 'Booked customer is running late (then a person takes over)', booking_confirm: 'Booked customer asks the time or to confirm (then a person takes over)', booking_specific: 'Booked customer asks for a specific day or time (then a person takes over)' };
 const URLISH = /@|https?:|www\.|\.(?:ie|com|net|org|co|uk)\b|€|\d/i;
 
 const emptyData = () => ({ sections: [], links: [], contact: { email: '', website: '', whatsapp: '' }, lines: { ...DEFAULT_LINES }, instructions: '', examples: [] });

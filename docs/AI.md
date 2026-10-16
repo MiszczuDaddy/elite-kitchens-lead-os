@@ -244,5 +244,20 @@ From `docs/RECEPTIONIST_AUDIT_2026-10-16.md`. What reaches a customer no longer 
   * Tests: `ai-knowledge-contradictions.test.js`, with blocked and must-pass sentences for showroom, pricing, materials, services, guarantees and consultations. The must-pass sentences include the real model answers from the knowledge demo.
 * **Not covered:** claims outside that list. These still only get the number, address and wording checks. The prompt changes (pick an `ack`, `asked_if_ai`, required `status`) are checked by the real-model run below.
 
+## After the 200-conversation audit (16 Oct 2026, branch `receptionist-audit-1-5`; not merged or deployed)
+The owner reviewed the 16 silent hand-overs and decided the following. Each new line is **owner-editable in the Knowledge Centre** (Lines). A knowledge published before these lines existed uses the defaults below until the owner edits them. These lines are used only when knowledge is published; without it, the receptionist behaves as before.
+
+| Customer | What is sent | Then |
+|---|---|---|
+| No, not now, maybe later | "No problem at all, thanks for letting us know. If anything changes, just send us a message here." | no hand-over, no booking request, not repeated |
+| Can I think about it? / I'll let you know | "No problem at all, just let us know when suits." | the same |
+| Reacts to a price (more than expected) | "Of course, completely understand. Every kitchen is priced individually, so there may be different options depending on what you're looking for." | no hand-over, no visit pushed |
+| Just looking at options | "No problem at all, take your time. If you have any questions, just ask." Questions are answered, with no visit offer | no hand-over |
+| Photo / voice note / video or file | "Thanks for the photo (voice note), I'll pass it on to the team." / "Thanks, I'll pass that on to the team." | a person takes over, with a push |
+| Booked: running late / asks the time / asks for a specific day | "…I'll tell the team." / "…they'll confirm the time with you." / "…they'll come back to you about it." | a person takes over, with a push |
+| "lol", "haha", a sticker | nothing | nobody is alerted (like "Thanks") |
+
+**Unchanged:** prompt injections and unrelated questions are not answered and go to a person, and every other safety rule still holds. Attachments are recognised from the message type, not the model. The model only picks a label for a price concern or browsing (`special`); it never writes those words.
+
 ## Not built (needs your approval, in this order)
 9.2 AI-prepared proposals (e.g. a quote revision) applied only after you press Approve · 9.3 push-to-talk voice (browser speech recognition first, fallback where unsupported) · 9.4 WhatsApp receptionist in **suggest-only** mode · 9.5 receptionist that replies by itself (after the disclosure question above, with a per-lead opt-out and a human hand-over).

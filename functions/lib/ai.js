@@ -479,7 +479,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
   return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,
-    schedule: { step: plan.step, preference: plan.preference }, window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur, ...(receptionist ? { sendCheck } : {}) };
+    schedule: { step: plan.step, preference: plan.preference, ...(plan.quiet ? { quiet: true } : {}) }, window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur, ...(receptionist ? { sendCheck } : {}) };
 }
 // Step C: "Try it" in the Knowledge Centre (owner only). Runs the real receptionist decision on a PRETEND customer with the DRAFT (or the live) knowledge. Nothing is sent, no chat or draft record is written; the cost counts
 // against the AI budget like any other question. It needs the AI switched on and a model that passed "Check models", but not the real-customer-data switch (no real customer is involved).

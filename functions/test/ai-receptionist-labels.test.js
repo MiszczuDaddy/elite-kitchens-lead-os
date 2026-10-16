@@ -115,3 +115,72 @@ test('PLEASANTRIES: a message that is only "thanks", "ok great", "Thanks, see yo
   assert.equal(REC.courtesyOnly([m('', 'image')]), false, 'a photo is never a pleasantry'); assert.equal(REC.courtesyOnly([m('Thanks'), m('how long does it take?')]), false, 'every message of the burst counts');
   assert.equal(REC.courtesyOnly([]), false);
 });
+
+// ---- the owner's decisions after the 200-conversation audit (16 Oct 2026): no unnecessary hand-overs, nobody ignored when it matters, every new line owner-editable ----
+const WITH_K = (o, ctx = {}) => run(o, { knowledge: true, ...ctx });
+const img = (body = '') => ({ direction: 'in', type: 'image', body }), aud = () => ({ direction: 'in', type: 'audio', body: '' }), doc = () => ({ direction: 'in', type: 'document', body: '' }), stk = () => ({ direction: 'in', type: 'sticker', body: '' });
+
+test('DECLINES, "MAYBE LATER" AND "CAN I THINK ABOUT IT?": one friendly owner line, no hand-over, no booking request, never repeated; a question with it is still answered', () => {
+  for (const say of ['No thanks', 'Not right now thanks, maybe in the spring', 'maybe later in the year', 'not interested']) {
+    const r = WITH_K({ visit: 'declined', intent: 'other' }, { ...OFFERED, messages: [...OFFERED.messages, inn(say)] });
+    assert.deepEqual([r.step, r.sent, r.handover.needed, r.plan.preference], ['declined', K.lines.declined, false, null], say);
+    assert.equal(S.PAUSE_STEPS.has(r.step), false); assert.equal(S.advance(OFFERED.consult, r.step, null, 1), null, 'no booking request');
+  }
+  for (const say of ['Can I think about it and come back to you?', 'I\'ll talk to my husband and let you know', 'let me have a think']) assert.equal(WITH_K({ visit: 'declined', intent: 'other' }, { ...OFFERED, messages: [...OFFERED.messages, inn(say)] }).sent, K.lines.thinking, say);
+  const again = WITH_K({ visit: 'declined', intent: 'other' }, { ...OFFERED, messages: [...OFFERED.messages, inn('No thanks'), out(K.lines.declined), inn('no')] });
+  assert.deepEqual([again.step, again.sent, again.plan.quiet], ['none', '', true], 'said once: a repeat needs nothing and nobody');
+  const withQ = WITH_K({ visit: 'declined', intent: 'asking_info', hasQuestion: true, answerState: 'answered', reply: 'Yes, we do wardrobes as well as kitchens and utility rooms.' }, { ...OFFERED, messages: [...OFFERED.messages, inn('not now, but do you do wardrobes?')] });
+  assert.equal(withQ.step, 'answer'); assert.match(withQ.sent, /wardrobes/);
+  assert.equal(run({ visit: 'declined', intent: 'other' }, { ...OFFERED, messages: [...OFFERED.messages, inn('No thanks')] }).handover.needed, true, 'no published knowledge: as before (a person is told)');
+});
+
+test('PRICE CONCERN AND "JUST LOOKING": the owner\'s line, no hand-over, no visit pushed, no promise; a question is still answered, without an offer when they are just looking', () => {
+  const pc = WITH_K({ special: 'price_concern', intent: 'other' }, { ...OFFERED, messages: [...OFFERED.messages, inn('ok thats a bit more than I thought')] });
+  assert.deepEqual([pc.step, pc.sent, pc.handover.needed], ['price_concern', K.lines.price_concern, false]); assert.doesNotMatch(pc.sent, /call out|next week|cheaper|discount|\d/i);
+  assert.equal(K.lines.price_concern, 'Of course, completely understand. Every kitchen is priced individually, so there may be different options depending on what you\'re looking for.');
+  const br = WITH_K({ special: 'browsing', intent: 'other' }, { messages: [WELCOME, inn('Hey'), out('Hi Aoife, thanks for getting back to us.'), inn('just looking at options for now')] });
+  assert.deepEqual([br.step, br.sent, br.handover.needed], ['browsing', K.lines.browsing, false]); assert.doesNotMatch(br.sent, /call out|have a look at your space/);
+  const brQ = WITH_K({ special: 'browsing', intent: 'new_enquiry', hasQuestion: true, answerState: 'answered', reply: 'Yes, we do handleless (Gola), shaker / painted, gloss and matt lacquer.' }, { messages: [WELCOME, inn('just looking for now, what door styles do you do?')] });
+  assert.equal(brQ.step, 'answer'); assert.doesNotMatch(brQ.sent, /call out/, 'answered, no offer');
+  assert.equal(WITH_K({ intent: 'new_enquiry', hasQuestion: true, answerState: 'answered', reply: 'Yes, we do handleless (Gola).' }, { messages: [WELCOME, inn('we want a new kitchen, do you do handleless?')] }).step, 'offer_visit', 'someone interested still gets the offer once');
+  for (const sp of ['price_concern', 'browsing']) assert.equal(run({ special: sp, intent: 'other' }, { ...OFFERED, messages: [...OFFERED.messages, inn('hmm')] }).step, 'none', sp + ': no published knowledge, no line');
+});
+
+test('PHOTOS, VOICE NOTES, FILES: the owner\'s thank-you line, then a person (with a push); read from the message type, not the model; a sticker is not an attachment', () => {
+  const cases = [[[img()], 'photo'], [[img('here is a photo of the space, Tuesday suits')], 'photo'], [[aud()], 'voice'], [[doc()], 'file'], [[inn('see attached'), img()], 'photo']];
+  for (const [burst, kind] of cases) {
+    const r = WITH_K({ intent: 'other' }, { messages: [WELCOME, ...burst] });
+    assert.deepEqual([r.step, r.sent, r.handover.needed], ['attachment', K.lines[kind], true], kind); assert.ok(S.PAUSE_STEPS.has('attachment'));
+  }
+  assert.notEqual(WITH_K({ intent: 'greeting', ack: 'thanks' }, { messages: [WELCOME, stk()] }).step, 'attachment');
+  assert.equal(WITH_K({ intent: 'other' }, { messages: [WELCOME, img()], booked: true }).step, 'attachment', 'booked or not');
+  assert.equal(run({ intent: 'other' }, { messages: [WELCOME, img()] }).step, 'none', 'no published knowledge: as before');
+});
+
+test('A BOOKED CUSTOMER RUNNING LATE, ASKING THE TIME OR A SPECIFIC DAY: the owner\'s line, then a person (with a push); nothing promised or confirmed', () => {
+  for (const [change, k] of [['late', 'late'], ['confirm', 'booking_confirm'], ['move_specific', 'booking_specific']]) {
+    const r = WITH_K({ change, intent: 'scheduling' }, { messages: [WELCOME, inn('...')], booked: true });
+    assert.deepEqual([r.step, r.sent, r.handover.needed], [k, K.lines[k], true], change); assert.ok(S.PAUSE_STEPS.has(k));
+    assert.doesNotMatch(r.sent, /\b(?:confirmed|booked|tomorrow|\d)\b/i);
+  }
+  assert.equal(run({ change: 'late', intent: 'scheduling' }, { messages: [WELCOME, inn('running late')], booked: true }).step, 'none', 'no published knowledge: as before');
+});
+
+test('EVERY NEW LINE IS THE OWNER\'S TO EDIT: listed in the Knowledge Centre, saved, used as written, checked like the other lines, and given a default in knowledge published before they existed', () => {
+  const NEW = ['declined', 'thinking', 'price_concern', 'browsing', 'photo', 'voice', 'file', 'late', 'booking_confirm', 'booking_specific'];
+  for (const k of NEW) { assert.ok(KN.DEFAULT_LINES[k], k); assert.ok(KN.LINE_LABELS[k], k); assert.deepEqual(R.outgoingCheck(KN.DEFAULT_LINES[k], { knowledge: K }).reasons, [], k); }
+  const d = JSON.parse(JSON.stringify(SEED)); d.lines = { ...KN.DEFAULT_LINES, declined: 'No bother at all, thanks for letting us know.', photo: 'Thanks a mill for the photo, the team will have a look.' };
+  const K2 = KN.compile(KN.clean(d), 2), kn2 = { lines: K2.lines, check: (x) => KN.checkAnswer(x, K2), linksText: () => '' };
+  const p = (o, messages) => S.plan({ decision: { ...base, ...o, schedule: { preference: null, opener: '' }, handover: { needed: false, reason: null } }, consult: OFFERED.consult, messages, booked: false, nowMs: NOW, natural: true, kn: kn2, who });
+  assert.equal(p({ visit: 'declined', intent: 'other' }, [...OFFERED.messages, inn('No thanks')]).reply, 'No bother at all, thanks for letting us know.');
+  assert.equal(p({ intent: 'other' }, [WELCOME, img()]).reply, 'Thanks a mill for the photo, the team will have a look.');
+  const old = JSON.parse(JSON.stringify(SEED)); old.lines = { holding: KN.DEFAULT_LINES.holding };            // a knowledge saved before these lines existed
+  assert.equal(KN.clean(old).lines.price_concern, KN.DEFAULT_LINES.price_concern);
+  assert.throws(() => KN.clean({ ...SEED, lines: { ...KN.DEFAULT_LINES, late: 'See you at 5' } }), /cannot contain numbers/, 'the same rules as the other lines: no numbers, prices or addresses');
+});
+
+test('LOL, HAHA AND STICKERS ARE PLEASANTRIES: nothing sent, nobody alerted', () => {
+  const REC = require('../lib/aiReceptionist'), m = (body, type = 'text') => ({ direction: 'in', type, body });
+  for (const b of ['lol', 'haha', 'Hahaha!', 'lol ok', 'hehe', 'lmao 😂']) assert.equal(REC.courtesyOnly([m(b)]), true, b);
+  assert.equal(REC.courtesyOnly([m('', 'sticker')]), true, 'a sticker is like an emoji'); assert.equal(REC.courtesyOnly([m('lol how much is it')]), false);
+});
