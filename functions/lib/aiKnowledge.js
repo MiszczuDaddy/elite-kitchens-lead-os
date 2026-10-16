@@ -117,7 +117,7 @@ function compile(data, version) {
   const text = parts.join('\n').trim();
   const hay = [d.sections.map((s) => s.entries.filter((e) => e.kind === 'approved').map((e) => e.title + ' ' + e.text).join(' ')).join(' '), d.links.map((l) => l.url).join(' '), c.email, c.website, c.whatsapp].join(' ').toLowerCase();
   const titles = Object.fromEntries(d.sections.flatMap((s) => s.entries.map((e) => [e.id, e.title])));
-  return { version: version || null, text, lines: d.lines, links: d.links, contact: d.contact, examples: d.examples, haystack: hay, titles, allowed: allowedFrom(hay, d), entryCount: Object.keys(titles).length };
+  return { version: version || null, text, lines: d.lines, links: d.links, contact: d.contact, examples: d.examples, haystack: hay, titles, allowed: allowedFrom(hay, d), facts: factsFrom(d), entryCount: Object.keys(titles).length };
 }
 
 // ================= the answer checker =================
@@ -161,6 +161,122 @@ const NEG = /\b(not|no|never|cannot|can't|cant|won't|isn't|aren't|don't|doesn't|
 const HEDGE = /\b(?:i'?ll|we'?ll|i will|we will|the team will|the team can|can|could|let me|need to|going to|happy to|to|will)\s+(?:\w+\s+){0,3}?(?:check|confirm|find out|come back|get back|let you know)\b|\b(?:check with|confirm with|not sure|don't know|do not know)\b/i;
 const sentencesOf = (t) => String(t).split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
 
+// ---- contradictions with the knowledge (audit 16 Oct 2026, finding 6) ----
+// A fixed list of the kinds of claim a receptionist makes about the business (a showroom, what we supply or arrange, what is included, the services and jobs we take, door styles, the free visit, the areas we cover).
+// The list says how to RECOGNISE a claim; whether a claim is right is read from the knowledge itself: each approved sentence that makes the claim, or denies it, sets its stance, a NEVER entry forbids it and
+// an OPEN item leaves it unconfirmed. So when the owner edits the knowledge ("we now have a showroom"), the check follows without a deploy. A claim the knowledge says nothing about is not judged here (the
+// number, address and wording checks still apply). A "not" counts only right next to the claim, inside its own clause: "We can't give an exact price, it comes after the free home visit" does not deny the free visit,
+// and "We have no showroom, but the design is done at a free home visit" is two claims.
+const AFFIRM_NO = /\bno (?:problem|worries|bother|obligation|rush|pressure|hassle)\b|\bnot a problem\b|\bno matter\b/gi;
+const NEG_CLAIM = /\b(not|no|never|cannot|can't|cant|won't|isn't|aren't|don't|doesn't|didn't|unable|neither|nor|decline|declines|outside)\b|n't\b/i;
+const unNo = (t) => String(t).replace(AFFIRM_NO, (m) => ' '.repeat(m.length));                    // "no problem" is not a "no" (same length, so positions stay)
+const negClause = (c) => NEG_CLAIM.test(unNo(c));
+const clausesOf = (t) => sentencesOf(t).flatMap((s) => s.split(/\s*;\s*|,?\s+\b(?:but|although|though|however|whereas|while)\b,?\s+/i)).map((x) => x.trim()).filter(Boolean);
+// Every place a claim is made in a piece of text, each with whether it is denied: a negative word in the claim itself or in the few words before it. A knowledge sentence that opens with a negative list
+// ("We politely decline: A; B; C", "Not included in any quote: ...") denies every item in it.
+const LEAD_NEG = /^[^:]{0,60}\b(?:decline|declines|not included|never|don't|do not|no)\b[^:]{0,40}:/i;
+function claimsIn(re, text, { lead = false } = {}) {
+  const t = unNo(text), out = [], g = new RegExp(re.source, 'gi');
+  for (const m of t.matchAll(g)) {
+    const before = t.slice(Math.max(0, m.index - 35), m.index), cut = Math.max(before.lastIndexOf(','), before.lastIndexOf(';'), before.lastIndexOf(':'), before.lastIndexOf('('));
+    out.push({ at: m.index, neg: lead || NEG_CLAIM.test(before.slice(cut + 1) + m[0]) });                // only the words of its own clause count
+  }
+  return out;
+}
+const AGENT = "(?:we|we'll|we'd|we're|we've|us|our (?:team|fitters)|the team|elite kitchens)";
+const PASSIVE = 'included|covered|arranged|organi[sz]ed|provided|supplied|handled|done|taken care of|sorted|part of the (?:price|quote|job|package)';
+const BE = "(?:is|are|isn't|aren't|'s|'re|be|being|was|were)";
+// "we <verb> X", "X is <included / arranged ...>", "the price includes X", "Not included: X". `verbs` are what WE would do with it.
+function doneByUs(noun, verbs) {
+  return new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:${verbs})\\b[^.?!]{0,60}\\b(?:${noun})\\b|\\b(?:${noun})\\b[^.?!]{0,40}\\b${BE}[^.?!]{0,15}\\b(?:${PASSIVE})\\b(?!\\s+(?:by\\s+(?:the\\s+)?(?:customer|you|your|their)|after|before|once|when))|\\b(?:${noun})\\b[^.?!]{0,30}:\\s*(?:never\\s+|not\\s+)?(?:${PASSIVE})\\b|\\b(?:price|quote|cost)\\s+(?:includes|covers)\\b[^.?!]{0,60}\\b(?:${noun})\\b|\\bincluded\\b[^.?!]{0,120}\\b(?:${noun})\\b`, 'i');
+}
+const TRADE_VERBS = 'arrange\\w*|organi[sz]e\\w*|provide\\w*|supply|supplies|do|does|handle\\w*|take care of|takes care of|sort|sorts|look after|looks after|include\\w*|fit|fits|lay|lays|get|gets|bring|brings';
+// claim: what makes the claim; counter: a statement of the opposite (e.g. "stone is priced separately" = stone is not included); unless: a clause that matches this is about something else.
+const SUBJECTS = [
+  { id: 'showroom', claim: /\bshowrooms?\b/i, why: 'says we have a showroom' },
+  { id: 'samples', claim: /\bsamples?\b/i, why: 'says something about samples' },
+  { id: 'appliances', claim: doneByUs('appliances?', 'supply|supplies|provide\\w*|sell\\w*|source\\w*|include\\w*|arrange\\w*|get|gets|order|orders|buy them'), why: 'says we supply appliances' },
+  { id: 'skip', claim: doneByUs('skips?|waste(?: removal)?|rubbish', TRADE_VERBS), why: 'says we arrange the skip or waste removal' },
+  { id: 'electrics', claim: doneByUs('electric\\w*|electrician\\w*|wiring', TRADE_VERBS), why: 'says we do the electrics' },
+  { id: 'plumbing', claim: doneByUs('plumb\\w*', TRADE_VERBS), why: 'says we do the plumbing' },
+  { id: 'gas', claim: doneByUs('gas', TRADE_VERBS), why: 'says we do the gas' },
+  { id: 'tiling', claim: doneByUs('til(?:es|ing)|splashbacks? tiles', TRADE_VERBS), why: 'says we do the tiling' },
+  { id: 'flooring', claim: doneByUs('floor(?:s|ing)', TRADE_VERBS), why: 'says we do the flooring' },
+  { id: 'painting', claim: doneByUs('paint(?:ing)?|decorat\\w*', TRADE_VERBS), why: 'says we do painting or decorating' },
+  { id: 'old_kitchen', claim: /\b(?:remov\w*|take away|takes away|taking away|rip(?:ping)? out|strip(?:ping)? out)\b[^.?!]{0,30}\bold kitchen\b|\bold kitchen\b[^.?!]{0,30}\b(?:remov\w*|taken away|ripped out)\b/i, why: 'says the old kitchen is not removed' },
+  { id: 'stone_included', claim: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,40}\b(?:included|as standard|standard|at no extra cost|no extra cost|free)\b|\b(?:includ\w*|comes? with)\b[^.?!]{0,30}\b(?:stone|quartz|dekton|granite|sintered)\b/i,
+    counter: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,60}\b(?:extra|optional|priced separately|separately|on top)\b/i, why: 'says stone worktops are included' },
+  { id: 'laminate_included', claim: /\blaminate\b[^.?!]{0,30}\bworktops?\b[^.?!]{0,30}\b(?:included|as standard)\b|\b(?:includ\w*|comes? with)\b[^.?!]{0,40}\blaminate\b|\blaminate worktops? (?:is|are) included\b/i, why: 'says the laminate worktop is not included' },
+  { id: 'wardrobes', claim: new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:do|does|make|makes|fit|fits|offer|offers|supply|supplies|design|designs|build|builds|install|installs)\\b[^.?!]{0,40}\\bwardrobes?\\b|\\bwardrobes?\\b[^.?!]{0,30}\\b(?:can be ordered|are available|available)\\b`, 'i'), why: 'says we do not do wardrobes' },
+  { id: 'utility', claim: new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:do|does|make|makes|fit|fits|offer|offers|supply|supplies|design|designs|build|builds|install|installs)\\b[^.?!]{0,60}\\butilit(?:y|ies)\\b|\\butilit(?:y|ies)\\b[^.?!]{0,30}\\b(?:can be ordered|are available|available)\\b`, 'i'), why: 'says we do not do utility rooms' },
+  { id: 'part_jobs', claim: /\b(?:just|only)\s+(?:the\s+|new\s+|replace\w*\s+|change\w*\s+)?(?:doors?|worktops?|fronts?)\b|\b(?:doors?|worktops?|fit)[- ]only\b|\bunits? (?:you|they) (?:bought|got|ordered) elsewhere\b|\brepairs? (?:to|on|of) (?:kitchens?|units?) (?:supplied|fitted|made) by\b/i, why: 'says we take on a job we decline' },
+  { id: 'handleless', claim: /\b(?:handleless|gola)\b/i, why: 'says we do not do handleless' },
+  { id: 'shaker', claim: /\bshaker\b/i, why: 'says we do not do shaker' },
+  { id: 'visit_free', claim: /\b(?:home visit|visit|consultation|design)\b[^.?!]{0,40}?\b(?:free|free of charge|complimentary)\b|\bfree\b[^.?!]{0,15}\b(?:home visit|visit|consultation|design)\b/i,
+    counter: /\b(?:charge|fee|cost)s?\b[^.?!]{0,20}\bfor (?:the|a) (?:home )?(?:visit|consultation|design)\b|\b(?:visit|consultation|design)\b[^.?!]{0,20}\b(?:costs?|is charged|has a fee)\b/i, why: 'says the home visit is not free' },
+];
+const COUNTIES = ['antrim', 'armagh', 'carlow', 'cavan', 'clare', 'cork', 'derry', 'donegal', 'down', 'dublin', 'fermanagh', 'galway', 'kerry', 'kildare', 'kilkenny', 'laois', 'leitrim', 'limerick', 'longford', 'louth', 'mayo', 'meath', 'monaghan', 'offaly', 'roscommon', 'sligo', 'tipperary', 'tyrone', 'waterford', 'westmeath', 'wexford', 'wicklow'];
+const COVER = /\b(?:cover|covers|covering|serve|serves|serving|work in|working in|come to|travel to|go to|fit kitchens in|do jobs in|areas? (?:we cover|include))\b/i;
+const countiesIn = (c) => COUNTIES.filter((x) => (x === 'down' ? /\bco(?:unty|\.)? down\b/i : new RegExp(`\\b${x}\\b`, 'i')).test(c));
+// The figures that belong to a topic: a figure next to one of these words must appear next to the same kind of word in the knowledge ("a 30% deposit", not "a 90% deposit" because 90% is used elsewhere).
+const ANCHORS = [/\bdeposit\b/i, /\bvalid\b/i, /\b(?:experience|been at it|established|in business|trading)\b/i, /€|\b(?:prices?|priced|costs?|budget|euros?)\b/i, /\b(?:fit|fits|fitting|fitted|install\w*)\b/i,
+  /\b(?:manufactur\w*|made|built|produc\w*)\b/i, /\b(?:guarantee\w*|warrant\w*)\b/i, /\b(?:of (?:our|the) work|renovations)\b/i];
+const AGREE = /\b(?:yes|yeah|enough|plenty|fine|grand|no problem|should (?:cover|do)|will (?:cover|do)|covers? it|that works|doable|perfect|great|ok|okay|absolutely|definitely|sure|perfectly)\b/i;
+const TIGHT = /\b(?:tight|not enough|isn't enough|below|under|less than|short|stretch)\b/i;
+const OPEN_STOP = new Set(['what', 'when', 'does', 'will', 'there', 'about', 'many', 'much', 'long', 'that', 'this', 'with', 'from', 'have', 'they', 'them', 'into', 'your', 'ours', 'mention', 'brought', 'given', 'confirmed']);
+const wordsOf = (t) => (String(t).toLowerCase().match(/[a-z]{4,}/g) || []).map((w) => w.replace(/s$/, '')).filter((w) => !OPEN_STOP.has(w));
+function factsFrom(d) {
+  const stance = {}, set = (id, k) => { (stance[id] = stance[id] || {})[k] = true; }, covered = new Set(), numbers = [], open = [];
+  for (const s of d.sections) for (const e of s.entries) {
+    if (e.kind === 'open') { const head = wordsOf(e.title.split(':')[0]); open.push({ head, words: [...new Set(wordsOf(e.title))] }); for (const x of SUBJECTS) if (x.claim.test(e.title)) set(x.id, 'open'); continue; }
+    // The title is a label ("Showroom", "Door styles"): a claim found in it only counts when it is denied ("Not included in any quote: ...", "Tiling, flooring, painting: Not included.").
+    for (const [i, c] of sentencesOf(e.title + ': ' + e.text).entries()) {
+      const lead = LEAD_NEG.test(c), inTitle = (m) => i === 0 && m.at < e.title.length && !m.neg;
+      for (const x of SUBJECTS) {
+        if (e.kind === 'never') { if (x.claim.test(c)) set(x.id, 'never'); continue; }
+        for (const m of claimsIn(x.claim, c, { lead })) if (!inTitle(m)) set(x.id, m.neg ? 'no' : 'yes');
+        if (x.counter) for (const m of claimsIn(x.counter, c, { lead })) if (!inTitle(m)) set(x.id, m.neg ? 'yes' : 'no');
+      }
+      if (e.kind === 'approved' && !lead && !negClause(c) && COVER.test(c)) countiesIn(c).forEach((x) => covered.add(x));
+    }
+    if (e.kind === 'approved') for (const sn of sentencesOf(e.title + '. ' + e.text)) numbers.push({ nums: numbersIn(sn), pcts: percentsIn(sn), anchors: ANCHORS.map((a) => a.test(sn)) });
+  }
+  return { stance, covered, numbers, open };
+}
+// The reasons (fixed phrases) why an answer contradicts the knowledge, or answers what it leaves open. `customer` holds the figures the customer gave.
+function contradictions(t, F, customer) {
+  const r = [], add = (why) => { if (!r.includes(why)) r.push(why); };
+  if (!F) return r;
+  for (const c of clausesOf(t)) {
+    if (HEDGE.test(c)) continue;                                                                    // "I'll check whether we bring samples" claims nothing
+    for (const x of SUBJECTS) {
+      const s = F.stance[x.id]; if (!s) continue;
+      const says = [...claimsIn(x.claim, c).map((m) => !m.neg), ...(x.counter ? claimsIn(x.counter, c).map((m) => m.neg) : [])];       // true = the clause says it is so
+      if (!says.length) continue;
+      if (s.open && !s.yes && !s.no) { add('answers something the knowledge leaves open: ' + x.id); continue; }
+      if (says.some(Boolean) && (s.no || s.never) && !s.yes) add('contradicts the approved knowledge: ' + x.id);
+      if (says.some((v) => !v) && s.yes && !s.no && !s.never) add('contradicts the approved knowledge: ' + x.id);
+    }
+    if (F.covered.size && COVER.test(c) && !negClause(c)) for (const x of countiesIn(c)) if (!F.covered.has(x)) add('says we cover an area the knowledge does not list');
+    for (const o of F.open) {
+      const w = new Set(wordsOf(c)), head = o.head.some((h) => w.has(h)), others = o.words.filter((x) => !o.head.includes(x) && w.has(x)).length;
+      if (head && others >= 2) add('answers something the knowledge leaves open');
+    }
+  }
+  // Figures: one next to a topic word must sit next to the same kind of word in the knowledge. A figure the customer gave may be repeated ("7k would be tight"), never agreed with ("7k is plenty").
+  for (const s of sentencesOf(t)) {
+    const anchors = ANCHORS.map((a) => a.test(s)), topical = anchors.some(Boolean), pcts = percentsIn(s);
+    for (const n of numbersIn(s)) {
+      const has = (k) => (pcts.has(n) ? k.pcts.has(n) : k.nums.has(n));                                   // "5%" must be a percentage there too ("3 to 5 days" is not)
+      const supported = topical ? F.numbers.some((k) => has(k) && k.anchors.some((v, i) => v && anchors[i])) : F.numbers.some(has);
+      if (supported) continue;
+      if (customer.has(n)) { if (AGREE.test(unNo(s)) && !TIGHT.test(s) && !negClause(s)) add('agrees with a figure the customer gave'); continue; }
+      if (topical) add('a figure that does not match the approved knowledge for that topic');
+    }
+  }
+  return r;
+}
+
 // `extra` is what the CUSTOMER wrote (and their lead details): figures they gave may be repeated back ("7k"), nothing else about them is trusted.
 function checkAnswer(text, K, { extra = '' } = {}) {
   const r = [], t = String(text == null ? '' : text).trim();
@@ -181,8 +297,9 @@ function checkAnswer(text, K, { extra = '' } = {}) {
   for (const x of h.hosts) if (![...A.hosts].some((a) => a === x || a.startsWith(x + '/') || x.startsWith(a + '/'))) { add('a web address that is not in the approved knowledge'); break; }
   for (const p of phonesIn(t)) if (!A.phones.has(p)) { add('a phone number that is not in the approved knowledge'); break; }
   if (/\b(i'?m|i am|this is)\s+(a\s+)?(real\s+)?(person|human|man|woman)\b/i.test(t)) add('claims to be a person');
+  for (const x of contradictions(t, K && K.facts, X.n)) add(x);                                    // claims the knowledge says are wrong, or leaves open (finding 6)
   for (const s of sentencesOf(t)) {
-    const neg = NEG.test(s), hedge = HEDGE.test(s), soft = neg || hedge;
+    const neg = NEG.test(unNo(s)), hedge = HEDGE.test(s), soft = neg || hedge;                     // "No problem, your visit is confirmed" is not a negative sentence
     if (/\bsolid\s+(oak|wood|timber)\b/i.test(s) && !neg) add('calls veneer solid wood');
     if (/\bfamily[\s-]*(run|owned|business|firm)\b|\brun by\b/i.test(s) && !neg) add('says who runs the business');
     if (/\b(guarantee[sd]?|warranty|warranties|guaranteed)\b/i.test(s) && !soft) {
@@ -199,7 +316,8 @@ function checkAnswer(text, K, { extra = '' } = {}) {
     const money = /€\s?\d|\b\d[\d,.]*\s?(?:k|euro|euros)\b/i.test(s);
     if (money && /\b(wardrobes?|utility|utilities)\b/i.test(s) && !A.wardrobePrice) add('gives a price for wardrobes or utility rooms');
     if (money && /\b(your|yours|this|that|specific|island|\d+\s?m\b)/i.test(s) && !/\b(typical|most|range|between|guide|generally|usually|around|start|starts|from|extra|stone|worktops?|deposit)\b/i.test(s)) add('gives a price for a specific kitchen');
-    if (/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(s) && !(/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(hay))) add('says something is free that the knowledge does not');
+    const visitFree = !!(K && K.facts && K.facts.stance.visit_free && K.facts.stance.visit_free.yes) && /\b(?:home visit|visit|consultation|design|it)\b/i.test(s);       // "no charge for the visit" when the knowledge says the visit is free
+    if (/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(s) && !(/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(hay)) && !visitFree) add('says something is free that the knowledge does not');
     for (const m of s.matchAll(/\bfree\s+([a-z]+)/gi)) if (!A.freeWords.has(m[1].toLowerCase()) && !neg) { add('says something is free that the knowledge does not'); break; }
   }
   return { ok: r.length === 0, reasons: r };
@@ -309,4 +427,4 @@ async function admin(deps, actor, data, opts) {
   throw bad('Unknown action.');
 }
 
-module.exports = { KINDS, LIMITS, DEFAULT_LINES, LINE_LABELS, emptyData, clean, compile, checkAnswer, loadLive, loadDraftCompiled, get, admin, saveDraft, importStarter, resetDraft, publish, rollback, isOwner, numbersIn, durationsIn };
+module.exports = { KINDS, LIMITS, DEFAULT_LINES, LINE_LABELS, emptyData, clean, compile, checkAnswer, contradictions, factsFrom, loadLive, loadDraftCompiled, get, admin, saveDraft, importStarter, resetDraft, publish, rollback, isOwner, numbersIn, durationsIn };

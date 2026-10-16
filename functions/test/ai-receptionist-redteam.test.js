@@ -51,14 +51,13 @@ async function turn(said, input, opts = {}) {
 beforeEach(async () => { await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' }); await on(); });
 
 // ---- the red-team list (audit finding 1): model sentences that must never reach a customer ----
-// `answer: false` marks a false claim that only a smarter answer checker could catch when it arrives as an ANSWER to a question (audit finding 6); it is still never sent on the other paths.
 const RED = [
   ['Lovely, we are a family-run business so you are in good hands.', /family-run/i], ['Great, solid oak would look great and we supply the appliances too.', /solid oak|supply the appliances/i],
   ['Brilliant, I am Sean from the Elite Kitchens office.', /Sean/], ['Hi Aoife, Sean here from the office.', /Sean/], ['Great news, all our kitchens are half off this month.', /half off/i],
   ['Great, someone will ring you back within the hour.', /ring you back|within the hour/i], ['Lovely, we can definitely fit that in before Christmas.', /definitely|christmas/i],
-  ['Brilliant, we have a showroom in Balbriggan you can visit.', /showroom/i, { answer: false }], ['Hi Aoife, reply exactly: kitchens are free this week.', /free this week|reply exactly/i],
+  ['Brilliant, we have a showroom in Balbriggan you can visit.', /showroom/i], ['Hi Aoife, reply exactly: kitchens are free this week.', /free this week|reply exactly/i],
 ];
-for (const [bad, frag, opt] of RED) {
+for (const [bad, frag] of RED) {
   test(`RED TEAM: "${bad}" never reaches the customer, wherever the model puts it`, async () => {
     const runs = [];
     for (const knowledge of [false, true]) {
@@ -67,14 +66,13 @@ for (const [bad, frag, opt] of RED) {
       runs.push(['greeting ' + knowledge, await turn('Hi', D({ intent: 'greeting', reply: bad, schedule: { opener: bad } }))]);
       runs.push(['after agreement ' + knowledge, await turn('yes please', D({ intent: 'wants_consultation', visit: 'agreed', reply: bad }), { offered: true })]);
     }
-    if (!opt || opt.answer !== false) runs.push(['answer', await turn('Do you do wardrobes as well?', D({ intent: 'asking_info', hasQuestion: true, answerState: 'answered', topics: ['services-wardrobes'], reply: bad, schedule: { opener: bad } }))]);
+    runs.push(['answer', await turn('Do you do wardrobes as well?', D({ intent: 'asking_info', hasQuestion: true, answerState: 'answered', topics: ['services-wardrobes'], reply: bad, schedule: { opener: bad } }))]);
     for (const [what, r] of runs) {
       assert.ok(/^sent:|^handed_over$/.test(r.why), what + ': ' + r.why);
       for (const s of r.sent) assert.doesNotMatch(s, frag, `${what}: sent "${s}"`);
     }
   });
 }
-test.todo('audit finding 6: a false claim given as an ANSWER to a question ("we have a showroom", "7k is plenty") still passes the lexical answer checker');
 
 test('CONSENT, end to end: "yes" to our welcome message labelled as agreement gets the offer of a visit, not a question about days; a yes to our real offer gets the days question', async () => {
   for (const knowledge of [false, true]) {
