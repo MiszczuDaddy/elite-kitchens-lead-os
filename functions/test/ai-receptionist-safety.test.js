@@ -175,6 +175,16 @@ test('A PERSON WRITING (finding 2): the staff send paths record the person BEFOR
   const ro = src('reopen.js'); assert.ok(ro.indexOf('noteHuman(db, phone)') < ro.indexOf('wa.sendTemplateByName(phone'), 'Reopen');
 });
 
+test('DEPLOYMENT: the functions through which a person writes have their own stage, and it touches nothing else', () => {
+  const sh = fs.readFileSync(path.join(__dirname, '../../scripts/deploy-quote-sending.sh'), 'utf8').replace(/\r\n/g, '\n'), idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
+  const list = /^STAFFSEND_FUNCS="([^"]*)"/m.exec(sh); assert.ok(list); const fns = list[1].trim().split(/\s+/);
+  assert.deepEqual([...fns].sort(), ['deliverQuote', 'quoteChannels', 'reopenConversation', 'retryQuoteDelivery', 'sendMedia', 'sendReply']);
+  for (const f of fns) assert.match(idx, new RegExp('^exports\\.' + f + '\\s*=\\s*onCall\\b', 'm'), f + ' is a callable in functions/index.js');
+  const i = sh.indexOf('\n  staffsend)\n'); assert.ok(i >= 0); const stage = sh.slice(i, sh.indexOf('\n    ;;', i));
+  assert.match(stage, /deploy_functions \$STAFFSEND_FUNCS/); assert.match(stage, /check_routing \$STAFFSEND_FUNCS/); assert.equal(/leadIntake|claimAccess|webhook|add-iam-policy-binding|access-compat/.test(stage.replace(/The Meta lead intake, the sign-in check and the webhook are NOT touched\./, '')), false, 'nothing else is deployed or made public');
+  assert.ok(stage.indexOf('check_settings') < stage.indexOf('confirm "') && stage.indexOf('confirm "') < stage.indexOf('deploy_functions'), 'checks, then the question, then the deploy');
+});
+
 // ====================== after the send ======================
 test('AFTER THE SEND (finding 4): if the run dies after WhatsApp accepted the message, the next run finishes the job; nothing is sent twice and the owner is told', async () => {
   const pref = { status: 'available', weeks: 'next', days: ['tuesday'], text: 'Tuesday works' };
