@@ -136,8 +136,10 @@ test('THE REPLY DELAY: 30 seconds by default; one number in the settings documen
   await on({ replyDelaySeconds: 12 }); assert.equal((await ai.loadSettings(db)).replyDelaySeconds, 12); await on({ replyDelaySeconds: 9999 }); assert.equal((await ai.loadSettings(db)).replyDelaySeconds, 30, 'out of range in the document: the default');
   await on({ replyDelaySeconds: 12 }); await newLead(PH); const t = await says(PH, 'Hi, interested in a kitchen', NOW), c = clock(t + 2 * SEC);
   assert.equal(await event(model(decision({ reply: 'Thanks.' })), waFake(), pushFake(), PH, t, c), 'sent:offer_visit'); assert.deepEqual(c.sleeps, [12000]);
-  // the backup uses the same 30 second rule: it does not answer a message younger than that
-  await newLead(PH2); const u = await says(PH2, 'Hi, interested in a kitchen', NOW + 600 * SEC); assert.equal((await REC.sweep(deps(model(), waFake(), pushFake()), u + 20 * SEC)).wait, 1);
+  // the backup uses the SAME reply delay (12 seconds here, as set above): it does not answer a message younger than that, and answers one that is older
+  await newLead(PH2); const u = await says(PH2, 'Hi, interested in a kitchen', NOW + 600 * SEC); const wb = waFake();
+  assert.equal((await REC.sweep(deps(model(), wb, pushFake()), u + 8 * SEC)).wait, 1); assert.equal(wb.sent.length, 0);
+  assert.equal((await REC.sweep(deps(model(decision({ reply: 'Thanks.' })), wb, pushFake()), u + 20 * SEC))['sent:offer_visit'], 1); assert.equal(wb.sent.length, 1);
 });
 
 test('WIRING: the event function fires on a new message in any chat and goes on only for a customer message; no retry, no always-on instance, a long enough timeout; the backup runs every 5 minutes; the deploy stage includes it', () => {

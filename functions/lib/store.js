@@ -22,11 +22,15 @@ async function storeInbound(db, m) {
     } else if (m.name && !conv.data().name) {
       tx.update(convRef, { name: m.name }); tx.set(contactRef, { name: m.name }, { merge: true });
     }
+    // The next number in this conversation (audit 16 Oct 2026, finding 9C). WhatsApp times are whole seconds, so two messages in the same second share one time and cannot tell "answered" from "not yet";
+    // the number can. It is taken inside this transaction, and a duplicate delivery returned above, so every customer message gets exactly one number. A conversation from before this existed starts at 1.
+    const seq = (conv.exists && Number.isInteger(conv.data().inboundSeq) ? conv.data().inboundSeq : 0) + 1;
     tx.set(msgRef, { wamid: m.wamid, direction: 'in', type: m.type, body: m.body, media: m.media || null,
-      status: 'received', error: null, createdAt: at });
+      status: 'received', error: null, createdAt: at, seq });
     const prevIn = conv.exists && conv.data().lastInboundAt;
     tx.set(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: preview(m.body), lastMessageType: m.type, lastMessageDirection: 'in',
       unreadCount: FieldValue.increment(1),       // a duplicate delivery returned earlier, so retries never double-count
+      inboundSeq: seq,
       lastInboundAt: prevIn && prevIn.toMillis() > at.toMillis() ? prevIn : at }, { merge: true });
     return true;
   });

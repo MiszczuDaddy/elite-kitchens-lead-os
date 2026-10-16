@@ -209,7 +209,7 @@ test('AFTER THE SEND (finding 4): a push that could not be delivered is tried ag
   const d = decision({ intent: 'complaint', handover: { needed: true, reason: 'upset' } });
   const w = waFake(), p = pushFake(1), m = model(d);
   assert.equal(await run(m, w, p), 'error'); assert.equal(w.sent.length, 1); assert.equal(w.sent[0], L.complaint); assert.equal(p.events.length, 0);
-  assert.equal(await run(m, w, p, NOW + 5 * 60 * SEC), 'already_sent'); assert.equal(w.sent.length, 1); assert.equal(p.events.length, 1, 'told on the second run'); assert.equal(p.events[0].sourceId, PH + '|' + (NOW - 60 * SEC));
+  assert.equal(await run(m, w, p, NOW + 5 * 60 * SEC), 'already_sent'); assert.equal(w.sent.length, 1); assert.equal(p.events.length, 1, 'told on the second run'); assert.equal(p.events[0].sourceId, PH + '|s1', 'keyed by the customer message number');
   assert.equal((await conv()).receptionist.paused, 'handover: complaint: upset customer');
   // a push that never works: three tries, then the chat is still finished (paused, answered), not stuck forever
   await arm({ text: 'This is a disgrace' }); const w2 = waFake(), p2 = pushFake(99), m2 = model(d);
@@ -221,5 +221,5 @@ test('AFTER THE SEND (finding 4): the normal send still records everything, once
   await arm({ text: 'My kitchen door fell off, this is terrible' });
   const w = waFake(), p = pushFake(); assert.equal(await run(model(decision({ intent: 'complaint', handover: { needed: true, reason: 'upset' } })), w, p), 'sent:complaint');
   const c = (await conv()).receptionist; assert.deepEqual([c.count, c.day, c.last.step, c.handledMs], [1, ai.dayId(NOW), 'complaint', NOW - 60 * SEC]); assert.equal(c.paused, 'handover: complaint: upset customer'); assert.equal(p.events.length, 1);
-  const cl = (await claims())[0]; assert.deepEqual([cl.id, cl.state, cl.effectsDone], ['auto_' + (NOW - 60 * SEC), 'sent', true]);
+  const cl = (await claims())[0]; assert.deepEqual([cl.id, cl.state, cl.effectsDone], ['auto_s1', 'sent', true]); assert.equal(c.handledSeq, 1);
 });

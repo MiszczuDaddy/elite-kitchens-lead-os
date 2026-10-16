@@ -9,6 +9,8 @@
 #                                                closed-window quote goes in the approved quotation template. Email stays as it is.
 #   ./scripts/deploy-quote-sending.sh staffsend  the 6 functions through which a PERSON writes to a customer (sendReply, sendMedia, reopenConversation, deliverQuote, retryQuoteDelivery, quoteChannels): they now note "a person is
 #                                                writing" on the chat BEFORE WhatsApp is contacted, so the automatic receptionist can never talk over you. What they send is unchanged. Run it with "receptionist".
+#   ./scripts/deploy-quote-sending.sh webhook   ONLY the live WhatsApp webhook (finding 9C): every new customer message is stored with its number in the conversation, so two messages in the same second or
+#                                                a late one are told apart. Nothing else about it changes. Without it the receptionist keeps working by message time, as before. ASK the owner first.
 #   ./scripts/deploy-quote-sending.sh older      the audit fixes in the five OLDER functions (sendReply, sendMedia, startConversation, claimAccess, leadIntake): one request =
 #                                                one message, a Meta 5xx is never retried by itself, and staff access that expires and is renewed.
 #                                                Run it BEFORE "rules". It saves the revisions it replaces.
@@ -56,6 +58,7 @@ NEW_FUNCS="reopenConversation deliverQuote retryQuoteDelivery resolveQuoteDelive
 QUOTE_FUNCS="createCustomer saveQuoteSettings setQuoteNumbering createQuote saveQuoteDraft sendQuote acceptQuote declineQuote reopenQuote reviseQuote discardQuoteDraft deleteQuoteDraft setQuoteNotes quotePdfUrl"
 MAIL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"          # the functions that read the MAIL_* settings
 CHANNEL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"       # the functions that send (M7: they read the quotation template settings too)
+WEBHOOK_FUNCS="webhook"                                                                            # the one function that stores customer messages (review of 16 Oct 2026, finding 9C)
 STAFFSEND_FUNCS="sendReply sendMedia reopenConversation deliverQuote retryQuoteDelivery quoteChannels"          # the functions through which a person writes to a customer (review of 16 Oct 2026, finding 2)
 OLDER_FUNCS="sendReply sendMedia startConversation claimAccess leadIntake"           # older functions that the audit fixes touch (findings 5 and 6, second audit 6); all are public already
 PRE_AUDIT="${PRE_AUDIT:-6baa6ca}"                                                  # the last commit before the audit fixes: the code "back" redeploys (docs/PHASE6_1_PLAN.md, "Rollback")
@@ -75,7 +78,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,44p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,47p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -237,6 +240,19 @@ case "${1:-}" in
     deploy_functions $CHANNEL_FUNCS
     check_reachable "$CHANNEL_FUNCS"
     echo "Done. The live screen is unchanged. To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
+    ;;
+  webhook)
+    check_settings; check_access; check_routing $WEBHOOK_FUNCS
+    echo "Function: $WEBHOOK_FUNCS (the LIVE WhatsApp webhook)"
+    echo "The only change: every NEW customer message is stored with its number in the conversation, so the receptionist can tell two messages in the same second, or a late one, apart. The signature check, the"
+    echo "duplicate check by message id, the unread count and the answer to Meta are unchanged. The Meta lead intake, the sign-in check and the push functions are NOT touched."
+    confirm "Redeploy the LIVE WhatsApp webhook?"
+    install
+    echo "==> saving the revisions this replaces"
+    save_revisions $WEBHOOK_FUNCS
+    deploy_functions $WEBHOOK_FUNCS
+    check_reachable "$WEBHOOK_FUNCS"
+    echo "Done. Send yourself one WhatsApp message and check it appears in Elite OS. To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;
   staffsend)
     check_settings; check_access; check_routing $STAFFSEND_FUNCS
