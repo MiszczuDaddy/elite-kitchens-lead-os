@@ -27,7 +27,8 @@ const on = async () => {
 };
 const publishSeed = async () => { await KN.importStarter({ db, owners: OWNERS }, owner, {}, { nowMs: NOW }); await KN.publish({ db, owners: OWNERS }, owner, { note: 'start' }, { nowMs: NOW }); };
 // A Meta lead's chat: our welcome template, the receptionist switched on, then (optionally) our offer of a visit, then what the customer just wrote. `t` is when the check runs.
-async function chat(phone, said, t, { offered = false } = {}) {
+async function chat(phone, said, t, { offered = false, booked = false, type = 'text' } = {}) {
+  if (booked) await db.collection('appointments').doc('ap_' + phone).set({ phone, status: 'scheduled', type: 'consultation', version: 1, start: ts(t + 3 * 86400e3), end: ts(t + 3 * 86400e3 + 3600e3), customerName: 'Aoife' });
   await db.doc('contacts/' + phone).set({ phone, name: 'Aoife Kavanagh', projectType: 'Kitchen', location: 'Swords', createdAt: ts(t - 9e8) });
   await db.doc('conversations/' + phone).set({ phone, name: 'Aoife Kavanagh', inboxStatus: 'inbox', createdAt: ts(t - 9e8), updatedAt: ts(t - 1e6), lastInboundAt: ts(t - 3600e3), lastMessageDirection: 'out' });
   await db.collection(`conversations/${phone}/messages`).add({ direction: 'out', type: 'template', body: '[template: welcome] Hi Aoife, thanks for your enquiry with Elite Kitchens.', createdAt: ts(t - 4000e3) });
@@ -37,7 +38,7 @@ async function chat(phone, said, t, { offered = false } = {}) {
     await db.collection(`conversations/${phone}/messages`).add({ direction: 'out', type: 'text', body: L.visit_offer, auto: true, createdAt: ts(t - 400e3) });
     await db.doc('conversations/' + phone).update({ consult: { stage: 'offered_visit', offered: true } });
   }
-  await db.collection(`conversations/${phone}/messages`).add({ direction: 'in', type: 'text', body: said, createdAt: ts(t - 120e3) });
+  await db.collection(`conversations/${phone}/messages`).add({ direction: 'in', type, body: said, createdAt: ts(t - 120e3) });
   await db.doc('conversations/' + phone).update({ lastInboundAt: ts(t - 120e3), lastMessageDirection: 'in' });
 }
 // One customer message answered by the real receptionist with the given (fake) decision. Returns what happened and what WhatsApp received.
@@ -46,7 +47,7 @@ async function turn(said, input, opts = {}) {
   const phone = '3538711' + String(20000 + (n++)), t = NOW + n * 10000, w = fakeWa();
   await chat(phone, said, t, opts);
   const why = await REC.processChat({ db, wa: w, model: fake(input), owners: OWNERS, push: push() }, phone, t);
-  return { why, sent: w.sent.map((x) => x.body) };
+  return { why, sent: w.sent.map((x) => x.body), phone };
 }
 beforeEach(async () => { await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' }); await on(); });
 
@@ -103,4 +104,18 @@ test('AVAILABILITY, end to end: "I work all day though" with a made-up "evenings
   }
   const conv = (await db.collection('conversations').get()).docs.map((d) => d.data());
   assert.ok(conv.every((c) => !(c.consult && c.consult.needsBooking)), 'no booking request was created');
+});
+
+test('PLEASANTRIES, end to end (200-conversation audit, 16 Oct 2026): "Thanks" labelled "other" is not handed over in silence; a real decline, an unclear remark and a photo still go to a person', async () => {
+  const quiet = [['Thanks', { offered: true }], ['Thanks, see you then', { booked: true }], ['ok great 👍', { offered: true }]];
+  for (const [said, opts] of quiet) {
+    const r = await turn(said, D({ intent: 'other', ack: 'thanks' }), opts);
+    assert.equal(r.why, 'quiet_skip', said); assert.deepEqual(r.sent, [], said);
+    const rec = (await db.doc('conversations/' + r.phone).get()).data().receptionist;
+    assert.ok(!rec.paused, said + ': still the receptionist\'s chat'); assert.ok(rec.handledMs > 0, said + ': marked handled');
+  }
+  for (const [said, opts] of [['ok thats a bit more than I thought', { offered: true }], ['No thanks', { offered: true }], ['', { offered: true, type: 'image' }]]) {
+    const r = await turn(said, D({ intent: 'other' }), opts);
+    assert.equal(r.why, 'handed_over', JSON.stringify(said));
+  }
 });

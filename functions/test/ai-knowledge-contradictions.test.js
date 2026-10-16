@@ -92,3 +92,10 @@ test('A NAME THE KNOWLEDGE USES IS NOT A PERSON: "It\'s Robson Oak as standard" 
   for (const t of ['I\'m Sean from the office.', 'Hi Aoife, Sean here.', 'My name is Mary.']) assert.equal(R.outgoingCheck(t, { knowledge: K }).ok, false, t);
   assert.equal(R.outgoingCheck('It\'s Robson Oak as standard.', { knowledge: null }).ok, false, 'without knowledge there are no known names: still blocked (fails safe)');
 });
+
+test('FALSE BLOCKS FROM THE 200-CONVERSATION AUDIT (16 Oct 2026) PASS: "free with no obligation" is not calling something else free, and a claim stops at a comma that starts a new one', () => table(
+  [['Stone worktops are included as standard.'], ['Yes, appliances are included in the price.'], ['We arrange the skip for you.'], ["The laminate worktop isn't included."], ['We do a free quote.'], ['Free delivery on all kitchens.'],
+    ['The price includes design, fitting and the skip.'], ['Tiling is included.']],
+  [['Nothing upfront. The home visit is free with no obligation, and a 30% deposit is only paid if you accept the quote.', 'Do I have to pay anything upfront?'],
+    ['Granite isn\'t included, laminate worktops are as standard. Stone like granite, quartz or Dekton is an optional extra, priced on top.', 'Is granite included?'],
+    ['Laminate is included, stone costs extra.'], ['We fit the kitchen, tiling is up to you.'], ['Laminate worktops are included, appliances aren\'t.'], ['The visit is free and there\'s no obligation.']]));

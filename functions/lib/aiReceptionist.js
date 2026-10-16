@@ -36,6 +36,14 @@ const ACTOR = { kind: 'system', id: 'receptionist' };
 // Step A: the receptionist offers a home visit ONCE and asks about days only after the customer has agreed; cancel_ask / tentative / ack_only / offer steps do not pause the chat (the customer may answer).
 // An ordinary message that needs no reply and no person (e.g. "thanks" from a customer who is already booked): not answered, not handed over.
 const QUIET_INTENTS = new Set(['greeting', 'new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general']);
+// A message that is ONLY a pleasantry ("Thanks", "ok great", "Thanks, see you then", a thumbs-up) needs no answer and no person, whatever intent the model gave it (the audit run of 16 Oct 2026: the model
+// labelled "Thanks" as "other" and the owner was alerted for a thank-you). Read from the customer's own words; anything else in the message (a question, "not now", a photo) is not a pleasantry.
+const COURTESY_ONE = String.raw`(?:ok(?:ay)?|k|kk|grand|great|brilliant|lovely|perfect|super|cool|nice(?: one)?|sound|class|deadly|fab(?:ulous)?|excellent|fantastic|amazing|good|cheers|ta|thanks?|thank you|thx|thank u|ty|many thanks|thanks? (?:a lot|a million|very much|so much|again|for that|for (?:the|your) (?:help|reply|info|message))|thank you (?:very much|so much|again)|no worries|no problem|will do|got it|noted|understood|see you (?:then|soon|on \w+)|talk (?:soon|later)|speak soon|have a (?:good|great|nice) (?:day|one|weekend|evening))`;
+const COURTESY = new RegExp(`^${COURTESY_ONE}(?:\\s+${COURTESY_ONE})*$`, 'i');          // one or more of them: "ok great", "perfect thanks"
+function courtesyOnly(messages) {
+  if (!messages.length || messages.some((m) => m.type && m.type !== 'text')) return false;
+  return messages.every((m) => { const parts = String(m.body || '').toLowerCase().replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ').split(/[,.!]+|\s+(?:and|&)\s+/).map((x) => x.trim()).filter(Boolean); return parts.every((p) => COURTESY.test(p)); });
+}
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : typeof t === 'number' ? t : 0);
 const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...extra }));
 const hourOf = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(new Date(t)));
@@ -108,7 +116,8 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     const warnings = [...(res.warnings || []), ...(res.draft && !(res.sendCheck && res.sendCheck.ok === true) && !(res.warnings || []).some((w) => w.startsWith('send check:')) ? ['send check: not done'] : [])];
     const report = (outcome) => ai.draftOutcome({ db }, ACTOR, { draftId: res.draftId, outcome }, { uid: 'receptionist' }).catch(() => {});
     if (!SEND_STEPS.has(step) || !res.draft || !res.structured || warnings.length) {
-      if (step === 'none' && !needs && !warnings.length && res.structured && QUIET_INTENTS.has(res.intent)) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered
+      const burst = []; for (const x of recent.docs.map((d) => d.data())) { if (x.direction !== 'in') break; burst.push(x); }              // the customer's messages since our last one
+      if (step === 'none' && !needs && !warnings.length && res.structured && (QUIET_INTENTS.has(res.intent) || courtesyOnly(burst))) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered
         await report('discarded'); await ref.update({ 'receptionist.handledMs': lastIn }); return 'quiet_skip';
       }
       await report('discarded');                                                           // not a simple case, or the draft failed a check: nothing is sent, a person takes over
@@ -199,4 +208,4 @@ async function sweep(deps, nowMs = Date.now()) {
   return out;
 }
 
-module.exports = { processChat, onInbound, onMessage, sweep, delayMs, activateIfNewLead, quiet, hourOf, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DEBOUNCE_MS, MIN_DELAY_MS, MAX_DELAY_MS, DAILY_CAP, QUIET_UNTIL_HOUR };
+module.exports = { processChat, onInbound, onMessage, sweep, delayMs, activateIfNewLead, quiet, hourOf, courtesyOnly, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DEBOUNCE_MS, MIN_DELAY_MS, MAX_DELAY_MS, DAILY_CAP, QUIET_UNTIL_HOUR };

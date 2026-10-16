@@ -107,3 +107,11 @@ test('the code-written acknowledgements: built from the records only, never the 
   // a greeting with no choice from the model and no usable opener: nothing safe to say, so a person looks at it
   assert.equal(run({ intent: 'greeting', reply: 'Hi there!' }).step, 'none');
 });
+
+test('PLEASANTRIES: a message that is only "thanks", "ok great", "Thanks, see you then" or an emoji needs no reply and no person; anything more (a question, "not now", a photo) is not a pleasantry', () => {
+  const REC = require('../lib/aiReceptionist'), m = (body, type = 'text') => ({ direction: 'in', type, body });
+  for (const b of ['Thanks', 'thanks!', 'Thanks, see you then', 'ok great', 'ok', '👍', 'Cheers', 'Thank you very much', 'perfect thanks', 'grand, talk soon', 'Thanks a million!! 😊']) assert.equal(REC.courtesyOnly([m(b)]), true, b);
+  for (const b of ['ok thats a bit more than I thought', 'Not right now thanks', 'no thanks', 'thanks, how much is it?', 'Can I think about it', 'thanks but no', 'sounds good yes', 'yes', 'Thanks, and do you do wardrobes?', 'ok see you tomorrow at 5']) assert.equal(REC.courtesyOnly([m(b)]), false, b);
+  assert.equal(REC.courtesyOnly([m('', 'image')]), false, 'a photo is never a pleasantry'); assert.equal(REC.courtesyOnly([m('Thanks'), m('how long does it take?')]), false, 'every message of the burst counts');
+  assert.equal(REC.courtesyOnly([]), false);
+});

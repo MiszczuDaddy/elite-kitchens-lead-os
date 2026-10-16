@@ -169,7 +169,8 @@ const sentencesOf = (t) => String(t).split(/(?<=[.!?])\s+|\n+/).map((s) => s.tri
 // an OPEN item leaves it unconfirmed. So when the owner edits the knowledge ("we now have a showroom"), the check follows without a deploy. A claim the knowledge says nothing about is not judged here (the
 // number, address and wording checks still apply). A "not" counts only right next to the claim, inside its own clause: "We can't give an exact price, it comes after the free home visit" does not deny the free visit,
 // and "We have no showroom, but the design is done at a free home visit" is two claims.
-const AFFIRM_NO = /\bno (?:problem|worries|bother|obligation|rush|pressure|hassle)\b|\bnot a problem\b|\bno matter\b/gi;
+const FREE_LINK = new Set(['with', 'and', 'or', 'but', 'so', 'too', 'as', 'at', 'to', 'for', 'if', 'on', 'in', 'there', 'here', 'when', 'until', 'then', 'which', 'that', 'is', 'are', 'nothing']);
+const AFFIRM_NO =/\bno (?:problem|worries|bother|obligation|rush|pressure|hassle)\b|\bnot a problem\b|\bno matter\b/gi;
 const NEG_CLAIM = /\b(not|no|never|cannot|can't|cant|won't|isn't|aren't|don't|doesn't|didn't|unable|neither|nor|decline|declines|outside)\b|n't\b/i;
 const unNo = (t) => String(t).replace(AFFIRM_NO, (m) => ' '.repeat(m.length));                    // "no problem" is not a "no" (same length, so positions stay)
 const negClause = (c) => NEG_CLAIM.test(unNo(c));
@@ -190,7 +191,7 @@ const PASSIVE = 'included|covered|arranged|organi[sz]ed|provided|supplied|handle
 const BE = "(?:is|are|isn't|aren't|'s|'re|be|being|was|were)";
 // "we <verb> X", "X is <included / arranged ...>", "the price includes X", "Not included: X". `verbs` are what WE would do with it.
 function doneByUs(noun, verbs) {
-  return new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:${verbs})\\b[^.?!]{0,60}\\b(?:${noun})\\b|\\b(?:${noun})\\b[^.?!]{0,40}\\b${BE}[^.?!]{0,15}\\b(?:${PASSIVE})\\b(?!\\s+(?:by\\s+(?:the\\s+)?(?:customer|you|your|their)|after|before|once|when))|\\b(?:${noun})\\b[^.?!]{0,30}:\\s*(?:never\\s+|not\\s+)?(?:${PASSIVE})\\b|\\b(?:price|quote|cost)\\s+(?:includes|covers)\\b[^.?!]{0,60}\\b(?:${noun})\\b|\\bincluded\\b[^.?!]{0,120}\\b(?:${noun})\\b`, 'i');
+  return new RegExp(`\\b${AGENT}\\b[^.?!,;]{0,30}\\b(?:${verbs})\\b[^.?!,;]{0,60}\\b(?:${noun})\\b|\\b(?:${noun})\\b[^.?!]{0,40}\\b${BE}[^.?!]{0,15}\\b(?:${PASSIVE})\\b(?!\\s+(?:by\\s+(?:the\\s+)?(?:customer|you|your|their)|after|before|once|when))|\\b(?:${noun})\\b[^.?!]{0,30}:\\s*(?:never\\s+|not\\s+)?(?:${PASSIVE})\\b|\\b(?:price|quote|cost)\\s+(?:includes|covers)\\b[^.?!]{0,60}\\b(?:${noun})\\b|\\bincluded\\b[^.?!:,;]{0,25}:[^.?!]{0,120}\\b(?:${noun})\\b|\\bincluded\\b[^.?!,;]{0,40}\\b(?:${noun})\\b`, 'i');
 }
 const TRADE_VERBS = 'arrange\\w*|organi[sz]e\\w*|provide\\w*|supply|supplies|do|does|handle\\w*|take care of|takes care of|sort|sorts|look after|looks after|include\\w*|fit|fits|lay|lays|get|gets|bring|brings';
 // claim: what makes the claim; counter: a statement of the opposite (e.g. "stone is priced separately" = stone is not included); unless: a clause that matches this is about something else.
@@ -206,9 +207,9 @@ const SUBJECTS = [
   { id: 'flooring', claim: doneByUs('floor(?:s|ing)', TRADE_VERBS), why: 'says we do the flooring' },
   { id: 'painting', claim: doneByUs('paint(?:ing)?|decorat\\w*', TRADE_VERBS), why: 'says we do painting or decorating' },
   { id: 'old_kitchen', claim: /\b(?:remov\w*|take away|takes away|taking away|rip(?:ping)? out|strip(?:ping)? out)\b[^.?!]{0,30}\bold kitchen\b|\bold kitchen\b[^.?!]{0,30}\b(?:remov\w*|taken away|ripped out)\b/i, why: 'says the old kitchen is not removed' },
-  { id: 'stone_included', claim: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,40}\b(?:included|as standard|standard|at no extra cost|no extra cost|free)\b|\b(?:includ\w*|comes? with)\b[^.?!]{0,30}\b(?:stone|quartz|dekton|granite|sintered)\b/i,
+  { id: 'stone_included', claim: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,40}\b(?:included|as standard|standard|at no extra cost|no extra cost|free)\b|\b(?:includ\w*|comes? with)\b[^.?!,;]{0,30}\b(?:stone|quartz|dekton|granite|sintered)\b/i,
     counter: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,60}\b(?:extra|optional|priced separately|separately|on top)\b/i, why: 'says stone worktops are included' },
-  { id: 'laminate_included', claim: /\blaminate\b[^.?!]{0,30}\bworktops?\b[^.?!]{0,30}\b(?:included|as standard)\b|\b(?:includ\w*|comes? with)\b[^.?!]{0,40}\blaminate\b|\blaminate worktops? (?:is|are) included\b/i, why: 'says the laminate worktop is not included' },
+  { id: 'laminate_included', claim: /\blaminate\b[^.?!]{0,30}\bworktops?\b[^.?!]{0,30}\b(?:included|as standard)\b|\b(?:includ\w*|comes? with)\b[^.?!,;]{0,40}\blaminate\b|\blaminate worktops? (?:is|are) included\b/i, why: 'says the laminate worktop is not included' },
   { id: 'wardrobes', claim: new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:do|does|make|makes|fit|fits|offer|offers|supply|supplies|design|designs|build|builds|install|installs)\\b[^.?!]{0,40}\\bwardrobes?\\b|\\bwardrobes?\\b[^.?!]{0,30}\\b(?:can be ordered|are available|available)\\b`, 'i'), why: 'says we do not do wardrobes' },
   { id: 'utility', claim: new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:do|does|make|makes|fit|fits|offer|offers|supply|supplies|design|designs|build|builds|install|installs)\\b[^.?!]{0,60}\\butilit(?:y|ies)\\b|\\butilit(?:y|ies)\\b[^.?!]{0,30}\\b(?:can be ordered|are available|available)\\b`, 'i'), why: 'says we do not do utility rooms' },
   { id: 'part_jobs', claim: /\b(?:just|only)\s+(?:the\s+|new\s+|replace\w*\s+|change\w*\s+)?(?:doors?|worktops?|fronts?)\b|\b(?:doors?|worktops?|fit)[- ]only\b|\bunits? (?:you|they) (?:bought|got|ordered) elsewhere\b|\brepairs? (?:to|on|of) (?:kitchens?|units?) (?:supplied|fitted|made) by\b/i, why: 'says we take on a job we decline' },
@@ -320,7 +321,8 @@ function checkAnswer(text, K, { extra = '' } = {}) {
     if (money && /\b(your|yours|this|that|specific|island|\d+\s?m\b)/i.test(s) && !/\b(typical|most|range|between|guide|generally|usually|around|start|starts|from|extra|stone|worktops?|deposit)\b/i.test(s)) add('gives a price for a specific kitchen');
     const visitFree = !!(K && K.facts && K.facts.stance.visit_free && K.facts.stance.visit_free.yes) && /\b(?:home visit|visit|consultation|design|it)\b/i.test(s);       // "no charge for the visit" when the knowledge says the visit is free
     if (/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(s) && !(/\b(complimentary|free of charge|no charge|at no cost|no cost)\b/i.test(hay)) && !visitFree) add('says something is free that the knowledge does not');
-    for (const m of s.matchAll(/\bfree\s+([a-z]+)/gi)) if (!A.freeWords.has(m[1].toLowerCase()) && !neg) { add('says something is free that the knowledge does not'); break; }
+    // "free X" names what is free ("a free quote"); "free with no obligation", "free and..." do not (audit run of 16 Oct 2026: "The home visit is free with no obligation" was wrongly blocked).
+    for (const m of s.matchAll(/\bfree\s+([a-z]+)/gi)) if (!A.freeWords.has(m[1].toLowerCase()) && !FREE_LINK.has(m[1].toLowerCase()) && !neg) { add('says something is free that the knowledge does not'); break; }
   }
   return { ok: r.length === 0, reasons: r };
 }
