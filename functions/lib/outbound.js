@@ -23,18 +23,29 @@ function requestIdOf(data) {
 }
 const claimRef = (db, phone, requestId) => db.collection('conversations').doc(phone).collection('sendRequests').doc(requestId);
 
+// A PERSON is writing to this customer (a staff text, a file, a quote, a Reopen): recorded on the conversation BEFORE WhatsApp is contacted, so the automatic receptionist can never talk over them, however
+// many messages the customer sent in between (audit 16 Oct 2026, finding 2). Best effort: it must never stop a staff send.
+async function noteHuman(db, phone, nowMs = Date.now()) {
+  try { await db.collection('conversations').doc(phone).update({ 'receptionist.humanAt': Timestamp.fromMillis(nowMs) }); } catch (e) { /* no such conversation: nothing to note */ }
+}
+// A staff send that is claimed and not finished yet (the receptionist treats it as a person writing).
+const staffSending = (docs, nowMs) => docs.some((x) => !x.id.startsWith('auto_') && x.data().state === 'sending' && nowMs - (x.data().claimedAt ? x.data().claimedAt.toMillis() : 0) < STUCK_MS);
+
 // Claim the request. { go: true } = send it; { done: true } = it was already sent (answer with success, send nothing).
-async function begin(db, phone, requestId, nowMs = Date.now()) {
+// guard(tx, conversationSnapshot): for the automatic receptionist. It runs INSIDE the same transaction as the claim, just before the claim is made, and returns null (go on) or a reason (nothing is claimed,
+// nothing is sent). effects: what must still happen after the send (kept in the claim, so a run that dies after WhatsApp accepted the message can finish the job).
+async function begin(db, phone, requestId, nowMs = Date.now(), { guard = null, effects = null } = {}) {
   if (!requestId) return { go: true };
   const ref = claimRef(db, phone, requestId), convRef = db.collection('conversations').doc(phone);
   return db.runTransaction(async (tx) => {
     const [s, conv] = await Promise.all([tx.get(ref), tx.get(convRef)]);
     if (!conv.exists) throw new HttpsError('not-found', 'Conversation not found.');            // erased meanwhile: no claim is left behind
     const now = Timestamp.fromMillis(nowMs);
-    if (!s.exists) { tx.create(ref, { state: 'sending', claimedAt: now }); return { go: true }; }
+    if (s.exists && s.data().state === 'sent') return { done: true, effects: s.data().effects || null, effectsDone: s.data().effectsDone === true };
+    if (guard) { const why = await guard(tx, conv); if (why) throw new HttpsError('failed-precondition', 'Not sent: ' + why, { reason: 'guard', why }); }
+    if (!s.exists) { tx.create(ref, { state: 'sending', claimedAt: now, ...(effects ? { effects, effectsDone: false } : {}) }); return { go: true }; }
     const d = s.data();
-    if (d.state === 'sent') return { done: true };
-    if (d.state === 'failed') { tx.update(ref, { state: 'sending', claimedAt: now }); return { go: true }; }
+    if (d.state === 'failed') { tx.update(ref, { state: 'sending', claimedAt: now, ...(effects ? { effects, effectsDone: false } : {}) }); return { go: true }; }
     const age = nowMs - (d.claimedAt ? d.claimedAt.toMillis() : 0);
     if (d.state === 'sending' && age < STUCK_MS) throw new HttpsError('failed-precondition', 'This message is already being sent.', { reason: 'in_progress' });
     throw new HttpsError('failed-precondition', NOT_CONFIRMED, { reason: 'not_confirmed' });    // unknown, or "sending" for too long: nobody has resolved it
@@ -47,4 +58,9 @@ async function settle(db, phone, requestId, patch) {
   try { await claimRef(db, phone, requestId).update({ ...patch, at: Timestamp.now() }); } catch (e) { /* the claim is only a safeguard */ }
 }
 
-module.exports = { requestIdOf, begin, settle, NOT_CONFIRMED, REQUEST_ID };
+// The claim as it stands (for the receptionist: was this customer message already answered, and are its effects finished?).
+async function peek(db, phone, requestId) {
+  const s = await claimRef(db, phone, requestId).get();
+  return s.exists ? { state: s.data().state, effects: s.data().effects || null, effectsDone: s.data().effectsDone === true } : null;
+}
+module.exports = { requestIdOf, begin, settle, noteHuman, staffSending, peek, claimRef, STUCK_MS, NOT_CONFIRMED, REQUEST_ID };

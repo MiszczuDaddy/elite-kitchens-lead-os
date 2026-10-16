@@ -113,6 +113,7 @@ async function reopen({ db, wa, cfg }, actor, data, { nowMs = Date.now() } = {})
   // 2. Send. Meta refused (definite: nothing was sent) -> failed, safe to try again. Anything else -> not confirmed.
   const body = `[template: ${name}] ${WS.reopenText(claim.first)}`;
   let wamid;
+  await require('./outbound').noteHuman(db, phone);                         // a person is writing: the automatic receptionist stays out (audit 16 Oct 2026, finding 2)
   try {
     wamid = await wa.sendTemplateByName(phone, { name, lang, params: [claim.first] }, { timeoutMs: (cfg && cfg.reopenTimeoutMs) || SEND_TIMEOUT_MS });
   } catch (e) {

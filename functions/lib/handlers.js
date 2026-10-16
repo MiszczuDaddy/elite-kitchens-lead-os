@@ -148,6 +148,7 @@ async function sendReply(auth, data, { db, wa, cfg }) {
   // One request = one message (audit finding 6): claim it, then send. WhatsApp accepting the message is final: nothing after that can make it a
   // failure, and an answer we cannot confirm is never sent a second time by itself.
   const requestId = outbound.requestIdOf(data);
+  await outbound.noteHuman(db, phone);                                            // a person is writing: the automatic receptionist stays out (audit 16 Oct 2026, finding 2)
   if ((await outbound.begin(db, phone, requestId)).done) return { ok: true, existing: true };
   let wamid;
   try { wamid = await wa.sendText(phone, body); }
@@ -296,6 +297,7 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
   const shown = kind === 'audio' ? '' : caption;
   // One request = one file, and "accepted" is final (audit finding 6): see sendReply.
   const requestId = outbound.requestIdOf(data);
+  await outbound.noteHuman(db, phone);                                            // a person is writing (audit 16 Oct 2026, finding 2)
   if ((await outbound.begin(db, phone, requestId)).done) { await cleanup(); return { ok: true, existing: true }; }
   let mediaId, wamid, sendStarted = false;
   try {

@@ -67,7 +67,8 @@ function whatsappChannel({ db, bucket, wa, quoteTemplate = null, now = Date.now,
       }
       // The customer may have been erased while the PDF was uploading: then nothing is sent (audit finding 4).
       if (!(await db.collection('conversations').doc(ctx.phone).get()).exists) throw new ChannelError('This customer was erased, so nothing was sent.', { code: 'customer_erased', definite: true });
-      // 2. the message itself
+      // 2. the message itself (a person is sending it: the automatic receptionist stays out, audit 16 Oct 2026, finding 2)
+      await require('./outbound').noteHuman(db, ctx.phone);
       const asTemplate = () => wa.sendTemplateWithDocument(ctx.phone, { name: quoteTemplate.name, lang: quoteTemplate.lang, mediaId, filename: ctx.filename, params: [first, label] }, { timeoutMs });
       let wamid, route = (check && check.route) || 'document', text = ctx.message;
       try {

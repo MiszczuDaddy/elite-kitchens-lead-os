@@ -12,8 +12,9 @@
 //   * Only messages the customer sends AFTER the chat was activated are answered; at least 45 seconds after the last one (a burst is answered once); never between midnight and 7:00 Irish time
 //     (it waits and answers after 7:00); WhatsApp's 24-hour window must be open; at most 6 automatic messages to one customer a day.
 //   * Never twice for one customer message: duplicate webhooks are ignored by the inbox, a claim is made before sending (as for staff sends) and a short per-chat lock stops overlapping checks.
-//   * The words: a short natural acknowledgement checked by code (no question, no number, nothing about days, times, prices or promises) followed by the fixed consultation line, or one of the other
-//     fixed lines (ask the following week, "I'll pass that on", "no preference", the honest "automated assistant" line, the booking-change question). A draft with any warning is not sent.
+//   * The words: a short acknowledgement WRITTEN BY CODE (the model only picks which one) followed by the fixed consultation line, or one of the other fixed lines (ask the following week, "I'll pass
+//     that on", "no preference", the honest "automated assistant" line, the booking-change question), or an answer that passed the answer checker. Just before sending, the whole message (fixed lines
+//     aside) is checked once more; a draft with any warning, or with no such check, is not sent.
 //   * It never invents a price, promises availability, books or changes anything. Prices, discounts, delivery and fitting questions, complaints, photos, "are you a person" and anything unsure are handed
 //     over: no reply, a push to the owner.
 // HOW IT RUNS (event-driven, with a backup): a Firestore trigger (functions/index.js receptionistOnMessage) calls onInbound() the moment a customer message is saved. It waits the reply delay (30 seconds by
@@ -35,6 +36,14 @@ const ACTOR = { kind: 'system', id: 'receptionist' };
 // Step A: the receptionist offers a home visit ONCE and asks about days only after the customer has agreed; cancel_ask / tentative / ack_only / offer steps do not pause the chat (the customer may answer).
 // An ordinary message that needs no reply and no person (e.g. "thanks" from a customer who is already booked): not answered, not handed over.
 const QUIET_INTENTS = new Set(['greeting', 'new_enquiry', 'answering_questions', 'wants_consultation', 'scheduling', 'asking_price_general']);
+// A message that is ONLY a pleasantry ("Thanks", "ok great", "Thanks, see you then", a thumbs-up) needs no answer and no person, whatever intent the model gave it (the audit run of 16 Oct 2026: the model
+// labelled "Thanks" as "other" and the owner was alerted for a thank-you). Read from the customer's own words; anything else in the message (a question, "not now", a photo) is not a pleasantry.
+const COURTESY_ONE = String.raw`(?:lol|lols|lolz|ha(?:ha)+h?|he(?:he)+|lmao|xd|ok(?:ay)?|k|kk|grand|great|brilliant|lovely|perfect|super|cool|nice(?: one)?|sound|class|deadly|fab(?:ulous)?|excellent|fantastic|amazing|good|cheers|ta|thanks?|thank you|thx|thank u|ty|many thanks|thanks? (?:a lot|a million|very much|so much|again|for that|for (?:the|your) (?:help|reply|info|message))|thank you (?:very much|so much|again)|no worries|no problem|will do|got it|noted|understood|see you (?:then|soon|on \w+)|talk (?:soon|later)|speak soon|have a (?:good|great|nice) (?:day|one|weekend|evening))`;
+const COURTESY = new RegExp(`^${COURTESY_ONE}(?:\\s+${COURTESY_ONE})*$`, 'i');          // one or more of them: "ok great", "perfect thanks"
+function courtesyOnly(messages) {
+  if (!messages.length || messages.some((m) => m.type && m.type !== 'text' && m.type !== 'sticker')) return false;          // a sticker is like an emoji
+  return messages.every((m) => { const parts = String(m.body || '').toLowerCase().replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ').split(/[,.!]+|\s+(?:and|&)\s+/).map((x) => x.trim()).filter(Boolean); return parts.every((p) => COURTESY.test(p)); });
+}
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : typeof t === 'number' ? t : 0);
 const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...extra }));
 const hourOf = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(new Date(t)));
@@ -47,8 +56,32 @@ async function handOver(deps, ref, phone, why, nowMs, { notify = true } = {}) {
   await ref.update({ 'receptionist.paused': why, 'receptionist.pausedAt': Timestamp.fromMillis(nowMs) });
   if (notify) await ping(deps, phone, nowMs);
 }
-async function ping(deps, phone, nowMs) {
-  if (deps.push) { try { await deps.push.notify({ kind: 'handover', sourceId: phone + '|' + nowMs, phone, backendReceivedAt: nowMs }); } catch (e) { log('error', 'handover push failed'); } }
+async function ping(deps, phone, nowMs, key = nowMs) {
+  if (!deps.push) return true;
+  try { await deps.push.notify({ kind: 'handover', sourceId: phone + '|' + key, phone, backendReceivedAt: nowMs }); return true; } catch (e) { log('error', 'handover push failed'); return false; }
+}
+// A person has written to this customer since the receptionist was switched on (recorded before every staff send: outbound.noteHuman).
+const personWrote = (rec) => ms(rec && rec.humanAt) > ms(rec && rec.at);
+
+// What must happen after an automatic message went out (audit 16 Oct 2026, finding 4): the consultation request for the owner, the pause, the push, and the record that this customer message is answered. The plan is stored in the
+// claim BEFORE WhatsApp is contacted, and each part can be repeated safely, so a run that dies after WhatsApp accepted the message is finished by the next run (it never sends again, and the owner is never left unaware).
+async function applyEffects(deps, ref, phone, eff, nowMs) {
+  const { db } = deps;
+  if (eff.draftId) { try { await ai.draftOutcome({ db }, ACTOR, { draftId: eff.draftId, outcome: 'used_unchanged' }, { uid: 'receptionist' }); } catch (e) { if (!(e && e.code === 'not-found')) throw e; } }     // a repeat is answered as a repeat
+  if (eff.pause) await handOver(deps, ref, phone, eff.pause, nowMs, { notify: false });
+  const claimRef = outbound.claimRef(db, phone, 'auto_' + eff.lastIn);
+  if (eff.notify && !(await ping(deps, phone, nowMs, eff.lastIn))) {                      // the owner was not told: try again on the next run (the same push key, so never twice), three times at most
+    const cs = await claimRef.get(), n = ((cs.exists && cs.data().pushTries) || 0) + 1;
+    await claimRef.update({ pushTries: n }).catch(() => {});
+    if (n < 3) throw new Error('push not delivered');
+  }
+  await db.runTransaction(async (tx) => {
+    const [cs, c] = await Promise.all([tx.get(claimRef), tx.get(ref)]);
+    if (cs.exists && cs.data().effectsDone === true) return;                                  // finished already
+    const cur = (c.exists && c.data().receptionist) || {};
+    if (c.exists) tx.update(ref, { 'receptionist.handledMs': Math.max(cur.handledMs || 0, eff.lastIn), 'receptionist.day': eff.day, 'receptionist.count': (cur.day === eff.day ? cur.count || 0 : 0) + 1, 'receptionist.last': { step: eff.step, at: Timestamp.fromMillis(nowMs), delayMs: Math.max(0, nowMs - eff.lastIn) }, 'receptionist.tries': 0 });
+    if (cs.exists) tx.update(claimRef, { effectsDone: true });
+  });
 }
 
 // A NEW Meta lead's chat is switched on by itself the first time the customer has written (never an existing conversation, never a customer who is not a Meta lead). Decided once and recorded,
@@ -68,14 +101,19 @@ async function activateIfNewLead(deps, doc, since) {
 
 // One chat. Returns a short reason (what was done or why not), never throws.
 async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS } = {}) {
-  const { db, wa, model, owners } = deps, ref = db.doc('conversations/' + phone);
+  const { db, wa, model, owners } = deps, ref = db.doc('conversations/' + phone), t0 = Date.now(), nowAt = () => nowMs + (Date.now() - t0);       // nowAt: the time now, on the same clock as nowMs
   let locked = false;
   try {
     const snap = await ref.get();
     if (!snap.exists) return 'gone';
     const c = snap.data(), r = c.receptionist || {}, at = ms(r.at), lastIn = ms(c.lastInboundAt);
     if (r.on !== true) return 'off';
-    if (r.paused) return 'paused';
+    if (r.paused) {
+      // A send whose job did not finish (the claim says sent, the effects are not done) is finished even though the chat is already paused by its own effects.
+      if (lastIn > at && lastIn > (r.handledMs || 0)) { const prior = await outbound.peek(db, phone, 'auto_' + lastIn); if (prior && prior.state === 'sent' && !prior.effectsDone && prior.effects) { await applyEffects(deps, ref, phone, prior.effects, nowAt()); return 'already_sent'; } }
+      return 'paused';
+    }
+    if (personWrote(r)) { await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }          // recorded before the person's message was sent: it cannot fall out of a window of messages
     if (!lastIn || lastIn <= at) return 'nothing_new';                           // only messages sent after it was switched on
     if (lastIn <= (r.handledMs || 0)) return 'handled';
     if (nowMs - lastIn < waitMs) return 'wait';
@@ -88,11 +126,17 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     // one run at a time per chat (two overlapping checks must never both answer). The state is read AGAIN inside the lock: a check that was waiting must not act on what it read before another one finished.
     const got = await db.runTransaction(async (tx) => {
       const s = await tx.get(ref), cur = (s.exists && s.data().receptionist) || {};
-      if (cur.on !== true || cur.paused) return 'paused'; if (ms(cur.lockUntil) > nowMs) return 'busy'; if (lastIn <= (cur.handledMs || 0)) return 'handled';
+      if (cur.on !== true || cur.paused || personWrote(cur)) return 'paused'; if (ms(cur.lockUntil) > nowMs) return 'busy'; if (lastIn <= (cur.handledMs || 0)) return 'handled';
       tx.update(ref, { 'receptionist.lockUntil': nowMs + 90000 }); return 'ok';
     });
     if (got !== 'ok') return got;
     locked = true;
+    // This customer message may already have been answered by an earlier run that died before it finished the job (the claim says so): finish it, ask the model nothing, send nothing.
+    const prior = await outbound.peek(db, phone, 'auto_' + lastIn);
+    if (prior && prior.state === 'sent') {
+      if (!prior.effectsDone && prior.effects) await applyEffects(deps, ref, phone, prior.effects, nowAt()); else await ref.update({ 'receptionist.handledMs': lastIn });
+      return 'already_sent';
+    }
     // the decision: the same reply suggestion staff get, asked for by the receptionist (automatic mode)
     let res;
     try { res = await ai.suggestReply({ db, model, owners }, ACTOR, { phone }, { uid: 'receptionist', nowMs, receptionist: true }); }
@@ -102,10 +146,13 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
       if (tries >= MAX_TRIES) { await handOver(deps, ref, phone, 'ai failed ' + tries + ' times', nowMs); return 'failed'; }
       await ref.update({ 'receptionist.tries': tries, 'receptionist.triesFor': lastIn }); return 'retry';
     }
-    const step = res.schedule && res.schedule.step, warnings = res.warnings || [], needs = !!(res.handover && res.handover.needed);
+    const step = res.schedule && res.schedule.step, needs = !!(res.handover && res.handover.needed);
+    // The whole message was checked once more (fixed lines aside) before it may be sent; a missing result counts as a failure (audit 16 Oct 2026, finding 1).
+    const warnings = [...(res.warnings || []), ...(res.draft && !(res.sendCheck && res.sendCheck.ok === true) && !(res.warnings || []).some((w) => w.startsWith('send check:')) ? ['send check: not done'] : [])];
     const report = (outcome) => ai.draftOutcome({ db }, ACTOR, { draftId: res.draftId, outcome }, { uid: 'receptionist' }).catch(() => {});
     if (!SEND_STEPS.has(step) || !res.draft || !res.structured || warnings.length) {
-      if (step === 'none' && !needs && !warnings.length && res.structured && QUIET_INTENTS.has(res.intent)) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered
+      const burst = []; for (const x of recent.docs.map((d) => d.data())) { if (x.direction !== 'in') break; burst.push(x); }              // the customer's messages since our last one
+      if (step === 'none' && !needs && !warnings.length && res.structured && (QUIET_INTENTS.has(res.intent) || courtesyOnly(burst) || (res.schedule && res.schedule.quiet === true))) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered
         await report('discarded'); await ref.update({ 'receptionist.handledMs': lastIn }); return 'quiet_skip';
       }
       await report('discarded');                                                           // not a simple case, or the draft failed a check: nothing is sent, a person takes over
@@ -116,12 +163,42 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     // replied (a person is never talked over), or the owner may have paused the chat. Nothing is sent, nothing is marked answered.
     const [fresh, latest] = await Promise.all([ref.get(), ref.collection('messages').orderBy('createdAt', 'desc').limit(12).get()]), fc = fresh.exists ? fresh.data() : {}, fr = fc.receptionist || {};
     if (fr.on !== true || fr.paused) { await report('discarded'); return 'paused'; }
+    if (personWrote(fr)) { await report('discarded'); await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }
     if (latest.docs.some((d) => { const x = d.data(); return x.direction === 'out' && !x.auto && !isWelcome(x, deps.welcomeTemplate) && ms(x.createdAt) > at; })) { await report('discarded'); await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }
     if (ms(fc.lastInboundAt) > lastIn) { await report('discarded'); return 'newer_message'; }
-    // send: claim first (never twice for the same customer message), then WhatsApp, then record
-    const requestId = 'auto_' + lastIn;
-    let claim; try { claim = await outbound.begin(db, phone, requestId, nowMs); } catch (e) { await report('discarded'); if (e && e.details && e.details.reason === 'in_progress') return 'busy'; await handOver(deps, ref, phone, 'send not confirmed', nowMs); return 'send_unconfirmed'; }
-    if (claim.done) { await report('discarded'); await ref.update({ 'receptionist.handledMs': lastIn }); return 'already_sent'; }
+    // send: claim first (never twice for the same customer message), then WhatsApp, then record. The claim is made inside a transaction that LOOKS AGAIN at everything that could have changed while the
+    // answer was being written (audit 16 Oct 2026, finding 3): the switches (the AI switch, real customer data, reply suggestions, the master switch for an automatic chat), quiet hours and the 24-hour window
+    // on the clock as it is NOW, the chat's pause, a person writing (recorded, or a staff send still in progress), a newer customer message and the daily limit. Any of them: nothing is claimed, nothing is sent.
+    const requestId = 'auto_' + lastIn, pauseWhy = (PAUSE_STEPS.has(step) || (step === 'answer' && needs)) ? (step === 'asked_ai' ? 'asked if AI' : ['acknowledge', 'no_preference', 'change_given', 'change_pass_on'].includes(step) ? 'consultation passed to you' : 'handover: ' + String((res.handover && res.handover.reason) || 'needs you').slice(0, 80)) : null;
+    const eff = { step, draftId: res.draftId, pause: pauseWhy, notify: needs, lastIn, day: ai.dayId(nowAt()) };
+    const guard = async (tx, convSnap) => {
+      const cur = convSnap.data() || {}, fr2 = cur.receptionist || {}, t = nowAt();
+      if (fr2.on !== true || fr2.paused) return 'paused';
+      const [sd, sending] = await Promise.all([tx.get(db.doc('aiSettings/current')), tx.get(ref.collection('sendRequests').where('state', '==', 'sending'))]);
+      const st = sd.exists ? sd.data() : {};
+      if (st.enabled !== true || st.customerDataApproved !== true || st.replyAssistant !== true || (fr2.auto === true && st.autoReply !== true)) return 'switch_off';
+      if (quiet(t)) return 'quiet';
+      if (t - lastIn >= WINDOW_MS) return 'window';
+      if (personWrote(fr2) || (cur.reopen && cur.reopen.state === 'sending') || outbound.staffSending(sending.docs, t)) return 'human';
+      if (ms(cur.lastInboundAt) > lastIn) return 'newer_message';
+      if (fr2.day === ai.dayId(t) && (fr2.count || 0) >= DAILY_CAP) return 'daily_limit';
+      return null;
+    };
+    let claim;
+    try { claim = await outbound.begin(db, phone, requestId, nowMs, { guard, effects: eff }); }
+    catch (e) {
+      await report('discarded');
+      const why = e && e.details && e.details.reason === 'guard' ? e.details.why : null;
+      if (why === 'human') { await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }
+      if (why) return { paused: 'paused', switch_off: 'off', quiet: 'quiet', window: 'window_closed', newer_message: 'newer_message', daily_limit: 'daily_limit' }[why] || 'blocked';
+      if (e && e.details && e.details.reason === 'in_progress') return 'busy';
+      await handOver(deps, ref, phone, 'send not confirmed', nowMs); return 'send_unconfirmed';
+    }
+    if (claim.done) {                                                                       // answered by an earlier run: finish its job, send nothing
+      await report('discarded');
+      if (!claim.effectsDone && claim.effects) await applyEffects(deps, ref, phone, claim.effects, nowAt()); else await ref.update({ 'receptionist.handledMs': lastIn });
+      return 'already_sent';
+    }
     let wamid;
     try { wamid = await wa.sendText(phone, res.draft); }
     catch (e) {
@@ -132,10 +209,7 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     }
     await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
     await store.storeOutbound(db, phone, { wamid, type: 'text', body: res.draft, extra: { auto: true } }).catch(() => log('error', 'receptionist text sent but not recorded', { wamid }));
-    await ref.update({ 'receptionist.handledMs': lastIn, 'receptionist.day': day, 'receptionist.count': (r.day === day ? r.count || 0 : 0) + 1, 'receptionist.last': { step, at: Timestamp.fromMillis(nowMs), delayMs: Math.max(0, nowMs - lastIn) }, 'receptionist.tries': 0 });
-    await report('used_unchanged');                                              // moves the consultation flow on (and leaves the request for the owner to book)
-    if (PAUSE_STEPS.has(step) || (step === 'answer' && needs)) await handOver(deps, ref, phone, step === 'asked_ai' ? 'asked if AI' : ['acknowledge', 'no_preference', 'change_given', 'change_pass_on'].includes(step) ? 'consultation passed to you' : 'handover: ' + String((res.handover && res.handover.reason) || 'needs you').slice(0, 80), nowMs, { notify: false });
-    if (needs) await ping(deps, phone, nowMs);
+    await applyEffects(deps, ref, phone, eff, nowAt());                                      // the request for the owner, the pause, the push, "answered": repeated by the next run if this one dies here
     return 'sent:' + step;
   } catch (e) {
     log('error', 'receptionist chat failed', { code: String((e && e.code) || 'unknown').slice(0, 60) });
@@ -158,7 +232,7 @@ async function onInbound(deps, phone, messageMs, { sleep = (n) => new Promise((r
     const ref = deps.db.doc('conversations/' + phone), first = await ref.get();
     if (!first.exists) return 'gone';
     const c = first.data(), rec = c.receptionist;
-    const ours = rec ? rec.on === true && !rec.paused && (s.autoReply || !rec.auto) : !!(s.autoReply && s.autoReplySince && ms(c.createdAt) >= s.autoReplySince);          // switched on, or a new Meta lead that may be
+    const ours = rec ? rec.on === true && !rec.paused && !personWrote(rec) && (s.autoReply || !rec.auto) : !!(s.autoReply && s.autoReplySince && ms(c.createdAt) >= s.autoReplySince);          // switched on, or a new Meta lead that may be
     if (!ours) return 'not_ours';
     if (ms(c.lastInboundAt) > messageMs) return 'superseded';                              // a newer message is already here: its own run answers
     await sleep(Math.max(0, delayMs(s) - (now() - t0)));                                   // the reply delay: a burst of messages is answered once
@@ -196,4 +270,4 @@ async function sweep(deps, nowMs = Date.now()) {
   return out;
 }
 
-module.exports = { processChat, onInbound, onMessage, sweep, delayMs, activateIfNewLead, quiet, hourOf, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DEBOUNCE_MS, MIN_DELAY_MS, MAX_DELAY_MS, DAILY_CAP, QUIET_UNTIL_HOUR };
+module.exports = { processChat, onInbound, onMessage, sweep, delayMs, activateIfNewLead, quiet, hourOf, courtesyOnly, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DEBOUNCE_MS, MIN_DELAY_MS, MAX_DELAY_MS, DAILY_CAP, QUIET_UNTIL_HOUR };

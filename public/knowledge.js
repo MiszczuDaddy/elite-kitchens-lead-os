@@ -77,7 +77,7 @@ window.KNOW = (() => {
   function linesTab() {
     const root = el('div'), d = S.data;
     root.append(el('h3', null, 'Lines the system sends by itself'), el('p', 'hint', 'The receptionist\'s own wording for these cases (no prices, numbers or addresses in them).'));
-    for (const k of Object.keys(S.lineLabels)) { const w = field(S.lineLabels[k], input(d.lines[k], (v) => { d.lines[k] = v; }, { max: 220 })); root.append(w); }
+    for (const k of Object.keys(S.lineLabels)) { if (d.lines[k] == null && S.defaultLines[k]) d.lines[k] = S.defaultLines[k]; const w = field(S.lineLabels[k], input(d.lines[k], (v) => { d.lines[k] = v; }, { max: 220 })); root.append(w); }      // a line added since the draft was saved starts with its default
     root.append(el('h3', null, 'Portfolio links'), el('p', 'hint', 'Shared once per chat, only when the customer asks to see previous work, photos, styles or projects. The receptionist picks them; the address is typed here only.'));
     d.links.forEach((l, i) => { const row = el('div', 'kn-row2'); row.append(field('Name', input(l.label, (v) => { l.label = v; }, { max: 60 })), field('Address', input(l.url, (v) => { l.url = v; }, { ph: 'elitekitchens.ie', max: 160 })));
       const rm = btn('Remove', 'btn-ghost', () => { d.links.splice(i, 1); touch(); render(); }); rm.disabled = !S.canEdit; row.append(rm); root.append(row); });

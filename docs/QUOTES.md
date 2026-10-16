@@ -721,3 +721,10 @@ customer; AI.
 * **Preview PDF.** A "Preview PDF" button on the quote page (the saved draft; design renders are added in the Send box, so they are not in this one) and in the Send box (with the renders chosen there). It calls the same `QuoteDocument.toPdf` with the same data as a real send (`pdfDataFor`), then opens the PDF in a new tab (opened at once so the browser allows it, filled when ready; if blocked, the PDF is downloaded). It uploads nothing, sends nothing, marks nothing and does not touch the PDF made for a real send. The older on-screen preview is now called "Quick preview".
 * **Number fields.** In the Quotes screens a number field is selected when entered and leading zeros are removed as you type ("085" becomes "85"; "0.5" and "0" are left alone). Only what is shown changes; the calculator reads the same number and nothing saved is touched (`public/quote-numbers.js`).
 * **Tests.** `test-ui/quote-pdf.e2e.js` (layout with 0, 1, 2, 3, 5 renders; the PDF has the preview's pages; number fields), and Preview PDF checks in `test-ui/quote-send.e2e.js`.
+
+## Known issue: "Blum runners" wording on the quote (recorded 16 Oct 2026, not fixed)
+The owner confirmed on 16 Oct 2026 that the **standard drawers are Cemux soft-close**. Blum drawer systems are an optional upgrade, and the hinges are Blum soft-close as standard. Two fixed quote texts still say the drawer runners are Blum:
+* `functions/lib/quoteEngine.js:323` and `public/quote-engine.js:323`: the fact row **"Hinges & runners: Blum soft-close throughout"**.
+* `public/quote-document.js:179`: **"Hinges and runners are Blum throughout, soft-close as standard."**
+
+These are wrong for a quote whose drawers are Cemux (or that has no drawer boxes). The fix is a wording change the owner must approve. One option: say "Blum soft-close hinges", and add the runners only when the chosen drawer box is Blum. That changes printed quotes, so it needs the quote tests (`quote-engine`, `quote-template`, the legacy-parity test) and a PDF check. It was deliberately left out of the receptionist audit branch.

@@ -23,7 +23,7 @@ const LEAD_NOTES = 'Meta lead · Kitchen enquiry · 13 Oct 2026\nLead ID: 123456
 
 function fake(script) { const m = { calls: [], async complete() { m.calls.push(1); const s = script[Math.min(m.calls.length - 1, script.length - 1)]; return { text: '', toolCalls: [], stopReason: 'end_turn', usage: USAGE, ...s }; } }; return m; }
 const decision = (over = {}) => ({ toolCalls: [{ id: 'd1', name: 'reply_decision', input: { reply: '', intent: 'new_enquiry', wantsConsultation: false, schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null }, ...over } }], stopReason: 'tool_use' });
-const PREF = { preference: { weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }, opener: '' };
+const PREF = { preference: { status: 'available', weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }, opener: '' };
 const waFake = () => { const w = { sent: [], async sendText(to, body) { w.sent.push({ to, body }); return 'wamid.AUTO' + w.sent.length; } }; return w; };
 const pushFake = () => { const p = { events: [], async notify(ev) { p.events.push(ev); } }; return p; };
 const checked = () => db.doc('aiSettings/modelCheck').set(Object.fromEntries(Object.entries(ai.MODELS).map(([k, m]) => [k, { id: m.id, ok: true, name: m.label, lifecycle: 'active', at: ts(NOW) }])));
@@ -53,9 +53,9 @@ const offersVisit = (t) => /call out and have a look|stop by and have a look|hav
 test('JOURNEY: a new Meta lead replies to the welcome template; nobody switches anything on; it answers what they said and OFFERS a visit once; it asks about days only after they say yes; it collects the preference and hands over with a push; nothing is booked', async () => {
   await newLead(PH); const w = waFake(), p = pushFake(), a0 = await apptCount();
   await says(PH, 'Hi, yes I am interested, I want a new kitchen', NOW - 120e3);
-  const m1 = fake([decision({ intent: 'new_enquiry', reply: 'Thanks for getting back to us, Aoife.' })]);
+  const m1 = fake([decision({ intent: 'new_enquiry', ack: 'hello', reply: 'Thanks for getting back to us, Aoife.' })]);
   const r1 = await REC.sweep(deps(m1, w, p), NOW); assert.equal(r1.activated, 1, 'switched on by itself because it is a new Meta lead'); assert.equal(r1['sent:offer_visit'], 1);
-  assert.deepEqual(w.sent, [{ to: PH, body: 'Thanks for getting back to us, Aoife. ' + SCH.LINES.visit_offer }], 'what they said is acknowledged, then the visit is OFFERED');
+  assert.deepEqual(w.sent, [{ to: PH, body: 'Hi Aoife, thanks for getting back to us. ' + SCH.LINES.visit_offer }], 'what they said is acknowledged (in words written by code), then the visit is OFFERED');
   assert.equal(asksDays(w.sent[0].body), false, 'interest is not agreement: no question about days'); assert.equal(offersVisit(w.sent[0].body), true); assert.equal(p.events.length, 0, 'an offer needs nobody');
   assert.doesNotMatch(w.sent[0].body, /eircode|postcode|what kind|budget|project/i, 'nothing the lead form already answered is asked again');
   assert.deepEqual((await conv()).consult, { stage: 'offered_visit', offered: true });
@@ -75,10 +75,10 @@ test('JOURNEY: a new Meta lead replies to the welcome template; nobody switches 
 
 test('ORDINARY MESSAGES: an enquiry is answered and a visit offered; "hello" or confusion gets a friendly reply and NO offer; a model sentence with a question, money, a promise or a day in it is dropped; nobody is asked about days', async () => {
   await newLead(PH); await says(PH, 'Hi, looking for a shaker style kitchen with an island', NOW - 120e3); const w = waFake();
-  await REC.sweep(deps(fake([decision({ intent: 'answering_questions', reply: 'Lovely, a shaker kitchen with an island sounds great.' })]), w, pushFake()), NOW);
-  assert.equal(w.sent[0].body, 'Lovely, a shaker kitchen with an island sounds great. ' + SCH.LINES.visit_offer);
+  await REC.sweep(deps(fake([decision({ intent: 'answering_questions', ack: 'project', reply: 'Lovely, a shaker kitchen with an island sounds great.' })]), w, pushFake()), NOW);
+  assert.equal(w.sent[0].body, 'Lovely, a new kitchen sounds great. ' + SCH.LINES.visit_offer, 'the acknowledgement is written by code from the records (audit 16 Oct 2026, finding 1)');
   await newLead(PH2); await says(PH2, 'Hello', NOW - 120e3); const w2 = waFake(), p2 = pushFake();
-  const r2 = await REC.sweep(deps(fake([decision({ intent: 'greeting', reply: 'Hi Aoife, thanks for getting back to us.' })]), w2, p2), NOW); assert.equal(r2['sent:ack_only'], 1);
+  const r2 = await REC.sweep(deps(fake([decision({ intent: 'greeting', ack: 'hello' })]), w2, p2), NOW); assert.equal(r2['sent:ack_only'], 1);
   assert.deepEqual(w2.sent.map((x) => x.body), ['Hi Aoife, thanks for getting back to us.']); assert.equal(offersVisit(w2.sent[0].body) || asksDays(w2.sent[0].body), false, '"hello" is not agreement and not an invitation to pitch'); assert.equal((await conv(PH2)).receptionist.paused, null, 'still the receptionist\'s chat');
   await newLead(PH3); await says(PH3, 'Looking at a new kitchen', NOW - 120e3); const w3 = waFake();
   await REC.sweep(deps(fake([decision({ intent: 'new_enquiry', reply: 'Is that a good time? We can do it for 5000 euro, see you tomorrow!' })]), w3, pushFake()), NOW);
@@ -128,7 +128,7 @@ test('PER-CHAT CONTROL: switching a chat off stays off (it is never switched on 
   await ai.setReceptionist({ db, owners: OWNERS }, owner, { phone: PH, on: false }, { nowMs: NOW + 100e3 });
   await says(PH, 'Still there?', NOW + 200e3); const r = await REC.sweep(deps(m, w, pushFake()), NOW + 400e3); assert.equal(w.sent.length, 1, 'off stays off'); assert.equal(r.activated, undefined); assert.equal((await conv()).receptionist.on, false);
   await ai.setReceptionist({ db, owners: OWNERS }, owner, { phone: PH, on: true }, { nowMs: NOW + 500e3 }); assert.equal((await REC.sweep(deps(m, w, pushFake()), NOW + 520e3)).nothing_new, 1, 'what the customer wrote before it was switched on again is not answered');
-  await says(PH, 'Any day next week is fine', NOW + 600e3); await REC.sweep(deps(fake([decision({ intent: 'scheduling', wantsConsultation: true, schedule: { preference: { weeks: 'next', anyDay: true, text: 'any day' } } })]), w, pushFake()), NOW + 700e3); assert.equal(w.sent[1].body, SCH.LINES.acknowledge);
+  await says(PH, 'Any day next week is fine', NOW + 600e3); await REC.sweep(deps(fake([decision({ intent: 'scheduling', wantsConsultation: true, schedule: { preference: { status: 'available', weeks: 'next', anyDay: true, text: 'any day' } } })]), w, pushFake()), NOW + 700e3); assert.equal(w.sent[1].body, SCH.LINES.acknowledge);
 });
 
 test('MANUAL TAKE-OVER: anything a person sends stops the automatic replies for good until the owner reactivates the chat; our own welcome template is not a take-over', async () => {
@@ -170,12 +170,12 @@ test('NOTHING BOOKED, NOTHING CHANGED: the receptionist never books, edits or ca
 });
 
 test('THE MODEL IS TOLD IT IS UNATTENDED: the automatic mode note is added for the receptionist only; staff drafts keep the model\'s own reply; the automatic receptionist offers a visit but never pushes one', async () => {
-  const seen = []; const spy = { async complete(req) { seen.push(req.system); return { text: '', stopReason: 'tool_use', usage: USAGE, ...decision({ intent: 'new_enquiry', reply: 'Thanks, Aoife.' }) }; } };
+  const seen = []; const spy = { async complete(req) { seen.push(req.system); return { text: '', stopReason: 'tool_use', usage: USAGE, ...decision({ intent: 'new_enquiry', ack: 'thanks', reply: 'Thanks, Aoife.' }) }; } };
   await newLead(PH); await says(PH, 'Hi, I want a kitchen', NOW - 120e3);
   const manual = await ai.suggestReply({ db, model: spy, owners: OWNERS }, owner, { phone: PH }, { uid: 'u1', nowMs: NOW }); assert.equal(manual.schedule.step, 'none', 'staff drafts: the model\'s own reply is the draft; the person decides about an offer'); assert.equal(manual.draft, 'Thanks, Aoife.');
   await ai.setReceptionist({ db, owners: OWNERS }, owner, { phone: PH, on: true }, { nowMs: NOW - 600e3 });
   const auto = await ai.suggestReply({ db, model: spy, owners: OWNERS }, owner, { phone: PH }, { uid: 'u2', nowMs: NOW, receptionist: true }); assert.equal(auto.schedule.step, 'offer_visit'); assert.equal(auto.draft, 'Thanks, Aoife. ' + SCH.LINES.visit_offer); assert.equal(asksDays(auto.draft), false);
-  assert.doesNotMatch(seen[0], /AUTOMATIC MODE/); assert.match(seen[1], /AUTOMATIC MODE[\s\S]*no member of staff reads it first[\s\S]*Do NOT push a consultation[\s\S]*ONE short, natural sentence[\s\S]*hand over/);
+  assert.doesNotMatch(seen[0], /AUTOMATIC MODE/); assert.match(seen[1], /AUTOMATIC MODE[\s\S]*no member of staff reads it first[\s\S]*Do NOT push a consultation[\s\S]*Do NOT write an acknowledgement yourself[\s\S]*hand over/);
   assert.equal((await db.collection('aiDrafts').where('auto', '==', true).get()).size, 1, 'the draft record says it was automatic');
 });
 

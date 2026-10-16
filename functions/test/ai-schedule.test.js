@@ -13,8 +13,9 @@ const offersVisit = (t) => /call out and have a look|stop by and have a look|hav
 const claimsDone = (t) => /\b(cancelled|canceled|has been cancelled|is cancelled|confirmed|booked in|all done|you are booked)\b/i.test(t || '');
 const base = { reply: '', intent: 'new_enquiry', visit: 'none', hasQuestion: false, change: 'none', schedule: { preference: null, opener: '' }, handover: { needed: false, reason: null } };
 const D = (o = {}) => ({ ...base, ...o });
-const P = (o = {}, ctx = {}) => S.plan({ decision: D(o), consult: null, messages: [], booked: false, nowMs: TUE, natural: true, ...ctx });
-const pref = (p) => ({ schedule: { preference: S.cleanPreference(p), opener: '' } });
+// The customer's own words about when they are free are put in the chat, since the plan checks the days and times against them (audit 16 Oct 2026, finding 5).
+const P = (o = {}, ctx = {}) => { const w = o.schedule && o.schedule.preference && o.schedule.preference.text; return S.plan({ decision: D(o), consult: null, booked: false, nowMs: TUE, natural: true, ...ctx, messages: [...(ctx.messages || []), ...(w ? [{ direction: 'in', type: 'text', body: w }] : [])] }); };
+const pref = (p) => ({ schedule: { preference: S.cleanPreference({ status: 'available', ...p }), opener: '' } });       // the model must give a status; these tests give 'available' unless they say otherwise
 const out = (text, type = 'text') => ({ direction: 'out', type, body: text }), inn = (text) => ({ direction: 'in', type: 'text', body: text });
 const sent = (p) => p.reply || '';
 
@@ -36,21 +37,27 @@ test('weeks run Monday to Sunday in Irish time, counted from today', () => {
 });
 
 test('AVAILABILITY INTEGRITY: only what the customer OFFERED can become a booking request; unavailable, tentative and unknown never do, and nothing is inferred', () => {
-  const ok = [{ weeks: 'next' }, { days: ['tuesday'] }, { anyDay: true }, { times: 'mornings' }, { days: ['monday', 'friday'], times: 'after 5pm' }, { status: 'available', weeks: 'following', times: 'mornings' }];
-  for (const p of ok) assert.equal(S.reasonable(S.cleanPreference(p)), true, JSON.stringify(p));
+  const ok = [{ weeks: 'next' }, { days: ['tuesday'] }, { anyDay: true }, { times: 'mornings' }, { days: ['monday', 'friday'], times: 'after 5pm' }, { weeks: 'following', times: 'mornings' }];
+  for (const p of ok) assert.equal(S.reasonable(S.cleanPreference({ status: 'available', ...p })), true, JSON.stringify(p));
+  for (const p of ok) assert.equal(S.reasonable(S.cleanPreference(p)), false, 'no status from the model: never "available" (audit 16 Oct 2026, finding 5): ' + JSON.stringify(p));
   const notOk = [null, undefined, {}, { text: 'not sure yet, I will let you know' }, { days: [] }, { days: ['funday'] }, { weeks: 'someday' }, { anyDay: 'yes' }, 'tuesday', { times: '   ' },
     { weeks: 'other', text: 'abroad for a few weeks' }, { weeks: 'other', text: 'the 28th' },                                       // "another time" alone is not a day or a time they offered
     { status: 'unavailable', text: 'I work all day' }, { status: 'tentative', text: 'I will know on Friday' }, { status: 'tentative', days: ['friday'], text: 'maybe Friday' }, { status: 'unknown', days: ['monday'] }];
   for (const p of notOk) assert.equal(S.reasonable(S.cleanPreference(p)), false, JSON.stringify(p));
   const c = S.cleanPreference({ weeks: 'next', days: ['Tuesday', 'tuesday', 'WEDNESDAY', 'x'], times: ' afternoons ', text: 'y'.repeat(400) });
-  assert.deepEqual([c.weeks, c.days, c.times, c.text.length <= 160, c.status], ['next', ['tuesday', 'wednesday'], 'afternoons', true, 'available']);
-  assert.equal(S.cleanPreference({ status: 'bogus', days: ['monday'] }).status, 'available'); assert.equal(S.cleanPreference({ text: 'maybe' }).status, 'unknown');
+  assert.deepEqual([c.weeks, c.days, c.times, c.text.length <= 160, c.status], ['next', ['tuesday', 'wednesday'], 'afternoons', true, 'unknown']);
+  assert.equal(S.cleanPreference({ status: 'bogus', days: ['monday'] }).status, 'unknown'); assert.equal(S.cleanPreference({ text: 'maybe' }).status, 'unknown');
   const n = S.noteOf(S.cleanPreference({ status: 'tentative', text: 'I will know on Friday' })); assert.deepEqual([n.days, n.times, n.status, n.customerWords], [[], null, 'tentative', 'I will know on Friday']); assert.match(n.text, /I will know on Friday/);
-  assert.equal(S.noteOf(S.cleanPreference({ days: ['monday'] })), null, 'an available customer has a preference, not a note');
+  assert.equal(S.noteOf(S.cleanPreference({ status: 'available', days: ['monday'] })), null, 'an available customer has a preference, not a note');
+  // the days and times must be in what the customer wrote
+  const h = (p, said) => S.heard(S.cleanPreference({ status: 'available', ...p }), said);
+  assert.deepEqual(h({ days: ['tuesday', 'friday'], times: 'afternoons' }, 'Tues afternoon works').days, ['tuesday']); assert.equal(h({ days: ['tuesday'], times: 'afternoons' }, 'Tues afternoon works').times, 'afternoons');
+  assert.equal(h({ times: 'evenings' }, 'I work all day though').times, null); assert.equal(h({ times: 'after 5pm' }, 'any day after 5 is fine').times, 'after 5pm'); assert.deepEqual(h({ days: ['friday'] }, 'the fridge is staying').days, []);
+  assert.deepEqual(h({ days: ['saturday', 'sunday'] }, 'weekends, saturdays best').days, ['saturday']); assert.equal(S.heard(null, 'x'), null);
 });
 
 test('the summary for the person who books it: the real dates, the days, the time of day, the customer\'s own words', () => {
-  const d = (p) => S.describe(S.cleanPreference(p), TUE);
+  const d = (p) => S.describe(S.cleanPreference({ status: 'available', ...p }), TUE);
   assert.equal(d({ weeks: 'next', days: ['tuesday', 'wednesday'], times: 'afternoons', text: 'Tue or Wed pm' }).text, 'Next week (Mon 19 Oct to Sun 25 Oct) · Tuesday 20 Oct, Wednesday 21 Oct · afternoons');
   assert.deepEqual(d({ weeks: 'next', days: ['tuesday', 'wednesday'], times: 'afternoons', text: 'Tue or Wed pm' }).dayLabels, ['Tuesday 20 Oct', 'Wednesday 21 Oct']);
   assert.equal(d({ weeks: 'following', anyDay: true }).text, 'The week after next (Mon 26 Oct to Sun 1 Nov) · any day'); assert.equal(d({ weeks: 'this', days: ['friday'] }).text, 'This week (Mon 12 Oct to Sun 18 Oct) · Friday 16 Oct');
@@ -71,14 +78,17 @@ test('CONSENT: interest, hello, ok, thanks, confusion, a project description and
     ['"not until after Christmas"', P({ intent: 'answering_questions', reply: 'No rush at all.' })]];
   for (const [what, p] of nothingAboutDays) { assert.equal(asksDays(sent(p)), false, what + ': ' + sent(p)); assert.equal(p.preference, null, what); }
   // asked for a visit or agreed to the offer -> now, and only now, the question about days
-  for (const v of ['asked', 'agreed']) { const p = P({ visit: v, intent: 'wants_consultation' }); assert.equal(p.step, 'ask_next_week'); assert.equal(asksDays(sent(p)), true, v); }
+  for (const v of ['asked', 'agreed']) { const p = P({ visit: v, intent: 'wants_consultation' }, { messages: [out(L.visit_offer), inn('yes please')] }); assert.equal(p.step, 'ask_next_week'); assert.equal(asksDays(sent(p)), true, v); }
+  assert.equal(P({ visit: 'asked', intent: 'wants_consultation' }, { messages: [inn('can someone call out to measure?')] }).step, 'ask_next_week', 'they asked for a visit in their own words');
+  for (const v of ['asked', 'agreed']) assert.equal(P({ visit: v, intent: 'wants_consultation' }, { messages: [inn('yes')] }).step, 'offer_visit', 'labelled agreement with no offer and no request for a visit: offered, not assumed (audit 16 Oct 2026, finding 5)');
   // volunteering when they are free is agreement too: recorded, nothing asked
   const vol = P({ intent: 'scheduling', ...pref({ weeks: 'next', days: ['tuesday'], text: 'free Tuesday' }) }); assert.equal(vol.step, 'acknowledge'); assert.equal(asksDays(sent(vol)), false); assert.ok(vol.preference && vol.preference.days[0] === 'tuesday');
 });
 
 test('ANSWER FIRST, OFFER ONCE: the offer follows the reply to what they said; it is never repeated, never combined with a question about days, and never made to someone who is upset, asked a question or said no', () => {
-  const first = P({ intent: 'new_enquiry', reply: 'Lovely, a shaker kitchen with an island sounds great.' });
-  assert.equal(first.step, 'offer_visit'); assert.equal(offersVisit(sent(first)), true); assert.equal(asksDays(sent(first)), false); assert.match(sent(first), /shaker kitchen with an island/, 'what they said is acknowledged first');
+  const first = P({ intent: 'new_enquiry', ack: 'project', reply: 'Lovely, a shaker kitchen with an island sounds great.' }, { who: { name: 'Anna', projectType: 'Kitchen' } });
+  assert.equal(first.step, 'offer_visit'); assert.equal(offersVisit(sent(first)), true); assert.equal(asksDays(sent(first)), false); assert.equal(sent(first), 'Lovely, a new kitchen sounds great. ' + L.visit_offer, 'what they said is acknowledged first, in words written by code');
+  assert.equal(sent(P({ intent: 'new_enquiry', reply: 'Lovely, a shaker kitchen with an island sounds great.' })), L.visit_offer, 'the model\'s own sentence is never sent');
   // after the offer: no second offer, no question about days, however they reply without agreeing
   const ctx = { messages: [out(L.visit_offer)], consult: { stage: 'offered_visit', offered: true } };
   for (const o of [{ intent: 'greeting' }, { intent: 'answering_questions', reply: 'Thanks.' }, { intent: 'new_enquiry', reply: 'Nice.' }]) { const p = P(o, ctx); assert.equal(offersVisit(sent(p)) || asksDays(sent(p)), false, JSON.stringify(o)); assert.equal(p.step, 'none'); }
@@ -99,14 +109,14 @@ test('ANSWER FIRST, OFFER ONCE: the offer follows the reply to what they said; i
 });
 
 test('A GREETING gets one friendly acknowledgement and nothing else; after our first reply "ok" and "thanks" need no answer', () => {
-  const hello = P({ intent: 'greeting', reply: 'Hi Eimear, thanks for getting back to us.' }); assert.equal(hello.step, 'ack_only'); assert.equal(sent(hello), 'Hi Eimear, thanks for getting back to us.');
+  const hello = P({ intent: 'greeting', ack: 'hello', reply: 'Hi Eimear, we are a family-run firm.' }, { who: { name: 'Eimear Byrne' } }); assert.equal(hello.step, 'ack_only'); assert.equal(sent(hello), 'Hi Eimear, thanks for getting back to us.');
   const unsafe = P({ intent: 'greeting', reply: 'Hi, call tomorrow at 5pm?' }); assert.equal(unsafe.step, 'none'); assert.equal(unsafe.handover.needed, true, 'no safe words: a person looks at it, nobody is left in silence without an alert');
   assert.equal(P({ intent: 'greeting', reply: 'Thanks again.' }, { messages: [out(L.visit_offer, 'text'), inn('ok')] }).step, 'none');
-  assert.equal(P({ intent: 'greeting', reply: 'Thanks.' }, { messages: [out('welcome...', 'template')] }).step, 'ack_only', 'our welcome template is not "our first reply"');
+  assert.equal(P({ intent: 'greeting', ack: 'thanks' }, { messages: [out('welcome...', 'template')] }).step, 'ack_only', 'our welcome template is not "our first reply"');
 });
 
 test('THE FLOW AFTER AGREEMENT: next week, then the following week once, then "no preference"; at most two questions; a customer who gives when they are free is acknowledged and nothing more is asked', () => {
-  const agreed = (o = {}, ctx = {}) => P({ visit: 'agreed', intent: 'wants_consultation', ...o }, ctx);
+  const agreed = (o = {}, ctx = {}) => P({ visit: 'agreed', intent: 'wants_consultation', ...o }, { ...ctx, consult: { offered: true, ...(ctx.consult || {}) } });       // we offered a visit (the flow records that)
   const q1 = agreed(); assert.equal(q1.step, 'ask_next_week'); assert.equal(q1.handover, null);
   const q2 = agreed({}, { consult: { stage: 'asked_next_week', asks: 1 }, messages: [out(L.ask_next_week)] }); assert.equal(q2.step, 'ask_following_week');
   const q3 = agreed({}, { consult: { stage: 'asked_following_week', asks: 2 }, messages: [out(L.ask_next_week), out(L.ask_following_week)] }); assert.deepEqual([q3.step, q3.handover.needed], ['no_preference', true]);
@@ -115,12 +125,12 @@ test('THE FLOW AFTER AGREEMENT: next week, then the following week once, then "n
   assert.equal(agreed({}, { consult: { stage: 'preference_given', asks: 1 } }).step, 'none', 'already handed over: never asked again');
   const fixed = agreed(pref({ days: ['friday'], text: 'sorry, Friday instead' }), { consult: { stage: 'preference_given', asks: 1 } }); assert.equal(fixed.step, 'acknowledge', 'a customer who corrects their day after the hand-over is recorded again');
   // the first question may carry a short acknowledgement; later ones do not
-  assert.match(sent(agreed({ reply: 'Lovely, thanks Anna.' })), /^Lovely, thanks Anna\. /);
-  assert.equal(sent(agreed({ reply: 'Lovely, thanks Anna.' }, { consult: { asks: 1 }, messages: [out(L.ask_next_week)] })), L.ask_following_week);
+  assert.equal(sent(agreed({ ack: 'thanks' }, { who: { name: 'Anna' } })), 'Thanks, Anna. ' + L.ask_next_week);
+  assert.equal(sent(agreed({ ack: 'thanks' }, { who: { name: 'Anna' }, consult: { asks: 1 }, messages: [out(L.ask_next_week)] })), L.ask_following_week);
   // the model's words about days, prices, promises or questions are never sent
   for (const bad of ['Is Tuesday good?', 'We can do it for 5000 euro', 'See you tomorrow', 'You are booked in']) assert.equal(sent(agreed({ reply: bad })), L.ask_next_week, bad);
   // price + agreement: the owner's line then the first question
-  assert.equal(sent(P({ intent: 'asking_price_general', visit: 'asked' })), L.price_general + ' ' + L.ask_next_week);
+  assert.equal(sent(P({ intent: 'asking_price_general', visit: 'asked' }, { messages: [inn('How much is a kitchen? Could someone come out and measure?')] })), L.price_general + ' ' + L.ask_next_week);
 });
 
 test('THEY WILL LET US KNOW / ARE NOT AVAILABLE: no booking request, no pressure, their own words are kept; "I work all day" is not evenings; "abroad" is not a preference', () => {

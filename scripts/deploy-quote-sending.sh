@@ -7,6 +7,8 @@
 #                                                locks a draft while a send is prepared). Email stays as it is (the settings file decides). The live screen is unaffected.
 #   ./scripts/deploy-quote-sending.sh channels   M7 only: redeploy the 3 functions that send (deliverQuote, retryQuoteDelivery, quoteChannels) so a
 #                                                closed-window quote goes in the approved quotation template. Email stays as it is.
+#   ./scripts/deploy-quote-sending.sh staffsend  the 6 functions through which a PERSON writes to a customer (sendReply, sendMedia, reopenConversation, deliverQuote, retryQuoteDelivery, quoteChannels): they now note "a person is
+#                                                writing" on the chat BEFORE WhatsApp is contacted, so the automatic receptionist can never talk over you. What they send is unchanged. Run it with "receptionist".
 #   ./scripts/deploy-quote-sending.sh older      the audit fixes in the five OLDER functions (sendReply, sendMedia, startConversation, claimAccess, leadIntake): one request =
 #                                                one message, a Meta 5xx is never retried by itself, and staff access that expires and is renewed.
 #                                                Run it BEFORE "rules". It saves the revisions it replaces.
@@ -54,6 +56,7 @@ NEW_FUNCS="reopenConversation deliverQuote retryQuoteDelivery resolveQuoteDelive
 QUOTE_FUNCS="createCustomer saveQuoteSettings setQuoteNumbering createQuote saveQuoteDraft sendQuote acceptQuote declineQuote reopenQuote reviseQuote discardQuoteDraft deleteQuoteDraft setQuoteNotes quotePdfUrl"
 MAIL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"          # the functions that read the MAIL_* settings
 CHANNEL_FUNCS="deliverQuote retryQuoteDelivery quoteChannels"       # the functions that send (M7: they read the quotation template settings too)
+STAFFSEND_FUNCS="sendReply sendMedia reopenConversation deliverQuote retryQuoteDelivery quoteChannels"          # the functions through which a person writes to a customer (review of 16 Oct 2026, finding 2)
 OLDER_FUNCS="sendReply sendMedia startConversation claimAccess leadIntake"           # older functions that the audit fixes touch (findings 5 and 6, second audit 6); all are public already
 PRE_AUDIT="${PRE_AUDIT:-6baa6ca}"                                                  # the last commit before the audit fixes: the code "back" redeploys (docs/PHASE6_1_PLAN.md, "Rollback")
 BACKEND_FUNCS="$NEW_FUNCS $QUOTE_FUNCS"
@@ -72,7 +75,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,41p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,44p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -234,6 +237,19 @@ case "${1:-}" in
     deploy_functions $CHANNEL_FUNCS
     check_reachable "$CHANNEL_FUNCS"
     echo "Done. The live screen is unchanged. To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
+    ;;
+  staffsend)
+    check_settings; check_access; check_routing $STAFFSEND_FUNCS
+    echo "Functions: $STAFFSEND_FUNCS"
+    echo "These are LIVE functions from earlier phases that send to customers: staff replies and files, Reopen, and quote sending. The only change: before WhatsApp is contacted they note that a person is writing on the chat,"
+    echo "so the automatic receptionist can never talk over you. What they send, to whom and how is unchanged. The Meta lead intake, the sign-in check and the webhook are NOT touched."
+    confirm "Redeploy these 6 sending functions to the LIVE project?"
+    install
+    echo "==> saving the revisions this replaces"
+    save_revisions $STAFFSEND_FUNCS
+    deploy_functions $STAFFSEND_FUNCS
+    check_reachable "$STAFFSEND_FUNCS"
+    echo "Done. To go back: redeploy the previous code (docs/PHASE6_1_PLAN.md, \"Rollback\"); ./scripts/rollback-quote-sending.sh works only for about a day."
     ;;
   older)
     check_settings; check_access; check_routing $OLDER_FUNCS

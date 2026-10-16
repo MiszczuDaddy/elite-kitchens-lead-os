@@ -27,7 +27,7 @@ const inventsTime = (t) => /\b(evening|evenings|tonight|tomorrow|today|am|pm|\d{
 
 function fake(script) { const m = { calls: [], async complete() { m.calls.push(1); const s = script[Math.min(m.calls.length - 1, script.length - 1)]; return { text: '', toolCalls: [], stopReason: 'end_turn', usage: USAGE, ...s }; } }; return m; }
 const decision = (over = {}) => ({ toolCalls: [{ id: 'd1', name: 'reply_decision', input: { reply: '', intent: 'new_enquiry', visit: 'none', hasQuestion: false, change: 'none', schedule: { preference: null, opener: '' }, newFacts: [], handover: { needed: false, reason: null }, ...over } }], stopReason: 'tool_use' });
-const pref = (p) => ({ schedule: { preference: p, opener: '' } });
+const pref = (p) => ({ schedule: { preference: { status: 'available', ...p }, opener: '' } });       // the model must give a status (none = unknown); 'available' unless the test says otherwise
 const waFake = () => { const w = { sent: [], async sendText(to, body) { w.sent.push({ to, body }); return 'wamid.AUTO' + w.sent.length; } }; return w; };
 const pushFake = () => { const p = { events: [], async notify(ev) { p.events.push(ev); } }; return p; };
 const checked = () => db.doc('aiSettings/modelCheck').set(Object.fromEntries(Object.entries(ai.MODELS).map(([k, m]) => [k, { id: m.id, ok: true, name: m.label, lifecycle: 'active', at: ts(NOW) }])));
@@ -143,8 +143,8 @@ test('PREFERENCES ARE KEPT: a day given together with a question that needs a pe
 
 test('GOOD WORDING IS NOT BLOCKED: an acknowledgement that mentions the Eircode before the offer, and the second scheduling question, are sent; they are no longer "asks for the address again" / "asks for the time again"', async () => {
   await newLead(PHONES[0]); const w = waFake(), p = pushFake();
-  const a = await turn(PHONES[0], 'Yes please. My eircode is K67 X123 if you need it.', decision({ intent: 'answering_questions', reply: 'Thanks for the Eircode, Aoife.' }), w, p);
-  assert.equal(a.got.length, 1, 'sent, not handed over'); assert.match(a.got[0], /Eircode/); assert.equal(offersVisit(a.got[0]), true); assert.equal((await conv(PHONES[0])).receptionist.paused, null);
+  const a = await turn(PHONES[0], 'Yes please. My eircode is K67 X123 if you need it.', decision({ intent: 'answering_questions', ack: 'details', reply: 'Thanks for the Eircode, Aoife.' }), w, p);
+  assert.equal(a.got.length, 1, 'sent, not handed over'); assert.match(a.got[0], /^Thanks for the details, Aoife\. /, 'the acknowledgement is written by code (audit 16 Oct 2026, finding 1)'); assert.equal(offersVisit(a.got[0]), true); assert.equal((await conv(PHONES[0])).receptionist.paused, null);
   await newLead(PHONES[1]); const w2 = waFake(), p2 = pushFake();
   await turn(PHONES[1], 'Yes, can you call out?', decision({ intent: 'wants_consultation', visit: 'asked' }), w2, p2);
   const b = await turn(PHONES[1], 'I am not sure which week suits', decision({ intent: 'scheduling', visit: 'agreed', ...pref({ status: 'unavailable', text: 'not sure which week' }) }), w2, p2);
