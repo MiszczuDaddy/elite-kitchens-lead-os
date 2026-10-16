@@ -609,13 +609,13 @@ test('every stage that deploys functions runs the routing check BEFORE it asks f
   before(stage('projects'), 'projects'); assert.match(stage('projects'), /check_routing \$PROJECT_FUNCS/);
   before(stage('push'), 'push'); assert.match(stage('push'), /check_routing \$PUSH_FUNCS/);
   before(stage('ai'), 'ai'); assert.match(stage('ai'), /check_routing \$AI_FUNCS/);
-  const help = s.split('\n').slice(0, 44).join('\n');                       // the usage text is lines 2 to 44 of the script (it was 2 to 39 before the receptionist and staffsend stages were added)
-  assert.match(s, /^usage\(\) \{ sed -n '2,44p'/m); assert.match(help, /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+  const help = s.split('\n').slice(0, 47).join('\n');                       // the usage text is lines 2 to 44 of the script (it was 2 to 39 before the receptionist and staffsend stages were added)
+  assert.match(s, /^usage\(\) \{ sed -n '2,47p'/m); assert.match(help, /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
   assert.match(help, /deploy-quote-sending\.sh projects/, 'the help text must show the projects stage');
   assert.match(help, /deploy-quote-sending\.sh push /, 'the help text must show the push stage');
   assert.match(help, /deploy-quote-sending\.sh ai /, 'the help text must show the ai stage');
   assert.match(help, /deploy-quote-sending\.sh receptionist /, 'the help text must show the receptionist stage'); assert.match(help, /deploy-quote-sending\.sh staffsend /, 'the help text must show the staffsend stage');
-  before(stage('staffsend'), 'staffsend'); assert.match(stage('staffsend'), /check_routing \$STAFFSEND_FUNCS/);
+  before(stage('staffsend'), 'staffsend'); before(stage('webhook'), 'webhook'); assert.match(stage('webhook'), /check_routing \$WEBHOOK_FUNCS/); assert.match(stage('staffsend'), /check_routing \$STAFFSEND_FUNCS/);
 });
 
 // ============================ Phase 8: the "push" stage deploys exactly the right functions (the live webhook among them), and the screen waits for them ======================
