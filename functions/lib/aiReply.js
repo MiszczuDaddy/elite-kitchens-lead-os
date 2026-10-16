@@ -189,23 +189,25 @@ function stripFixed(text, extra = []) {
 }
 // Checks that hold with or without approved knowledge (audit 16 Oct 2026, finding 1c): pretending to be a named member of staff, promise wording, and discount talk. Fixed phrases only (no customer words).
 // With approved knowledge the answer checker judges "guarantee", "discount" and the like in context (Blum's guarantee is approved; "we don't do discounts" is fine); these are the ones it does not cover.
-const NAMED = /(?:^|[^\w'’])(?:[Ii]['’]?m|[Ii] am|[Tt]his is|[Mm]y name(?:['’]s| is)|[Ii]t['’]?s)\s+(?!Elite\b|Kitchens\b)[A-Z][a-z'’-]+\b|(?:^|[.!?,]\s*)(?!Elite\b|Kitchens\b|Team\b)[A-Z][a-z'’-]+\s+(?:here|speaking)\b/;
+// `names`: words the knowledge itself uses as names (Blum, Cemux, Robson...): "It's Robson Oak as standard" names a colour, not a person.
+const NAMED_AT = [/(?:^|[^\w'’])(?:[Ii]['’]?m|[Ii] am|[Tt]his is|[Mm]y name(?:['’]s| is)|[Ii]t['’]?s)\s+([A-Z][a-z'’-]+)\b/g, /(?:^|[.!?,]\s*)([A-Z][a-z'’-]+)\s+(?:here|speaking)\b/g];
+const namedPerson = (r, names) => NAMED_AT.some((re) => [...r.matchAll(re)].some((m) => !['elite', 'kitchens', 'team'].includes(m[1].toLowerCase()) && !(names && names.has(m[1].toLowerCase()))));
 const PROMISE = /\b(definitely|for sure|within (?:the|an|a|one|two|\d+) (?:hour|hours|minutes?)|(?:before|in time for|by) (?:christmas|xmas|the new year|easter|the summer|tonight|tomorrow|the weekend|end of (?:the )?(?:day|week))|(?:ring|call|phone) you (?:back|today|tomorrow|shortly|later|straight away|right away|this (?:morning|afternoon|evening))|(?:fit|squeeze) (?:that|it|you|this|them) in)\b/i;
 const DISCOUNT = /\b(half off|half price|\w+ off this month|money off|on sale|in the sale|sale price)\b/i;
 const DISCOUNT_PLAIN = /\b(discounts?|\d+\s?% off|special offer|price match|cheaper|knock\s+\w+\s+off)\b|\d+\s?% off/i;
-function safety(text, { checked = false } = {}) {
+function safety(text, { checked = false, names = null } = {}) {
   const r = String(text || ''), w = [];
-  if (NAMED.test(r)) w.push('says it is a named person');
+  if (namedPerson(r, names)) w.push('says it is a named person');
   if (PROMISE.test(r)) w.push('makes a promise');
   if (DISCOUNT.test(r) || (!checked && DISCOUNT_PLAIN.test(r))) w.push('mentions a discount');
   return w;
 }
 // Warnings for the person who will send it. Never blocks: staff decide.
 const ASKS = { address: /\b(eircode|post ?code|address)\b/i, budget: /\bbudget\b/i, projectType: /\b(kitchen or|what (?:kind|type) of|which room)\b/i, timing: /\b(what day|which day|what time|when (?:would|suits|are you)|suit you)\b/i, name: /\b(your (?:full )?name)\b/i };
-function lint(reply, known, asked, { checked = false, fixed = [] } = {}) {
+function lint(reply, known, asked, { checked = false, fixed = [], names = null } = {}) {
   const w = [], r = String(reply || '').split(SCH.LINES.price_general).join('');                  // the owner's own price line is the one price statement that is allowed
   if (!r) return w;
-  w.push(...safety(stripFixed(r, fixed), { checked }));
+  w.push(...safety(stripFixed(r, fixed), { checked, names }));
   if (checked) {                                                                                  // approved knowledge in use: the answer checker (aiKnowledge.js) has already judged money, links, numbers, promises and days in context
     if (/\b(as an ai|language model|artificial intelligence|i am a bot|i\'m a bot)\b/i.test(r)) w.push('mentions AI');
     if (r.length > 560) w.push('is long for WhatsApp: shorten it');
@@ -237,7 +239,7 @@ function outgoingCheck(text, { knowledge = null, extra = '' } = {}) {
   const fixed = knowledge ? [...Object.values(knowledge.lines || {}), ...(knowledge.links || []).map((l) => l.url)] : [];
   const rest = stripFixed(text, fixed);
   if (!rest) return { ok: true, reasons: [] };
-  const reasons = new Set(lint(rest, [], new Set(), { checked: !!knowledge }));
+  const reasons = new Set(lint(rest, [], new Set(), { checked: !!knowledge, names: knowledge && knowledge.names }));
   if (knowledge) for (const x of KN.checkAnswer(rest, knowledge, { extra }).reasons) reasons.add(x);
   return { ok: reasons.size === 0, reasons: [...reasons] };
 }
@@ -248,7 +250,7 @@ function askedFields(messages) {
   return out;
 }
 // Consultation readiness: decided by code from the records and what the customer said, never by the model.
-function analyse(sheet, d, plan, { knowledge = false, fixed = [] } = {}) {
+function analyse(sheet, d, plan, { knowledge = false, fixed = [], names = null } = {}) {
   plan = plan || { step: 'none', preference: null };
   const known = new Set(sheet.known.map((k) => k.field)), fromChat = new Set(d.newFacts.map((f) => f.field));
   const facts = [...d.newFacts];
@@ -273,7 +275,7 @@ function analyse(sheet, d, plan, { knowledge = false, fixed = [] } = {}) {
   else if (plan.step === 'ask_following_week') { state = 'almost'; label = 'Wants a consultation: asking about the following week'; }
   else if (missing.length) { state = 'almost'; label = 'Wants a consultation: details still needed'; }
   else { state = 'ready'; label = 'Wants a consultation'; }
-  const warnings = lint(d.reply, sheet.known, askedFields(sheet.messages), { checked: knowledge, fixed });
+  const warnings = lint(d.reply, sheet.known, askedFields(sheet.messages), { checked: knowledge, fixed, names });
   if (sheet.window.state !== 'open') warnings.unshift('the WhatsApp 24-hour window is closed: a free-text reply cannot be sent (use Reopen conversation)');
   return { known: sheet.known, fromChat: facts, missing, readiness: { state, label }, warnings, schedule: { step: plan.step, preference: plan.preference } };
 }

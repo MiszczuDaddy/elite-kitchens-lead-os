@@ -433,7 +433,7 @@ async function replyCore({ db, model, settings, key, sheet, knowledge, reception
   const asked = R.cleanDecision(call ? call.input : { reply: res.text, intent: 'other' });
   // What the system itself may say about knowledge: the owner's lines, the portfolio links (the model only picks ids), and the answer checker.
   const customerSaid = sheet.messages.filter((m) => m.direction === 'in').map((m) => m.body || '').join(' ') + ' ' + (sheet.lead || '') + ' ' + sheet.known.map((k) => k.value).join(' ');
-  const kn = knowledge ? { lines: knowledge.lines, check: (x) => { const c = KN.checkAnswer(x, knowledge, { extra: customerSaid }), more = R.safety(x, { checked: true }).filter((w) => !c.reasons.includes(w)); return { ok: c.ok && !more.length, reasons: [...c.reasons, ...more] }; }, linksText(ids) {
+  const kn = knowledge ? { lines: knowledge.lines, check: (x) => { const c = KN.checkAnswer(x, knowledge, { extra: customerSaid }), more = R.safety(x, { checked: true, names: knowledge.names }).filter((w) => !c.reasons.includes(w)); return { ok: c.ok && !more.length, reasons: [...c.reasons, ...more] }; }, linksText(ids) {
     const sent = (u) => sheet.messages.some((m) => m.direction === 'out' && String(m.body || '').toLowerCase().includes(u.toLowerCase()));
     const list = (ids || []).map((id) => knowledge.links.find((l) => l.id === id)).filter((l) => l && !sent(l.url));
     return list.length ? knowledge.lines.links_intro + ' ' + list.map((l) => l.url).join(' and ') : '';
@@ -448,7 +448,7 @@ async function replyCore({ db, model, settings, key, sheet, knowledge, reception
   if (!receptionist && kn && plan.step === 'none' && decision.reply) { const lt = kn.linksText(asked.links); if (lt) decision = { ...decision, reply: decision.reply + ' ' + lt }; extra = kn.check(asked.reply).reasons.map((x) => 'check: ' + x); }
   // The automatic receptionist writes nothing of its own: a question it cannot answer (or a complaint) goes to a person with a reason, never to silence.
   if (receptionist && plan.step === 'none' && !decision.handover.needed && (asked.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(asked.intent))) decision = { ...decision, handover: { needed: true, reason: asked.intent === 'complaint' ? 'upset customer' : 'a question that needs a person' } };
-  const analysis = R.analyse(sheet, decision, plan, { knowledge: !!knowledge, fixed: knowledge ? Object.values(knowledge.lines) : [] });
+  const analysis = R.analyse(sheet, decision, plan, { knowledge: !!knowledge, fixed: knowledge ? Object.values(knowledge.lines) : [], names: knowledge ? knowledge.names : null });
   if (extra.length) analysis.warnings.push(...extra);
   // The automatic receptionist: the WHOLE message it would send is checked once more (audit 16 Oct 2026, finding 1). A failure is a warning, and a draft with a warning is never sent.
   const sendCheck = receptionist && decision.reply ? R.outgoingCheck(decision.reply, { knowledge, extra: customerSaid }) : { ok: true, reasons: [] };

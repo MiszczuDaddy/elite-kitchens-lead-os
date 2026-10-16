@@ -31,7 +31,7 @@ test('PRICING: figures must belong to their topic in the knowledge; a customer\'
 test('MATERIALS: veneer is not solid wood; laminate is included, stone is extra; the door styles we do are not denied', () => table(
   [['Our doors are solid oak.'], ['Stone worktops are included as standard.'], ['Quartz comes with every kitchen at no extra cost.'], ["The laminate worktop isn't included."], ["We don't do handleless kitchens."], ['Sorry, we don\'t do shaker doors.']],
   [['Yes, a laminate worktop is included. If you\'d like stone (quartz, Dekton or granite) that\'s priced separately on top.'], ['Yes, we do quartz, Dekton and granite. They\'re optional and priced separately, on top of the usual kitchen price.'],
-    ['Yes, we do handleless (Gola). We also do shaker / painted, gloss and matt lacquer, and wood / veneer.'], ['It is a wood veneer, not solid oak.'], ['Every kitchen comes with Blum soft-close hinges and drawers as standard.']]));
+    ['Yes, we do handleless (Gola). We also do shaker / painted, gloss and matt lacquer, and wood / veneer.'], ['It is a wood veneer, not solid oak.'], ['Every kitchen comes with Blum soft-close hinges and Cemux soft-close drawers as standard.']]));
 
 test('SERVICES: what we do not supply or arrange is never claimed; what we do is never denied; the jobs we decline are not accepted; only the areas we cover', () => table(
   [['We supply integrated appliances.'], ['Yes, appliances are included in the price.'], ['We arrange the skip for you.'], ['The old kitchen and skip are all taken care of by us.'], ['We do the electrics and plumbing too.'], ['Tiling is included.'],
@@ -44,7 +44,7 @@ test('SERVICES: what we do not supply or arrange is never claimed; what we do is
 
 test('GUARANTEES: only Blum\'s lifetime mechanical guarantee; no other guarantee, warranty or length', () => table(
   [['Blum hardware has a 5 year guarantee.'], ['We give a 10 year warranty on the carcasses.'], ['All our work comes with a 12 month workmanship warranty.'], ['The units are guaranteed for life.']],
-  [['The Blum hardware in every kitchen, like the soft-close hinges and drawers, comes with Blum\'s lifetime mechanical guarantee.'], ['Blum hardware carries Blum\'s lifetime mechanical guarantee.']]));
+  [['The Blum soft-close hinges in every kitchen come with Blum\'s lifetime mechanical guarantee.'], ['Blum hardware carries Blum\'s lifetime mechanical guarantee.']]));
 
 test('CONSULTATIONS: nothing is booked or confirmed by the answer, open items (samples, quote turnaround) are not answered, the visit is free', () => table(
   [['No problem, your consultation is confirmed for Monday.'], ['Great, you\'re booked in for a home visit.'], ['We bring door and worktop samples to the visit.'], ['No, we don\'t bring samples.'], ['You will get the quote a few days after the home visit.'],
@@ -56,8 +56,8 @@ test('REAL ANSWERS FROM THE PAID RUN OF 16 OCT 2026 PASS (one was wrongly blocke
   ['Yes, we do wardrobes as well as kitchens and utility rooms. A laminate worktop is included in the price, and stone like quartz, Dekton or granite is optional and costs extra.'],
   ['No, we don\'t have a showroom. We do the design at a free home visit instead, with no obligation.'], ['No, appliances are bought by you, but we fit the integrated ones into the units for you.'],
   ['To be honest, most of our kitchens start around €10,000, so 7k would be tight. A free home visit would let us see what\'s possible, though.', 'My budget is about 7k, is that enough?'],
-  ['It\'s a 30% deposit, paid once you accept the quote. The balance is paid when the kitchen is fitted and finished.'], ['We don\'t have a showroom, the design is done at a free home visit.'],
-  ['All our kitchens come with Blum soft-close hinges and drawers as standard, and the Blum hardware carries Blum\'s lifetime mechanical guarantee.']]));
+  ['It\'s a 30% deposit, paid once you accept the quote. The balance is paid when the kitchen is fitted and finished.'], ['We don\'t have a showroom, the design is done at a free home visit.']]));
+// That run's seventh answer ("Blum soft-close hinges and drawers as standard") is wrong since the owner's correction of 16 Oct 2026: it is in the blocked list of ai-knowledge-language.test.js.
 
 test('THE CHECK FOLLOWS THE KNOWLEDGE: when the owner changes an entry, the same answer is judged by the new entry (no deploy)', () => {
   const edit = (id, text) => { const d = JSON.parse(JSON.stringify(SEED)); for (const s of d.sections) for (const e of s.entries) if (e.id === id) e.text = text; return KN.compile(KN.clean(d), 2); };
@@ -77,4 +77,18 @@ test('A CONTRADICTING ANSWER IS NEVER SENT: the receptionist sends the holding l
     const p = S.plan({ decision: { reply, intent: 'asking_info', visit: 'none', hasQuestion: true, answerState: 'answered', change: 'none', special: 'none', topics: ['company-showroom'], links: [], schedule: { preference: null, opener: '' }, handover: { needed: false, reason: null } }, consult: null, messages, booked: false, nowMs: Date.UTC(2026, 9, 13, 10), natural: true, kn });
     assert.equal(p.step, 'holding'); assert.equal(p.reply, K.lines.holding); assert.equal(p.handover.needed, true); assert.doesNotMatch(p.reply, /showroom/i);
   }
+});
+
+test('THE STARTING KNOWLEDGE MATCHES THE OWNER\'S CORRECTION (16 Oct 2026): Blum soft-close hinges and Cemux soft-close drawers as standard, Blum drawers an upgrade, the carcasses and their colour', () => {
+  const approved = SEED.sections.flatMap((s) => s.entries).filter((e) => e.kind === 'approved'), all = approved.map((e) => e.text).join('\n');
+  assert.match(all, /Blum soft-close hinges and Cemux soft-close drawers as standard/); assert.match(all, /Blum drawer systems are an optional upgrade, not standard/);
+  assert.match(all, /carcasses are made from melamine-faced furniture board with solid hard backs/); assert.match(all, /standard carcass colour is Robson Oak/);
+  for (const e of approved) assert.doesNotMatch(e.text, /Blum soft-close hinges and drawers|premium Blum hardware as standard/i, e.id);
+});
+
+test('A NAME THE KNOWLEDGE USES IS NOT A PERSON: "It\'s Robson Oak as standard" is sent; "I\'m Sean" and "Sean here" are still blocked', () => {
+  const R = require('../lib/aiReply');
+  for (const t of ['It\'s Robson Oak as standard.', 'It\'s Blum soft-close hinges as standard.', 'This is Cemux soft-close as standard.']) assert.deepEqual(R.outgoingCheck(t, { knowledge: K }).reasons, [], t);
+  for (const t of ['I\'m Sean from the office.', 'Hi Aoife, Sean here.', 'My name is Mary.']) assert.equal(R.outgoingCheck(t, { knowledge: K }).ok, false, t);
+  assert.equal(R.outgoingCheck('It\'s Robson Oak as standard.', { knowledge: null }).ok, false, 'without knowledge there are no known names: still blocked (fails safe)');
 });

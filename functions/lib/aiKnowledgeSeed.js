@@ -1,6 +1,8 @@
 'use strict';
 // The starting knowledge for the AI Knowledge Centre: "Elite Kitchens – AI Knowledge Brain v1" (approved by the owner on 15 Oct 2026), turned into entries. It is loaded into the DRAFT only
 // (never published by itself). Nothing here is added to what the PDF says; "Tomasz" is written as "the team", as the owner asked. The four open items of the PDF are OPEN: not confirmed, never answered.
+// Corrected by the owner on 16 Oct 2026: the standard drawers are Cemux soft-close (Blum drawer systems are an optional upgrade, not standard), and the carcasses (material and standard colour) were added.
+// This changes only what "Import starting knowledge" puts into a DRAFT; the published knowledge is corrected by the owner in the Knowledge Centre.
 const a = (id, title, text) => ({ id, kind: 'approved', title, text });
 const n = (id, title, text) => ({ id, kind: 'never', title, text });
 const o = (id, title) => ({ id, kind: 'open', title, text: '' });
@@ -12,7 +14,7 @@ const SEED = {
       a('company-base', 'Where we are based', 'We are based in Balbriggan, North Dublin.'),
       a('company-areas', 'Areas we cover', 'We cover Dublin, Meath, Kildare, Louth and Cavan.'),
       a('company-showroom', 'Showroom', 'We have no showroom. The design is done at a free home visit.'),
-      a('company-why', 'Why choose us', '20+ years\' experience; bespoke, made to measure; premium Blum hardware as standard.'),
+      a('company-why', 'Why choose us', '20+ years\' experience; bespoke, made to measure; Blum soft-close hinges as standard.'),
       a('company-fitters', 'Who fits the kitchen', 'Our experienced fitters fit the kitchen.'),
       n('never-family', 'Who runs the business', 'Do not describe the business as family-run, and do not say who runs it.'),
     ] },
@@ -22,7 +24,8 @@ const SEED = {
       a('services-decline', 'Jobs we politely decline', 'We politely decline: fit-only jobs where the customer bought the units elsewhere; worktop-only or door-only jobs; repairs to kitchens supplied by other companies; anything outside Dublin, Meath, Kildare, Louth and Cavan. (For these set special declined_job or outside_area: a person reviews them.)'),
     ] },
     { id: 'materials', title: 'Materials and products', entries: [
-      a('materials-hardware', 'Hardware', 'Every kitchen comes with Blum soft-close hinges and drawers as standard.'),
+      a('materials-hardware', 'Hinges and drawers', 'Every kitchen comes with Blum soft-close hinges and Cemux soft-close drawers as standard. Blum drawer systems are an optional upgrade, not standard.'),
+      a('materials-carcass', 'Carcasses (the cabinet bodies)', 'The carcasses are made from melamine-faced furniture board with solid hard backs. The standard carcass colour is Robson Oak.'),
       a('materials-worktops', 'Worktops', 'Laminate worktops are included. Stone is optional and priced separately: quartz, Dekton / sintered stone, granite.'),
       a('materials-doors', 'Door styles', 'Handleless (Gola); shaker / painted; gloss and matt lacquer; wood / veneer.'),
       a('materials-upgrades', 'Upgrades', 'LED lighting; Blum Servo-Drive bins; corner and larder pull-outs; internal drawers and organisers.'),
@@ -87,6 +90,8 @@ const SEED = {
     { text: 'Can I see some photos of your work?' },
     { text: 'Is the worktop included in the price?' },
     { text: 'Is that solid oak?', mustNot: ['solid oak.', 'solid wood.'] },
+    { text: 'What are the kitchen boxes made of?' },
+    { text: 'i was wondering what are the carcases build from and what hinges do you use', mustNot: ['guarantee', 'Blum soft-close hinges and drawers'] },
     { text: 'What guarantee do you give on the units?', mustNot: ['10 year', '12 month'] },
     { text: 'Are you a family business?', mustNot: ['family-run', 'family run', 'family business'] },
     { text: 'Do you do electrics and plumbing too?' },

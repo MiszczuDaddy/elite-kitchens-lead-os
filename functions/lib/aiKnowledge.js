@@ -117,7 +117,9 @@ function compile(data, version) {
   const text = parts.join('\n').trim();
   const hay = [d.sections.map((s) => s.entries.filter((e) => e.kind === 'approved').map((e) => e.title + ' ' + e.text).join(' ')).join(' '), d.links.map((l) => l.url).join(' '), c.email, c.website, c.whatsapp].join(' ').toLowerCase();
   const titles = Object.fromEntries(d.sections.flatMap((s) => s.entries.map((e) => [e.id, e.title])));
-  return { version: version || null, text, lines: d.lines, links: d.links, contact: d.contact, examples: d.examples, haystack: hay, titles, allowed: allowedFrom(hay, d), facts: factsFrom(d), entryCount: Object.keys(titles).length };
+  // The names the knowledge itself uses (Blum, Cemux, Robson Oak, Dekton, Gola...): an answer that names them ("It's Robson Oak as standard") is not claiming to be a person.
+  const names = new Set((d.sections.flatMap((s) => s.entries.filter((e) => e.kind === 'approved').map((e) => e.title + ' ' + e.text)).join(' ').match(/\b[A-Z][a-zA-Z'’-]+/g) || []).map((x) => x.toLowerCase()));
+  return { version: version || null, text, lines: d.lines, links: d.links, contact: d.contact, examples: d.examples, haystack: hay, titles, allowed: allowedFrom(hay, d), facts: factsFrom(d), names, entryCount: Object.keys(titles).length };
 }
 
 // ================= the answer checker =================
