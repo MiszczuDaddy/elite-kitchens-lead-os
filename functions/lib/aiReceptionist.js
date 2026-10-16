@@ -22,7 +22,7 @@
 // answers anything the event path missed, and everything that arrived during quiet hours. Both call the same processChat(), so they cannot both answer: a per-chat lock, the "already answered" record and the
 // claim before sending see to that. Just before sending, the chat is read AGAIN: a message from a person, or a newer message from the customer, stops this reply (a person replying while the reply was being
 // written must never be talked over, and a newer message gets its own answer with the full picture).
-const { Timestamp } = require('firebase-admin/firestore');
+const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const ai = require('./ai');
 const outbound = require('./outbound');
 const store = require('./store');
@@ -30,6 +30,8 @@ const { SEND_STEPS, PAUSE_STEPS } = require('./aiSchedule');
 
 const TZ = 'Europe/Dublin';
 const WAIT_MS = 30000, DEBOUNCE_MS = 30000, MIN_DELAY_MS = 5000, MAX_DELAY_MS = 90000, DAILY_CAP = 6, QUIET_UNTIL_HOUR = 7, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
+// The backup check handles several chats at once, oldest waiting first, and stops starting new ones after a while (its function has a time limit): what is left waits for the next check.
+const SWEEP_CONCURRENCY = 4, SWEEP_DEADLINE_MS = 120000, RATE_RETRY_MS = 20000, RATE_RETRIES = 3;
 const ACTOR = { kind: 'system', id: 'receptionist' };
 // The only steps whose words are sent by themselves. All of them are written by code (aiSchedule.js); the first may carry a short checked acknowledgement in front.
 // After these the chat is the owner's: the receptionist stays out.
@@ -102,7 +104,7 @@ async function activateIfNewLead(deps, doc, since) {
 // One chat. Returns a short reason (what was done or why not), never throws.
 async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS } = {}) {
   const { db, wa, model, owners } = deps, ref = db.doc('conversations/' + phone), t0 = Date.now(), nowAt = () => nowMs + (Date.now() - t0);       // nowAt: the time now, on the same clock as nowMs
-  let locked = false;
+  let locked = false, lockId = null;
   try {
     const snap = await ref.get();
     if (!snap.exists) return 'gone';
@@ -124,10 +126,11 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     const day = ai.dayId(nowMs);
     if (r.day === day && (r.count || 0) >= DAILY_CAP) return 'daily_limit';
     // one run at a time per chat (two overlapping checks must never both answer). The state is read AGAIN inside the lock: a check that was waiting must not act on what it read before another one finished.
+    lockId = require('crypto').randomBytes(6).toString('hex');                                // whose lock it is: only its owner may clear it
     const got = await db.runTransaction(async (tx) => {
       const s = await tx.get(ref), cur = (s.exists && s.data().receptionist) || {};
       if (cur.on !== true || cur.paused || personWrote(cur)) return 'paused'; if (ms(cur.lockUntil) > nowMs) return 'busy'; if (lastIn <= (cur.handledMs || 0)) return 'handled';
-      tx.update(ref, { 'receptionist.lockUntil': nowMs + 90000 }); return 'ok';
+      tx.update(ref, { 'receptionist.lockUntil': nowMs + 90000, 'receptionist.lockId': lockId }); return 'ok';
     });
     if (got !== 'ok') return got;
     locked = true;
@@ -141,6 +144,7 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     let res;
     try { res = await ai.suggestReply({ db, model, owners }, ACTOR, { phone }, { uid: 'receptionist', nowMs, receptionist: true }); }
     catch (e) {
+      if (e && e.code === 'resource-exhausted') return 'rate_limited';                  // too many AI calls in this minute or hour: NOT a failure and no hand-over; the customer is answered on a later run
       if (e && e.code === 'failed-precondition') { await handOver(deps, ref, phone, 'ai unavailable: ' + String(e.message || '').slice(0, 80), nowMs); return 'refused'; }
       const tries = (r.triesFor === lastIn ? r.tries || 0 : 0) + 1;
       if (tries >= MAX_TRIES) { await handOver(deps, ref, phone, 'ai failed ' + tries + ' times', nowMs); return 'failed'; }
@@ -214,7 +218,14 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
   } catch (e) {
     log('error', 'receptionist chat failed', { code: String((e && e.code) || 'unknown').slice(0, 60) });
     return 'error';
-  } finally { if (locked) await ref.update({ 'receptionist.lockUntil': 0 }).catch(() => {}); }
+  } finally {
+    if (locked) {                                                                           // a run that took over after this lock ran out keeps ITS lock: only the owner clears it
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(ref), cur = (s.exists && s.data().receptionist) || {};
+        if (cur.lockId === lockId) tx.update(ref, { 'receptionist.lockUntil': 0, 'receptionist.lockId': FieldValue.delete() });
+      }).catch(() => {});
+    }
+  }
 }
 
 // The reply delay: one number in the settings document (seconds, 5 to 90), 30 by default. Read on every run, so it can be changed without redeploying.
@@ -241,7 +252,9 @@ async function onInbound(deps, phone, messageMs, { sleep = (n) => new Promise((r
     if (ms(again.data().lastInboundAt) > messageMs) return 'superseded';                    // the customer wrote again while we waited: only the run for the LAST message goes on
     const t1 = now(); if (quiet(t1)) return 'quiet';
     if (!again.data().receptionist && !(await activateIfNewLead(deps, again, s.autoReplySince))) return 'not_ours';
-    return await processChat(deps, phone, t1, { waitMs: 0 });                              // the delay has been waited: no second wait
+    let r = await processChat(deps, phone, t1, { waitMs: 0 });                              // the delay has been waited: no second wait
+    for (let i = 0; i < RATE_RETRIES && r === 'rate_limited'; i++) { await sleep(RATE_RETRY_MS); r = await processChat(deps, phone, now(), { waitMs: 0 }); }        // too many AI calls this minute: wait a little and try again; if it is still busy the 5-minute check answers
+    return r;
   } catch (e) { log('error', 'receptionist event failed', { code: String((e && e.code) || 'unknown').slice(0, 60) }); return 'error'; }
 }
 
@@ -252,21 +265,31 @@ async function onMessage(deps, phone, message, opts) {
 }
 
 // The backup check (every 5 minutes): anything the event path missed, and everything that arrived during quiet hours. Returns a count of what happened, for the log (no names, no words).
-async function sweep(deps, nowMs = Date.now()) {
+async function sweep(deps, nowMs = Date.now(), { deadlineMs = SWEEP_DEADLINE_MS, concurrency = SWEEP_CONCURRENCY } = {}) {
   const s = await ai.loadSettings(deps.db), why = closed(s, deps, nowMs);
   if (why === 'off') return { skipped: 'off' };
   if (why === 'no key') return { skipped: 'no key' };
   if (why === 'quiet hours') return { skipped: 'quiet hours' };
-  // The chats the customer has written in during the last 24 hours (the only ones that can be answered): one query, newest first.
+  // The chats the customer has written in during the last 24 hours (the only ones that can be answered): one query.
   const chats = await deps.db.collection('conversations').where('lastInboundAt', '>=', Timestamp.fromMillis(nowMs - WINDOW_MS)).orderBy('lastInboundAt', 'desc').limit(MAX_CHATS).get();
-  const out = { chats: chats.size };
-  for (const d of chats.docs) {
-    let activated = false;
-    try { activated = s.autoReply && await activateIfNewLead(deps, d, s.autoReplySince); if (activated) out.activated = (out.activated || 0) + 1; } catch (e) { log('error', 'receptionist activation failed', { code: String((e && e.code) || 'unknown').slice(0, 60) }); continue; }
-    const rec = d.data().receptionist;
-    if (!activated && !(rec && rec.on === true && (s.autoReply || !rec.auto))) continue;     // not switched on (or not a Meta lead): never looked at any further; automatic chats need the master switch
-    const why = await processChat(deps, d.id, nowMs); out[why] = (out[why] || 0) + 1;
-  }
+  const out = { chats: chats.size }, t0 = Date.now(), at = () => nowMs + (Date.now() - t0), waitMs = delayMs(s);        // the same reply delay as the event path (the owner's setting), and a clock that moves while the check works
+  // Only chats the receptionist is on for, or that may be new Meta leads to switch on; the one that has waited longest first.
+  const queue = chats.docs.filter((d) => { const rec = d.data().receptionist; return (rec && rec.on === true && (s.autoReply || !rec.auto)) || (!rec && s.autoReply); }).sort((x, y) => ms(x.data().lastInboundAt) - ms(y.data().lastInboundAt));
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      if (Date.now() - t0 >= deadlineMs) return;                                       // the function has a time limit: what is left waits for the next check
+      if (quiet(at())) return;                                                         // midnight came while the check was working: nothing more is started (the 07:00 check answers the rest)
+      const d = queue[next++]; if (!d) return;
+      let activated = false;
+      try { activated = s.autoReply && await activateIfNewLead(deps, d, s.autoReplySince); if (activated) out.activated = (out.activated || 0) + 1; } catch (e) { log('error', 'receptionist activation failed', { code: String((e && e.code) || 'unknown').slice(0, 60) }); continue; }
+      const rec = d.data().receptionist;
+      if (!activated && !(rec && rec.on === true && (s.autoReply || !rec.auto))) continue;     // not switched on (or not a Meta lead): never looked at any further; automatic chats need the master switch
+      const r = await processChat(deps, d.id, at(), { waitMs }); out[r] = (out[r] || 0) + 1;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, queue.length)) }, worker));
+  if (queue.length - next > 0) out.deferred = queue.length - next;
   return out;
 }
 

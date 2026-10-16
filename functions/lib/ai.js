@@ -23,6 +23,9 @@ const TZ = 'Europe/Dublin';
 const DEADLINE_MS = 100000;                    // no new model call is started once a question has run this long (the function itself may run 240 s; one call is limited to 40 s, 3 tries)
 const MAX_STEPS = 6, MAX_TOOLS_PER_STEP = 4, MAX_MESSAGE = 2000, MAX_HISTORY = 12, MAX_HISTORY_CHARS = 12000, MAX_TURN_CHARS = 4000;
 const RATE_PER_MINUTE = 8, RATE_PER_HOUR = 60;
+// The automatic receptionist is not a person at a keyboard: a burst of new leads (7:00 after a night of messages, a campaign) must not be refused by the limit meant for staff. It has a pool of its own. The euro
+// spending caps (daily and monthly) are NOT changed: they remain the real limit on cost. Hitting this limit never counts as a failure: the chat is simply answered on a later run (aiReceptionist).
+const RECEPTIONIST_RATE = { perMinute: 30, perHour: 400, pool: 'rc_' };
 const CUSTOMER_ID = /^\d{9,15}$/, QUOTE_ID = /^q_[0-9a-f]{24}$/, PROJECT_ID = /^[pm]_[0-9a-f]{24}$/;
 
 // ---- settings: everything that can stop or limit the AI. A missing document means OFF. ----
@@ -467,7 +470,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
   if (!settings.replyAssistant) throw refused('Reply suggestions are switched off. The owner can switch them on in Assistant settings.');
   const key = modelKey(data.model) || settings.replyModel;                     // replies go to customers: the better model by default (about 1 cent), Haiku on request
   if (!modelReady(await loadModelCheck(db), key)) throw refused(`The ${MODELS[key].label} model has not been checked yet. Open Settings and press "Check models".`);
-  await checkRate(db, uid || actor.id, nowMs);
+  await checkRate(db, uid || actor.id, nowMs, receptionist ? RECEPTIONIST_RATE : {});             // staff: 8 a minute and 60 an hour each; the receptionist: its own, larger pool
   const sheet = await R.buildSheet(db, phone, nowMs);
   if (!sheet) throw new HttpsError('not-found', 'Customer not found.');
   const knowledge = await KN.loadLive(db);                                    // the PUBLISHED knowledge only (none published = the behaviour from before Step C)
@@ -572,4 +575,4 @@ async function decideProposal({ db }, actor, data, { uid, nowMs = Date.now() } =
   return A.decide({ db }, actor, uid || actor.id, data, { nowMs }, await loadSettings(db));
 }
 
-module.exports = { suggestReply, testKnowledge, draftOutcome, dismissConsult, setReceptionist, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };
+module.exports = { RECEPTIONIST_RATE, suggestReply, testKnowledge, draftOutcome, dismissConsult, setReceptionist, decideProposal, MODELS, isOwner, checkModels, loadModelCheck, DEFAULTS, UNKNOWN_PRICE, MAX_STEPS, SYSTEM, loadSettings, saveSettings, status, reserve, settle, checkRate, monthId, dayId, eur, priceOf, anthropicModel, MODEL_TUNING, judgeModelInfo, createDemoModel, ModelError, chat, checkHistory, checkContext };
