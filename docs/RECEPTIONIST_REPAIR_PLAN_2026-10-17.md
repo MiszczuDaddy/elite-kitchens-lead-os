@@ -107,6 +107,32 @@ All 11 checker cases are paired: the correct answer passes and the false claim i
   - Three older tests were updated for intended changes: the list of default lines; unavailable twice now means a note instead of a booking request; and a day plus an unknown question is now acknowledged.
   - One test was updated for the per-attempt alert key.
 
+## Full regression and paid re-run (17 Oct 2026)
+
+- **Full regression of b03f80d:**
+  - backend 780 of 781, browser 18 of 22;
+  - every failure (push, theme, reopen, scripts.test.js, a timing-sensitive load test) is the same on `main` 69621b8 or passes when run alone.
+- **Paid re-run on the real model (€1.11), 128 conversations:**
+  - fixed: 45 of our 56 flagged conversations and 19 of Astra's 22;
+  - held-out: 37 of 40 right;
+  - controls: 10 of 10 unchanged;
+  - safety: every hand-over alerted the owner, and no reply was sent after a hand-over.
+- Report: `tools/receptionist-audit/sim200-2026-10-17/RERUN-REPORT.md` (local).
+- **Two items it found, fixed afterwards:**
+  - Astra B034: a second "we're away then too" got the following-week question. Once "just let us know when suits" has been sent, no more week questions, and the absence is also read from the model's summary of the customer's words.
+  - N29: "Could someone come out this Saturday?" got an extra "I'll check the rest". That line is now added only when something besides the visit day is open.
+  - Replay tests for both in `ai-receptionist-audit-repairs.test.js`; AI suites 308/308.
+- **Still open from the re-run (small, none unsafe):**
+  - "our own fitters" is now blocked, so two answers became holding lines (needs the owner's fact about who employs the fitters);
+  - "You're Tomasz, right?";
+  - "Of course" to a request for the owner's number;
+  - the model hands over a sticker and the Blum-upgrade question;
+  - "looking at kitchens" gets "take your time";
+  - "Good question" to discount requests;
+  - "now just wardrobes" still says "a new kitchen";
+  - "touch the drawer and it opens";
+  - "weekdays until six" gets the following-week question.
+
 ## Testing needed before a controlled launch
 
 1. ~~Approve or edit the four lines above~~: done on 17 Oct 2026 (line 2 reworded by you).

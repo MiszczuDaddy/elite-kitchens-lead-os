@@ -224,6 +224,9 @@ const REFUSE_MOVE = /\b(?:(?:do ?n[o']?t|do not|no|not)\s+(?:want|need|looking f
 const STOP = /\b(?:stop (?:messaging|texting|contacting|sending)|unsubscribe|don'?t (?:message|text|contact) me|do not (?:message|text|contact) me|leave me alone|remove (?:me|my number))\b/i;
 // a request for ANOTHER customer's details (Astra F7 A096): a clear refusal, never "Good question, I'll check with the team"
 const PRIVACY = /\b(?:another|other|previous|last|a different|someone else'?s?)\s+(?:customer|client|person|household)s?'?\b[^.?!]{0,40}\b(?:address|number|phone|details|name|email|eircode|contact)\b|\b(?:address|number|phone|details|eircode|contact details)\b[^.?!]{0,30}\b(?:of|for)\s+(?:another|other|previous|the last|a)\s+(?:customer|client)s?\b/i;
+// the model's "what is still open" says nothing but the visit and its day ("visit availability this Saturday"), so there is no "rest" to check (re-run N29); "weekend working", "samples" are real questions
+const VISIT_DAY_WORDS = /\b(?:home|visits?|consultations?|appointments?|availability|available|come|coming|call|calling|out|over|round|slots?|dates?|days?|times?|weeks?|this|next|following|specific|requests?|requested|asks?|asking|wants?|whether|if|we|can|could|someone|on|at|for|a|an|the|to|be|is|are|of|and|or|tomorrow|today|tonight|mornings?|afternoons?|evenings?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thur?s?|fri|sat|sun)\b/gi;
+const visitDayOnly = (t) => !String(t || '').replace(VISIT_DAY_WORDS, ' ').replace(/[^a-z]+/gi, ' ').trim();
 // the project in the acknowledgement follows what the customer says NOW ("a utility room, not a full kitchen": Astra F8 A005, B049), never overwriting the records
 function projectSaid(words) {
   const w = String(words || ''), kitchenNo = /\b(?:not|no|rather than|instead of|n't need)\b[^.?!]{0,15}\bkitchen\b/i.test(w), kitchen = /\bkitchen\b/i.test(w) && !kitchenNo;
@@ -338,7 +341,9 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
         // They also said when they are free ("can someone come out today?", "I can only do Saturdays"): recorded for the booking card while a person answers (audit 17 Oct 2026, problem 5). A visit asked
         // for today or tomorrow gets the owner's "pass your request on" line; otherwise the customer is told their day was passed on and that the question will be checked (Astra F6 B076: "Wednesday suits. Will you bring
         // samples?" used to get only "Good question, I'll check with the team").
-        if (given && !booked) return { step: 'acknowledge', reply: prefHeard.soon ? line('soon') : passOn + ' ' + (kn.lines.partly || kn.lines.holding), handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + (reason || 'a question that needs the team') + unknown }, preference: given, kn: info };
+        // "I'll check the rest" only when something besides the visit day is open: the model sometimes lists the visit request itself as the open question ("visit availability this Saturday": re-run N29).
+        const dayOnly = !!d.unknown && visitDayOnly(d.unknown);
+        if (given && !booked) return { step: 'acknowledge', reply: prefHeard.soon ? line('soon') : passOn + (dayOnly ? '' : ' ' + (kn.lines.partly || kn.lines.holding)), handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + (reason || 'a question that needs the team') + unknown }, preference: given, kn: info };
         return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
       }
       if (state === 'partly') {
@@ -397,11 +402,15 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
 
   // 5. They will check / are not available: no booking request, no pushing.
   const asks = asksSoFar(consult, messages);
+  // Once a customer has been told "just let us know when suits" (they are away, or will come back to us), no more week questions and no repeat of the line: their next word about not being free needs
+  // no reply, and you were already told (re-run of 17 Oct 2026, Astra B034: "please don't ask about the week after next, we're abroad then too" got the following-week question).
+  const settled = natural && (said(LINES.tentative) || (consult && consult.stage === 'tentative'));
+  if (prefRaw && settled && (prefStatus === 'tentative' || prefStatus === 'unavailable')) return { ...none, quiet: true };
   if (prefRaw && prefStatus === 'tentative') return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer will let us know' }, preference: noteOf({ ...prefRaw, status: 'tentative' }) };
   if (prefRaw && prefStatus === 'unavailable') {
     // One question about the following week only for a plain "not next week". Someone away for weeks, or who says they will contact us, gets "just let us know when suits" and a note: never a second
     // week question and never a booking request (Astra F3 B034, B040: "we'll be in touch to arrange a time" and a booking request for someone who said they would contact us).
-    if (asks === 1 && !(natural && LONG_AWAY.test(words))) return { step: 'ask_following_week', reply: LINES.ask_following_week, handover: null, preference: null };
+    if (asks === 1 && !(natural && (LONG_AWAY.test(words) || LONG_AWAY.test(prefRaw.text || '')))) return { step: 'ask_following_week', reply: LINES.ask_following_week, handover: null, preference: null };
     if (asks >= MAX_ASKS && !natural) return { step: 'no_preference', reply: LINES.no_preference, handover: { needed: true, reason: 'no preference given after two questions' }, preference: noteOf(prefRaw) };
     return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer not available: ' + (prefRaw.text || 'no detail') }, preference: noteOf(prefRaw) };
   }

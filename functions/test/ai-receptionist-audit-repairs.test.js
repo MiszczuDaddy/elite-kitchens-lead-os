@@ -134,6 +134,40 @@ test('UNAVAILABLE (Astra F3 B034, B040): away for weeks, or "I\'ll contact you w
   assert.equal(run({ intent: 'scheduling', visit: 'agreed', schedule: { preference: { status: 'unavailable', weeks: 'next', text: 'Not next week, sorry.' } } }, { messages: [...ASKED, inn('Not next week, sorry.')], consult: ASKED_C }).step, 'ask_following_week');
 });
 
+test('UNAVAILABLE, SECOND MESSAGE (re-run of 17 Oct 2026, Astra B034): after "just let us know when suits", a further "we\'re away then too" is never answered with a week question', () => {
+  // the real conversation: away for six weeks -> our tentative line -> "please don't ask about the week after next, we're abroad then too" (the model's recorded decision)
+  const said1 = 'We\'re away for the next six weeks.', said2 = 'Please don\'t ask about the week after next, we\'re abroad then too.';
+  const msgs = [...ASKED, inn(said1), out(L.tentative), inn(said2)];
+  const d = { intent: 'scheduling', visit: 'agreed', schedule: { preference: { status: 'unavailable', weeks: 'other', text: said1 + ' ' + said2 } } };
+  for (const [name, consult] of [['the note is recorded', { stage: 'tentative', asks: 1, offered: true, note: { text: 'Not available: "' + said1 + '"' } }], ['only our line in the chat', ASKED_C]]) {
+    const r = run(d, { messages: msgs, consult });
+    assert.ok(!/following week|any day next week|days or times/i.test(r.sent), `${name}: no week question (${r.step}: ${r.sent})`);
+    assert.ok(!r.advance || !r.advance.needsBooking, name + ': no booking request');
+  }
+  // the absence in the model's summary of their words counts too, even when the latest message alone does not mention it
+  const r2 = run({ ...d, schedule: { preference: { status: 'unavailable', weeks: 'other', text: 'Away for six weeks; not the week after next either' } } }, { messages: [...ASKED, inn('Not the week after next either')], consult: ASKED_C });
+  assert.notEqual(r2.step, 'ask_following_week');
+  // unchanged: a customer who said they would let us know and then gives a day is passed on as usual
+  const r3 = run({ intent: 'scheduling', visit: 'agreed', ...pref({ days: ['tuesday'], weeks: 'next', text: 'Tuesday works now' }) }, { messages: [...ASKED, inn(said1), out(L.tentative), inn('Actually Tuesday next week works now')], consult: { stage: 'tentative', asks: 1, offered: true } });
+  assert.equal(r3.step, 'acknowledge');
+});
+
+test('ONLY THE VISIT DAY IS OPEN (re-run of 17 Oct 2026, N29): "Could someone come out this Saturday?" gets the pass-on line alone, no "I\'ll check the rest"', () => {
+  const r = run({ intent: 'wants_consultation', visit: 'asked', hasQuestion: true, answerState: 'none', unknown: 'visit availability this Saturday', handover: { needed: true, reason: 'asks for a visit this Saturday, specific date request' }, ...pref({ days: ['saturday'], weeks: 'this', text: 'this Saturday' }) },
+    { messages: [WELCOME, inn('Could someone come out this Saturday?')] });
+  assert.equal(r.step, 'acknowledge');
+  assert.equal(r.sent, L.acknowledge, r.sent);
+  assert.deepEqual(r.plan.preference.days, ['saturday']); assert.equal(r.plan.preference.firstDate, '2026-10-24');
+  assert.ok(r.handover.needed && r.pause, 'handed to the owner with a push, as before');
+  // unchanged: a real second question keeps "I'll check the rest" (Astra B076: samples; our E08: weekend working)
+  const b076 = run({ intent: 'scheduling', visit: 'agreed', hasQuestion: true, answerState: 'none', unknown: 'whether worktop samples are brought to the visit', handover: { needed: true, reason: 'samples' }, ...pref({ days: ['wednesday'], weeks: 'next', text: 'Wednesday next week suits me' }) },
+    { messages: [...ASKED, inn('Wednesday next week suits me. Will you bring worktop samples?')], consult: ASKED_C });
+  assert.equal(b076.sent, L.acknowledge + ' ' + K.lines.partly);
+  const e08 = run({ intent: 'asking_info', hasQuestion: true, answerState: 'none', unknown: 'weekend / Saturday working and visit availability', handover: { needed: true, reason: 'weekends' }, ...pref({ days: ['saturday'], text: 'I can only do Saturdays' }) },
+    { messages: [WELCOME, inn('Do you work weekends? I can only do Saturdays')] });
+  assert.equal(e08.sent, L.acknowledge + ' ' + K.lines.partly);
+});
+
 test('CANCEL WITH NO NEW DATE (Astra F3 A082; ours G12): an explicit "no other date" or "we went with another company" is never asked to move the visit; nothing is said as done; a person takes over', () => {
   for (const [id, words, over] of [
     ['A082', 'I need to cancel the consultation. I do not want another date.', { intent: 'scheduling', visit: 'declined', change: 'cancel', handover: { needed: true, reason: 'customer wants to cancel booked consultation' } }],
