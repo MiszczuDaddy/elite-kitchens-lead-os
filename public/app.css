@@ -1153,3 +1153,27 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 /* Phase 9 R3: the per-chat Receptionist switch and the label on automatic messages */
 .recep-btn.on { background: var(--consult-bg); color: #5f3f08; border-color: #e3cf9f; font-weight: 600; }
 .auto-tag { margin: 0 0 3px; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--consult); }
+
+/* Phase 10: "Needs attention" (problems, alerts that did not reach a phone, rejected leads) and "Do not contact" */
+.attn-bar { padding: 0 10px 8px; flex: none; }
+.attn-btn { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 7px 12px; border: 1px solid #e7c4bf; border-radius: 8px; background: #f9eae6; color: var(--err); font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+.attn-btn:hover { background: #f5dfda; }
+.attn-btn:focus-visible { outline: 2px solid var(--err); outline-offset: 2px; }
+.attn-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--err); color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; }
+.attn-sec { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.attn-sec h3 { margin: 0 0 8px; font-size: 14px; }
+.attn-item { padding: 10px 12px; margin: 0 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.attn-item-title { font-weight: 600; }
+.attn-item-line { font-size: 13px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+.attn-item-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.attn-checks .hint { margin: 4px 0; font-size: 13px; }
+.attn-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; font-size: 13px; }
+.attn-settings input { width: 76px; min-height: 36px; margin: 0 4px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
+.notif-health-row { margin: 4px 0 0; }
+.dnc-note { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 20px; background: #f9eae6; color: var(--err); font-size: 13px; }
+.dnc-note .btn { flex: none; color: var(--err); border-color: #e7c4bf; }
+.dnc-box { margin: 8px 20px 0; padding-top: 16px; border-top: 1px solid var(--line); }
+.dnc-box .hint { margin: 5px 0 10px; font-size: 12px; }
+.dnc-state.on { color: var(--err); font-weight: 600; }
+.conv-dnc, .conv-alert { display: inline-block; margin: 2px 4px 0 0; padding: 1px 7px; border-radius: 9px; background: #f6e9e6; color: var(--err); font-size: 11.5px; font-weight: 600; }
+@media (max-width: 899px) { .dnc-note { flex-direction: column; align-items: flex-start; padding: 12px 14px; } .attn-settings label { width: 100%; } }

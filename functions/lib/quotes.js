@@ -350,6 +350,7 @@ async function send({ db, bucket }, actor, data, { nowMs = Date.now(), uid } = {
   if (!first.exists) throw new HttpsError('not-found', 'Quote not found.');
   const q0 = first.data();
   if (q0.lastSendRequestId === requestId) return { ...view(ref.id, q0), existing: true };   // the same request again
+  await require('./contactBlock').assertPhoneAllowed(db, q0.phone);                           // Phase 10: "do not contact": no quote goes to them, even one staff send themselves
   if (q0.preparedSend) throw refused(IN_PROGRESS);
   checkRev(q0, data.expectedRev);
   if (q0.draftVersion == null) throw refused('There is nothing to send: revise the quote first.');

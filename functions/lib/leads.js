@@ -9,6 +9,9 @@ const store = require('./store');
 const { normalizeLeadPhone } = require('./phone');
 const { mapLead, buildNote } = require('./leadmap');
 const LeadAddress = require('./leadAddress');
+const CB = require('./contactBlock');          // Phase 10: "do not contact"
+const LeadIssues = require('./leadIssues');    // Phase 10: rejected leads shown in "Needs attention"
+const health = require('./health');
 
 const MAX_BODY = 32 * 1024;
 const STALE_CLAIM_MS = 90 * 1000;          // an in-flight claim older than this is considered abandoned
@@ -65,19 +68,22 @@ async function upsertLeadCustomer(db, phone, lead, now) {
   });
 }
 
-// One welcome per number per hour, even across different leads: claimed inside a transaction on the contact document.
+// One welcome per number per hour, even across different leads: claimed inside a transaction on the contact document. Returns 'ok' (claimed), 'recent' (one went out lately) or
+// 'blocked' (Phase 10: the customer asked not to be contacted; checked inside the same transaction).
 async function claimWelcome(db, phone, now) {
   const cRef = db.collection('contacts').doc(phone), convRef = db.collection('conversations').doc(phone);
   return db.runTransaction(async (tx) => {
     const [c, conv] = await Promise.all([tx.get(cRef), tx.get(convRef)]);
     const m = (c.exists && c.data().metaLead) || {}, cv = conv.exists ? conv.data() : {};
+    if (CB.blocked(cv)) return 'blocked';
     const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : 0);
     const recentTemplate = cv.lastMessageType === 'template' && cv.lastMessageDirection === 'out' && ms(cv.updatedAt) && now - ms(cv.updatedAt) < COOLDOWN_MS;
-    if ((ms(m.welcomeSentAt) && now - ms(m.welcomeSentAt) < COOLDOWN_MS) || (ms(m.welcomeClaimedAt) && now - ms(m.welcomeClaimedAt) < 2 * 60 * 1000) || recentTemplate) return false;
+    if ((ms(m.welcomeSentAt) && now - ms(m.welcomeSentAt) < COOLDOWN_MS) || (ms(m.welcomeClaimedAt) && now - ms(m.welcomeClaimedAt) < 2 * 60 * 1000) || recentTemplate) return 'recent';
     tx.set(cRef, { metaLead: { welcomeClaimedAt: Timestamp.fromMillis(now) } }, { merge: true });
-    return true;
+    return 'ok';
   });
 }
+const DNC_WELCOME = 'Welcome message not sent: this customer asked not to be contacted. They have sent a new Meta form, so check before contacting them (press "Allow contact again" if they want to hear from you).';
 const releaseWelcome = (db, phone, sentAt) => db.collection('contacts').doc(phone).set(
   { metaLead: { welcomeClaimedAt: FieldValue.delete(), ...(sentAt ? { welcomeSentAt: Timestamp.fromMillis(sentAt) } : {}) } }, { merge: true });
 
@@ -91,10 +97,18 @@ function classify(e) {
   return 'unknown';
 }
 
-async function handleLeadRequest(req, { db, wa, cfg, now: clock, push }) {
+// Phase 10: a key was offered (an Authorization or X-Api-Key header with something in it). A wrong OFFERED key means the Make scenario has the wrong one: that is a problem worth an
+// alert. A request with no key at all is someone else knocking (scanners): it is refused as before and alerts nobody.
+const offeredKey = (headers) => { const h = String(headers['authorization'] || '').trim(); return (h.toLowerCase().startsWith('bearer ') ? h.slice(7).trim() : h).length > 0 || String(headers['x-api-key'] || '').trim().length > 0; };
+
+async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: hh }) {
   const now = clock ? clock() : Date.now();
   if (req.method !== 'POST') return respond(405, { ok: false, error: 'POST only' });
-  if (!authorized(req.headers || {}, cfg.apiKeys)) { log('warn', 'lead rejected: bad or missing key'); return respond(401, { ok: false, error: 'unauthorized' }); }
+  if (!authorized(req.headers || {}, cfg.apiKeys)) {
+    log('warn', 'lead rejected: bad or missing key');
+    if (hh && offeredKey(req.headers || {})) await hh.report('lead_key');
+    return respond(401, { ok: false, error: 'unauthorized' });
+  }
   if ((req.rawBody ? req.rawBody.length : 0) > MAX_BODY) return respond(413, { ok: false, error: 'payload too large' });
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) return respond(400, { ok: false, error: 'JSON object expected' });
   const lead = mapLead(req.body);
@@ -109,15 +123,21 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push }) {
     return respond(200, { ok: true, status: 'duplicate', leadId: id, welcome: (prior.data().welcome || {}).state || null });
   }
 
-  if (!phone) {   // not a valid number: nothing is created or sent; the ledger remembers it and Make is told so you get notified
+  if (!phone) {   // not a valid number: no customer is created and nothing is sent; the ledger remembers it and Make is told
     await ref.set({ leadId: id, ...base, state: 'rejected', reason: 'invalid_phone', receivedAt: prior.exists ? prior.data().receivedAt : Timestamp.fromMillis(now), attempts: FieldValue.increment(1) }, { merge: true });
     log('warn', 'lead rejected: no valid phone', { leadId: id, formId: lead.formId, phonesGiven: lead.phones.length });
+    // Phase 10: shown in "Needs attention" with what a person needs to follow it up (name, email, the number as typed), and one alert (push now; the email, if set up, by the health check)
+    try {
+      const li = await LeadIssues.record(db, lead, { reason: 'invalid_phone', nowMs: now });
+      if (li.created && push) await health.deliverLeadAlert({ db, notify: push.notify }, id, now, { pushOnly: true });
+    } catch (e) { log('error', 'rejected lead not recorded', { leadId: id, code: String((e && e.code) || 'unknown').slice(0, 60) }); }
     return respond(200, { ok: true, status: 'rejected', reason: 'invalid_phone', leadId: id });
   }
+  const wasRejected = prior.exists && prior.data().state === 'rejected';
 
   if (!prior.exists) {   // circuit breaker, only for genuinely new leads
     const n = (await db.collection('leads').where('receivedAt', '>', Timestamp.fromMillis(now - 3600e3)).count().get()).data().count;
-    if (n >= BREAKER_PER_HOUR) { log('error', 'lead intake circuit breaker tripped', { perHour: n }); return respond(503, { ok: false, status: 'rate_limited' }, { 'Retry-After': '300' }); }
+    if (n >= BREAKER_PER_HOUR) { log('error', 'lead intake circuit breaker tripped', { perHour: n }); if (hh) await hh.report('lead_breaker'); return respond(503, { ok: false, status: 'rate_limited' }, { 'Retry-After': '300' }); }
   }
 
   const claim = await db.runTransaction(async (tx) => {
@@ -134,6 +154,7 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push }) {
   if (claim.r === 'in_progress') return respond(503, { ok: false, status: 'in_progress', leadId: id }, { 'Retry-After': '5' });
 
   const info = await upsertLeadCustomer(db, phone, lead, now);
+  if (wasRejected) { try { await LeadIssues.resolvedByIntake(db, id, now); } catch (e) { log('error', 'rejected lead not closed', { leadId: id }); } }   // Phase 10: sent again with a usable number
   // Phase 8: a push for a NEW lead, right after the customer is saved and before the welcome message is sent. It can never throw and gives up after a few seconds.
   if (push && claim.r === 'claimed') { try { await push.notify({ kind: 'lead', sourceId: id, phone, eventAt: Date.parse(lead.createdTime) || null, backendReceivedAt: now }); } catch (e) { log('error', 'push hook failed'); } }
   const finish = async (welcome, extra) => {
@@ -144,7 +165,7 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push }) {
   const w = claim.welcome || { state: 'pending' };
   const bodyText = `[template: ${cfg.template}] Hi ${lead.firstName}, thanks for your enquiry with Elite Kitchens...`;
 
-  if (w.state === 'sent' || w.state === 'skipped_recent') return finish(w);
+  if (w.state === 'sent' || w.state === 'skipped_recent' || w.state === 'blocked') return finish(w);
   if (w.state === 'sending') {      // an earlier attempt died mid-send: the template may or may not have gone out. Flag it, never resend.
     await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: 'Welcome message status unknown (interrupted while sending). Check WhatsApp, then send it manually if needed.' });
     await releaseWelcome(db, phone);
@@ -155,7 +176,12 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push }) {
     await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: 'Welcome message not sent: WhatsApp kept failing. Please send it manually.' });
     return finish({ state: 'failed', error: 'too many retries', at: now });
   }
-  if (!(await claimWelcome(db, phone, now))) return finish({ state: 'skipped_recent', at: now });
+  const cw = await claimWelcome(db, phone, now);
+  if (cw === 'recent') return finish({ state: 'skipped_recent', at: now });
+  if (cw === 'blocked') {          // Phase 10: "do not contact": no welcome, and the chat says why (a person decides whether the new form means they want to hear from us)
+    await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: DNC_WELCOME }).catch(() => {});
+    return finish({ state: 'blocked', at: now });
+  }
 
   await ref.update({ welcome: { state: 'sending', at: now } });
   try {

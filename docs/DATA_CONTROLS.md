@@ -42,3 +42,9 @@ project, budget, notes), and (Phase 5) their appointments and Google Calendar ev
 ## Not built yet (candidates)
 - Export a customer's data (subject access request) as a file.
 - Bulk "delete everyone inactive for N months".
+
+## Phase 10: do not contact, rejected leads, backups
+- **Do not contact** (`conversations/{phone}.doNotContact`, with the last 20 changes): set by staff or by the customer's own "stop messaging me"; every send is refused while it is on. "Delete customer" removes it with the chat. A person who sends a NEW Meta form after being deleted is a new enquiry and gets the welcome.
+- **Rejected Meta leads** (`leadIssues/{leadId}`): name, email, the number as typed and the area, only so a person can follow the lead up. Erased the moment it is dealt with (added, dismissed, or sent again by Make with a usable number); the dealt-with item is removed completely after 30 days. Open items stay until someone deals with them. Not linked to a customer (there is no usable number), so "Delete customer" does not find them: use Dismiss.
+- **Problems** (`healthIssues`), the health records (`health/*`) and the alert records hold no customer data (a phone number appears only in a hand-over alert record, erased with the customer as before). Fixed problems are removed after 90 days.
+- **Backups** (`docs/BACKUPS.md`): daily backups kept 14 days, point-in-time recovery 7 days, deleted files 7 days. A deleted customer disappears from them after those periods. Say so in the privacy notice.

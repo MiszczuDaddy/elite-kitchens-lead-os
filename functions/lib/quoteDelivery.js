@@ -20,6 +20,7 @@
 const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const quotes = require('./quotes');
+const CB = require('./contactBlock');
 
 const { onlyKeys, text, bad, refused, checkRev, quoteRef, versionRef, capped, at, view, REQUEST_ID } = quotes.H;
 
@@ -111,12 +112,20 @@ async function attempt(deps, actor, id, did, { nowMs, retry = false, message = n
     if (!dSnap.exists || !qSnap.exists) return { skip: 'gone' };
     const d = dSnap.data(), eff = effectiveState(d, nowMs);
     if (!(eff === 'queued' || (retry && eff === 'failed'))) return { skip: eff };
+    // Phase 10: "do not contact", inside the claim. Nothing reaches the provider: the delivery is recorded as failed with the reason (staff see it, and Retry is refused the same way).
+    const conv = await tx.get(db.collection('conversations').doc(qSnap.data().phone));
+    if (conv.exists && CB.blocked(conv.data())) {
+      const now = at(nowMs), error = { code: 'do_not_contact', text: CB.TEXT };
+      tx.update(dRef, { state: 'failed', failedAt: now, error, history: capped(d.history, entry({ now, actor }, { event: 'failed', code: 'do_not_contact' }), HISTORY_MAX), updatedAt: now });
+      return { blocked: error };
+    }
     const attemptId = `${did}#${d.attempts + 1}`, now = at(nowMs);
     tx.update(dRef, { state: 'sending', attempts: d.attempts + 1, attemptId, claimedAt: now, error: null, ...(message ? { message } : {}),
       history: capped(d.history, entry({ now, actor }, { event: 'sending', attempt: d.attempts + 1 }), HISTORY_MAX), updatedAt: now });
     return { d: { ...d, message: message || d.message }, attemptId, attempt: d.attempts + 1, quoteRef: qSnap.data().ref, phone: qSnap.data().phone };
   });
   if (claim.skip) return { did, channel: null, state: claim.skip, skipped: true };
+  if (claim.blocked) { log('warn', 'quote delivery refused', { code: 'do_not_contact' }); return { did, channel: null, state: 'failed', error: claim.blocked }; }
 
   // 2. send
   const channel = claim.d.channel, adapter = deps.channels && deps.channels[channel];
@@ -198,6 +207,7 @@ async function deliver(deps, actor, data, { nowMs = Date.now(), uid } = {}) {
   onlyKeys(data, [...SEND_KEYS, 'version', 'channels', 'messages', 'subject', 'recipients']);
   const channels = cleanChannels(deps, data), messages = cleanMessages(deps, channels, data), subject = cleanSubject(data);
   let id = data.id, requestId = data.requestId;
+  { const q = await quoteRef(db, id).get(); if (q.exists) await CB.assertPhoneAllowed(db, q.data().phone); }      // Phase 10: "do not contact": refused before anything is prepared (and again inside each claim)
   if (data.version == null) {
     if ('recipients' in data) throw bad('Unknown field: recipients');                  // a draft is checked against the customer details on screen instead
     const sendData = {};
@@ -270,6 +280,7 @@ async function retry(deps, actor, data, { nowMs = Date.now() } = {}) {
   const [dSnap, qSnap] = await Promise.all([dRef.get(), ref.get()]);
   if (!dSnap.exists || !qSnap.exists) throw new HttpsError('not-found', 'Delivery not found.');
   const d = dSnap.data(), q = qSnap.data(), eff = effectiveState(d, nowMs);
+  await CB.assertPhoneAllowed(db, q.phone);                                               // Phase 10: "do not contact" (and again inside the claim)
   if (eff === 'sent') throw refused('This was already delivered.');
   if (eff === 'sending') throw refused('This is being sent right now.');
   if (eff === 'unknown') throw refused('We could not confirm whether this arrived. Check, then choose "It arrived" or "It did not arrive".');

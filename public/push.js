@@ -88,7 +88,7 @@ window.PUSH = (() => {
       (e) => { $('notif-summary').textContent = 'Cannot load the measurements: ' + errText(e); });
   }
   function unlistenEvents() { if (P.unsubEvents) { P.unsubEvents(); P.unsubEvents = null; } P.events = []; }
-  const KIND = { message: 'WhatsApp', lead: 'Lead', test: 'Test', handover: 'Handover' }, PLAT = { windows: 'Windows', android: 'Android', other: 'Other' };
+  const KIND = { message: 'WhatsApp', lead: 'Lead', test: 'Test', handover: 'Handover', alert: 'Needs attention' }, PLAT = { windows: 'Windows', android: 'Android', other: 'Other' };
   const clock = (ms) => (ms ? new Intl.DateTimeFormat('en-IE', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', day: 'numeric', month: 'short' }).format(new Date(ms)) : '');
   function renderSpeed() {
     const rows = M.rowsOfAll(P.events), sums = M.summarize(rows), box = $('notif-summary');
@@ -111,7 +111,9 @@ window.PUSH = (() => {
   // ---------- opening the right chat ----------
   // A notification carries only an opaque id. The page looks it up (staff can read it) to find the chat.
   async function openFrom(n) {
-    if (!n || !/^[mlt]_[0-9a-f]{24}$/.test(n)) return;
+    // Phase 10: a hand-over alert (h_) opens its chat too (it used to open only Elite OS); an alert about a problem or a lead (a_) opens "Needs attention".
+    if (!n || !/^[mltha]_[0-9a-f]{24}$/.test(n)) return;
+    if (n[0] === 'a') { if (window.ATTN && ATTN.open) ATTN.open(); return; }
     try {
       const s = await db.doc('pushEvents/' + n).get();
       const phone = s.exists ? s.data().phone : null;

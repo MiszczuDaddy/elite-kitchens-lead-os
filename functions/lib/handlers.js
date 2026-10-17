@@ -16,6 +16,8 @@ const delivery = require('./quoteDelivery');
 const { WINDOW_MS } = require('./windowState');          // 24 hours; the same rule the screen uses (Phase 6.1)
 const { normalizeLeadPhone } = require('./phone');
 const { verifySignature, parseWebhook, normalizePhone } = require('./whatsapp');
+const CB = require('./contactBlock');                    // Phase 10: "do not contact"
+const health = require('./health');                       // Phase 10: "Needs attention"
 
 const log = (level, msg, extra) =>
   console[level === 'error' ? 'error' : 'log'](JSON.stringify({ level, msg, ...extra }));
@@ -114,6 +116,7 @@ async function startConversation(auth, data, { db, wa, cfg }) {
   if (phone.length < 9) throw new HttpsError('invalid-argument', 'Enter a full number with country code, e.g. +353851234567');
   if (!name) throw new HttpsError('invalid-argument', 'Enter the customer first name (used in the template).');
   const requestId = outbound.requestIdOf(data);
+  await CB.assertPhoneAllowed(db, phone);                                          // Phase 10: an existing customer marked "do not contact" gets no template (checked again inside the claim)
   await store.ensureConversation(db, phone, name);
   const body = `[template: ${cfg.template}] Hi ${name}, thanks for your enquiry with Elite Kitchens...`;
   // One request = one conversation start (second audit, finding 6): the same claim as sendReply. Meta accepting the template is final: nothing after
@@ -141,6 +144,7 @@ async function sendReply(auth, data, { db, wa, cfg }) {
   if (!body) throw new HttpsError('invalid-argument', 'Message is empty.');
   const conv = await store.getConversation(db, phone);
   if (!conv) throw new HttpsError('not-found', 'Conversation not found.');
+  CB.assertAllowed(conv);                                                         // Phase 10: "do not contact" (checked again inside the claim)
   const lastIn = conv.lastInboundAt && conv.lastInboundAt.toMillis();
   if (!lastIn || Date.now() - lastIn > WINDOW_MS) {
     throw new HttpsError('failed-precondition', "Outside WhatsApp's 24-hour window: the customer must message first, or start a new conversation with the template.");
@@ -282,6 +286,7 @@ async function sendMedia(auth, data, { db, wa, cfg, bucket }) {
   if (!conv) throw new HttpsError('not-found', 'Conversation not found.');
   const file = bucket.file(uploadPath);
   const cleanup = () => file.delete({ ignoreNotFound: true }).catch(() => {});
+  if (CB.blocked(conv)) { await cleanup(); throw CB.refusal(); }                  // Phase 10: "do not contact" (checked again inside the claim)
   const lastIn = conv.lastInboundAt && conv.lastInboundAt.toMillis();
   if (!lastIn || Date.now() - lastIn > WINDOW_MS) {
     await cleanup();
@@ -406,6 +411,10 @@ const aiKnowledge = aiAction(KN.admin);                                 // Step 
 const aiKnowledgeTest = aiAction(ai.testKnowledge);                      // Step C: "Try it" on the draft knowledge (owner only; sends nothing)
 const setReceptionist = aiAction(ai.setReceptionist);            // R3: the receptionist on or off for one chat (owner only)
 const aiDismissConsult = aiAction(ai.dismissConsult);            // R2b: "Not needed" on a consultation request card
+// ---- Phase 10: "do not contact" and "Needs attention" (docs/PHASE10_SAFETY_NET.md). Staff only; neither sends anything to a customer. ----
+const staffAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps.cfg); return fn({ db: deps.db }, actorOf(auth), data); };
+const setDoNotContact = staffAction(CB.set);
+const attentionAction = staffAction(health.attention);
 // Phase 9.2a: Approve / Reject on a proposal. Staff only; only the person who asked can decide; no model, no secret.
 const aiDecide = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return ai.decideProposal({ db: deps.db }, actorOf(auth), data, { uid: auth.uid }); };
 
@@ -431,7 +440,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

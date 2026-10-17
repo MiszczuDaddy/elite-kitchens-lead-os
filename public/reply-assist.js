@@ -28,7 +28,8 @@ window.REPLY = (() => {
   }
   function render() {
     const panel = $('reply-panel'), btn = $('reply-btn');
-    btn.hidden = !R.enabled || !R.phone; btn.disabled = R.busy; btn.textContent = R.busy ? 'Reading the chat…' : 'Suggest reply';
+    const dnc = !!(R.phone && S.convs.some((x) => x.id === R.phone && x.doNotContact && x.doNotContact.on === true));     // Phase 10: nothing can be sent to them, so no draft either
+    btn.hidden = !R.enabled || !R.phone || dnc; btn.disabled = R.busy; btn.textContent = R.busy ? 'Reading the chat…' : 'Suggest reply';
     panel.replaceChildren();
     if (!R.phone || (!R.result && !R.error)) { panel.hidden = true; return; }
     panel.hidden = false;

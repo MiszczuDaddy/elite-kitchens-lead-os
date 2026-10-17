@@ -26,7 +26,12 @@ const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const ai = require('./ai');
 const outbound = require('./outbound');
 const store = require('./store');
-const { SEND_STEPS, PAUSE_STEPS } = require('./aiSchedule');
+const { SEND_STEPS, PAUSE_STEPS, STOP } = require('./aiSchedule');
+const CB = require('./contactBlock');          // Phase 10: "do not contact"
+const H = require('./health');                 // Phase 10: the receptionist's faults become problems in "Needs attention"
+// Phase 10: tell the health check (deps.health, functions/index.js). Never throws; with no hook (tests of older behaviour) it does nothing.
+const healthReport = (deps, kind, detail) => (deps.health ? Promise.resolve(deps.health.report(kind, detail)).catch(() => null) : null);
+const healthResolve = (deps, kinds) => (deps.health ? Promise.resolve(deps.health.resolve(kinds)).catch(() => null) : null);
 
 const TZ = 'Europe/Dublin';
 const WAIT_MS = 30000, DEBOUNCE_MS = 30000, MIN_DELAY_MS = 5000, MAX_DELAY_MS = 90000, DAILY_CAP = 6, QUIET_UNTIL_HOUR = 7, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
@@ -167,6 +172,7 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
       if (r.notify) await notifyPending(deps, ref, phone, nowAt());
       return done.n ? 'already_sent' : done.failed ? 'error' : 'paused';
     }
+    if (CB.blocked(c)) return 'do_not_contact';                                       // Phase 10: the customer asked not to be contacted: no AI call, nothing sent (checked again inside the claim)
     if (personWrote(r)) { await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }          // recorded before the person's message was sent: it cannot fall out of a window of messages
     if (!lastIn || lastIn <= at) return 'nothing_new';                           // only messages sent after it was switched on
     if (answered(c, r, lastIn)) return 'handled';
@@ -199,9 +205,9 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     try { res = await ai.suggestReply({ db, model, owners }, ACTOR, { phone }, { uid: 'receptionist', nowMs, receptionist: true }); }
     catch (e) {
       if (e && e.code === 'resource-exhausted') return 'rate_limited';                  // too many AI calls in this minute or hour: NOT a failure and no hand-over; the customer is answered on a later run
-      if (e && e.code === 'failed-precondition') { await handOver(deps, ref, phone, 'ai unavailable: ' + String(e.message || '').slice(0, 80), nowMs); return 'refused'; }
+      if (e && e.code === 'failed-precondition') { await handOver(deps, ref, phone, 'ai unavailable: ' + String(e.message || '').slice(0, 80), nowMs); await healthReport(deps, H.aiProblem(e.message)); return 'refused'; }
       const tries = (r.triesFor === key ? r.tries || 0 : 0) + 1;
-      if (tries >= MAX_TRIES) { await handOver(deps, ref, phone, 'ai failed ' + tries + ' times', nowMs); return 'failed'; }
+      if (tries >= MAX_TRIES) { await handOver(deps, ref, phone, 'ai failed ' + tries + ' times', nowMs); await healthReport(deps, 'ai_failing', String((e && e.code) || 'error').slice(0, 40)); return 'failed'; }
       await ref.update({ 'receptionist.tries': tries, 'receptionist.triesFor': key }); return 'retry';
     }
     const step = res.schedule && res.schedule.step, needs = !!(res.handover && res.handover.needed);
@@ -248,6 +254,7 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     try { claim = await outbound.begin(db, phone, requestId, nowMs, { guard, effects: eff }); }
     catch (e) {
       await report('discarded');
+      if (CB.isRefusal(e)) { await handOver(deps, ref, phone, 'do not contact', nowMs, { notify: false }); return 'do_not_contact'; }      // Phase 10: switched on while the reply was being written
       const why = e && e.details && e.details.reason === 'guard' ? e.details.why : null;
       if (why === 'human') { await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }
       if (why) return { paused: 'paused', switch_off: 'off', quiet: 'quiet', window: 'window_closed', newer_message: 'newer_message', daily_limit: 'daily_limit' }[why] || 'blocked';
@@ -270,6 +277,7 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     await outbound.settle(db, phone, requestId, { state: 'sent', wamid });
     await store.storeOutbound(db, phone, { wamid, type: 'text', body: res.draft, extra: { auto: true } }).catch(() => log('error', 'receptionist text sent but not recorded', { wamid }));
     await applyEffects(deps, ref, phone, eff, nowAt());                                      // the request for the owner, the pause, the push, "answered": repeated by the next run if this one dies here
+    await healthResolve(deps, H.AI_KINDS);                                                   // Phase 10: it answered, so the AI works again
     return 'sent:' + step;
   } catch (e) {
     log('error', 'receptionist chat failed', { code: String((e && e.code) || 'unknown').slice(0, 60) });
@@ -300,6 +308,7 @@ async function onInbound(deps, phone, messageMs, { sleep = (n) => new Promise((r
     const ref = deps.db.doc('conversations/' + phone), first = await ref.get();
     if (!first.exists) return 'gone';
     const c = first.data(), rec = c.receptionist;
+    if (CB.blocked(c)) return 'do_not_contact';                                            // Phase 10: nothing to answer, no AI call
     const ours = rec ? rec.on === true && !rec.paused && !personWrote(rec) && (s.autoReply || !rec.auto) : !!(s.autoReply && s.autoReplySince && ms(c.createdAt) >= s.autoReplySince);          // switched on, or a new Meta lead that may be
     if (!ours) return 'not_ours';
     if (newer(c)) return 'superseded';                              // a newer message is already here: its own run answers
@@ -318,7 +327,26 @@ async function onInbound(deps, phone, messageMs, { sleep = (n) => new Promise((r
 // The Firestore event for a new message: only a message FROM THE CUSTOMER goes on (our own messages, a person's and the welcome template all return at once, without reading anything).
 async function onMessage(deps, phone, message, opts) {
   if (!message || message.direction !== 'in') return 'ignored';
+  await stopRequested(deps, phone, message, opts);
   return onInbound(deps, phone, ms(message.createdAt), { ...(opts || {}), seq: Number.isInteger(message.seq) ? message.seq : null });
+}
+// Phase 10: "stop messaging me", "unsubscribe", "don't contact me" (the receptionist's own words, aiSchedule.STOP) switch "do not contact" on in EVERY chat, with the AI on or off. If the
+// receptionist was handling the chat it hands it to you, with an alert, exactly as it did before for such a message. Only a person switches it off again. Never throws.
+// "Don't text me after 9pm" is a preference about WHEN, not a request to stop: it is left to a person (and to the receptionist's own rules), as before.
+const ONLY_WHEN = /\b(?:don'?t|do not) (?:message|text|contact) me (?:after|before|at|on|until|till|til|between|during|in the|early|late|this|today|tonight|tomorrow|at work|while)\b/i;
+// "I'll stop sending you photos" is about the customer's own messages, not ours.
+const THEIR_OWN = /\bstop sending (?:you|u|the|my|our|photos?|pictures?|pics|plans?|drawings?|files?)\b/i;
+const asksToStop = (body) => { const b = String(body || ''); return STOP.test(b) && !ONLY_WHEN.test(b) && !THEIR_OWN.test(b); };
+async function stopRequested(deps, phone, message, opts) {
+  if (message.type !== 'text' || !asksToStop(message.body)) return false;
+  try {
+    const nowMs = opts && typeof opts.now === 'function' ? opts.now() : Date.now();
+    if (!(await CB.customerAsked(deps.db, phone, nowMs))) return false;
+    const ref = deps.db.doc('conversations/' + phone), s = await ref.get(), rec = s.exists && s.data().receptionist;
+    if (rec && rec.on === true && !rec.paused) await handOver(deps, ref, phone, 'customer asked us to stop messaging: do not contact', nowMs);
+    log('info', 'do not contact switched on: the customer asked');
+    return true;
+  } catch (e) { log('error', 'do not contact not recorded', { code: String((e && e.code) || 'unknown').slice(0, 60) }); return false; }
 }
 
 // The backup check (every 5 minutes): anything the event path missed, and everything that arrived during quiet hours. Returns a count of what happened, for the log (no names, no words).
@@ -350,4 +378,4 @@ async function sweep(deps, nowMs = Date.now(), { deadlineMs = SWEEP_DEADLINE_MS,
   return out;
 }
 
-module.exports = { processChat, onInbound, onMessage, sweep, delayMs, activateIfNewLead, quiet, hourOf, courtesyOnly, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DEBOUNCE_MS, MIN_DELAY_MS, MAX_DELAY_MS, DAILY_CAP, QUIET_UNTIL_HOUR };
+module.exports = { processChat, onInbound, onMessage, stopRequested, asksToStop, sweep, delayMs, activateIfNewLead, quiet, hourOf, courtesyOnly, SEND_STEPS, PAUSE_STEPS, WAIT_MS, DEBOUNCE_MS, MIN_DELAY_MS, MAX_DELAY_MS, DAILY_CAP, QUIET_UNTIL_HOUR };

@@ -87,6 +87,7 @@
     <a id="to-projects" class="btn btn-link btn-sm only-mobile install-m" href="#projects" aria-label="Open projects">Projects</a>
     <a id="to-assistant" class="btn btn-link btn-sm only-mobile install-m" href="#assistant" aria-label="Open the assistant">Assistant</a>
     <button id="install-app-m" type="button" class="btn btn-link btn-sm only-mobile install-m" data-install-app hidden aria-label="Install Elite OS">Install Elite OS</button>
+    <div id="attn-bar" class="attn-bar" hidden><button id="attn-open" type="button" class="attn-btn" title="Problems, alerts that did not reach your phone, and leads that could not be added"><span id="attn-count" class="attn-count">0</span> <span id="attn-text">things need attention</span></button></div>
     <div id="consult-bar" class="consult-bar" hidden><button id="consult-filter" type="button" aria-pressed="false" title="Customers who have said when they are free and are waiting for you to book a consultation">Needs booking <span id="consult-count" class="consult-count">0</span></button></div>
     <div id="status-filters" class="status-filters" role="group" aria-label="Filter conversations by status">
       <button type="button" data-status="inbox" aria-pressed="true">New lead<span class="status-unread" hidden></span></button>
@@ -265,6 +266,10 @@
       <div id="banner" class="banner" role="alert" hidden></div>
       <div id="consult-card" class="consult-card" aria-live="polite" hidden></div>
       <div id="msgs" class="msgs" aria-live="polite"></div>
+      <div id="dnc-note" class="dnc-note" role="status" aria-live="polite" hidden>
+        <span id="dnc-text"></span>
+        <button id="dnc-allow" class="btn btn-ghost btn-sm" type="button">Allow contact again</button>
+      </div>
       <div id="window-note" class="window-note" role="status" aria-live="polite" hidden>
         <span id="window-text"></span>
         <button id="tpl-btn" class="btn btn-primary btn-sm" type="button">Reopen conversation</button>
@@ -335,6 +340,11 @@
       <div id="d-projects-list"></div>
       <div id="d-projects-msg" class="d-msg" role="status"></div>
     </section>
+    <div class="dnc-box">
+      <div class="d-label">Contact</div>
+      <p id="dnc-state" class="hint dnc-state">Messages to this customer are allowed.</p>
+      <button id="dnc-btn" type="button" class="btn btn-ghost btn-sm">Do not contact…</button>
+    </div>
     <div class="danger">
       <div class="d-label">Data controls</div>
       <p class="hint">Permanently remove this customer, their messages and every file they sent or received.</p>
@@ -465,12 +475,46 @@
   </form>
 </dialog>
 
+<dialog id="dnc-dlg" class="dlg">
+  <form id="dnc-form" autocomplete="off">
+    <h2 id="dnc-title">Do not contact</h2>
+    <p id="dnc-hint" class="hint"></p>
+    <label id="dnc-note-label">Note <span class="label-note">(optional, e.g. "asked on the phone")</span><input id="dnc-note-in" maxlength="200"></label>
+    <div id="dnc-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="dnc-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="dnc-go" class="btn btn-danger">Do not contact</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="attn-dlg" class="dlg dlg-wide" aria-labelledby="attn-title">
+  <h2 id="attn-title">Needs attention</h2>
+  <p id="attn-summary" class="hint" role="status"></p>
+  <section id="attn-problems" class="attn-sec" hidden><h3>Problems</h3><div id="attn-problems-list"></div></section>
+  <section id="attn-alerts" class="attn-sec" hidden><h3>Alerts that did not reach your phone</h3><div id="attn-alerts-list"></div></section>
+  <section id="attn-leads" class="attn-sec" hidden><h3>Meta leads that could not be added</h3><div id="attn-leads-list"></div></section>
+  <section class="attn-sec attn-checks">
+    <h3>System checks</h3>
+    <p id="attn-checks" class="hint"></p>
+    <p id="attn-backup" class="hint"></p>
+    <form id="attn-settings" class="attn-settings" autocomplete="off">
+      <label>Warn me if no Meta lead arrives for <input id="attn-hours" type="number" min="0" max="720" step="1" inputmode="numeric"> hours <span class="label-note">(0 = never)</span></label>
+      <button type="submit" id="attn-save" class="btn btn-ghost btn-sm">Save</button>
+      <span id="attn-set-msg" class="d-msg" role="status"></span>
+    </form>
+  </section>
+  <div id="attn-err" class="dlg-err" role="alert"></div>
+  <div class="dlg-actions"><button type="button" id="attn-close" class="btn btn-ghost">Close</button></div>
+</dialog>
+
 <dialog id="notif-dlg" class="dlg dlg-wide">
   <h2>Notifications</h2>
   <p id="notif-state" class="notif-state"></p>
   <p class="hint">An alert for every new WhatsApp message and every new lead, even when Elite OS is closed. It says only that something arrived, never who or what: open it to see.</p>
   <div id="notif-info" class="hint" role="status"></div>
   <div id="notif-err" class="dlg-err" role="alert"></div>
+  <p class="hint notif-health-row"><button type="button" id="notif-health" class="btn btn-link btn-sm">System health and backups</button></p>
   <div class="dlg-actions notif-actions"><button type="button" id="notif-close" class="btn btn-ghost">Close</button><button type="button" id="notif-test" class="btn btn-ghost">Send a test notification</button><button type="button" id="notif-toggle" class="btn btn-primary">Enable notifications</button></div>
   <details id="notif-speed" class="notif-speed">
     <summary>Notification speed</summary>
@@ -685,6 +729,7 @@
 <script src="/lead-address.js"></script>
 <script src="/window-state.js"></script>
 <script src="/quote-send-model.js"></script>
+<script src="/attention-model.js"></script>
 <script src="/app.js"></script>
 <script src="/pipeline.js"></script>
 <script src="/appointments.js"></script>
@@ -705,5 +750,6 @@
 <script src="/reply-assist.js"></script>
 <script src="/consult-model.js"></script>
 <script src="/consult.js"></script>
+<script src="/attention.js"></script>
 </body>
 </html>

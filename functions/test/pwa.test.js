@@ -62,6 +62,17 @@ test('the service worker, the manifest, the offline page and pwa.js are never ca
   assert.deepEqual(cfg.hosting.rewrites[0], { source: '/webhook', function: { functionId: 'webhook', region: 'europe-west1' } });
 });
 
+// Phase 10 (the full audit of 17 Oct 2026 found knowledge.js and quote-numbers.js missing): EVERY script the page loads from this site must be fetched fresh after a release,
+// or a browser can mix a new screen file with an old one for up to an hour.
+test('every script the page loads from this site is on the no-cache list', () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
+  const noCache = cfg.hosting.headers.find((b) => /sw\.js/.test(b.source)).source.split(/[(|)]/);
+  const scripts = [...read('index.html').matchAll(/<script src="\/([^"]+)"/g)].map((m) => m[1]).filter((s) => !s.startsWith('__/'));
+  assert.ok(scripts.length > 20, 'the page scripts were found');
+  for (const s of scripts) { assert.ok(noCache.includes(s), s + ' is not in the no-cache rule of firebase.json'); assert.ok(fs.existsSync(path.join(PUBLIC, s)), s + ' does not exist'); }
+  for (const s of ['knowledge.js', 'quote-numbers.js', 'attention-model.js', 'attention.js']) assert.ok(scripts.includes(s), s + ' is loaded by the page');
+});
+
 // ---------------------------------------------------------------- the service worker, run for real in a pretend browser
 function loadWorker({ origin = 'https://app.test', fetchImpl } = {}) {
   const handlers = {}, calls = { open: [], add: [], put: [], del: [], skipWaiting: 0, claim: 0 };
