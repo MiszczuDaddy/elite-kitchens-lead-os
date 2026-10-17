@@ -29,6 +29,10 @@ const LINES = {
   cancel_ask: 'No problem, do you want to move it to any other date?',
   // A customer who will check or let us know (owner's wording, 15 Oct 2026).
   tentative: 'No problem at all, just let us know when suits.',
+  // Audit repairs of 17 Oct 2026, PROPOSED wording waiting for the owner's approval (owner-editable in the Knowledge Centre; the same defaults are in aiKnowledge.DEFAULT_LINES):
+  // a booked customer who cancels and wants no other date (the owner's already-approved "running late" wording: nothing is said as done), and a request for another customer's details.
+  cancel_noted: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
+  privacy: 'Sorry, we can\'t share other customers\' details.',
   no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.',
   // Audit of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval). With published knowledge both are the owner's lines in the Knowledge Centre (aiKnowledge DEFAULT_LINES, the same defaults).
   // The question after our greeting when a new lead only says hello, so the reply never ends in a dead end.
@@ -73,10 +77,27 @@ const TIME_STOP = new Set(['the', 'any', 'and', 'after', 'before', 'from', 'arou
 // customer wrote the word AND the model read it as a day they can do (it gave that day, or its own summary of their words has the word without a "not" in front: "not today, Friday" gives Friday only).
 const REL_DAYS = [[/\b(?:today|tonight)\b/, 0], [/\b(?:tomorrow|tmrw|tmr|2moro|2morrow)\b/, 1]];
 const NOT_BEFORE = /\b(?:not|no|never|can'?t|cannot|won'?t|couldn'?t|isn'?t|doesn'?t|don'?t)\b[\s\w']{0,12}$/;
+// Days the customer EXCLUDED ("any morning apart from Monday", "except Friday", "not Wednesday", "can't do Mondays", "Monday is no good"). Audit 17 Oct 2026 (Astra F2, B027 and B035): the model
+// correctly read "apart from Monday" as Tuesday to Friday, the code dropped those days because they were not written, and the booking form then opened on the excluded Monday.
+function exceptDays(said) {
+  const s = String(said || '').toLowerCase(), out = [];
+  for (const d of WEEKDAYS) {
+    const D = `(?:${d}|${DAY_WORDS[d]})s?`;
+    if (new RegExp(`\\b(?:except|apart from|other than|but not|not on|not|bar|excluding|besides|anything but)\\s+(?:a\\s+|on\\s+|the\\s+|for\\s+)?${D}\\b`).test(s)
+      || new RegExp(`\\b(?:any|every)\\s+(?:day|morning|afternoon|evening|time|weekday|week ?day)s?\\b[^.?!]{0,25}\\b(?:but|except)\\s+(?:on\\s+)?${D}\\b`).test(s)
+      || new RegExp(`\\b(?:can'?t|cannot|can not|couldn'?t)\\s+(?:do|make)\\s+(?:a\\s+|on\\s+)?${D}\\b`).test(s)
+      || new RegExp(`\\b${D}\\s+(?:is|are|'s)?\\s*(?:no good|out|not good|bad|not possible|a no|not an option)\\b`).test(s)) out.push(d);
+  }
+  return out;
+}
+const RANGE = /\b(?:any|every|all|whatever|whichever|weekdays?|week ?days|most)\b/;
 function heard(pref, said, nowMs = null) {
   if (!pref) return null;
   const s = String(said || '').toLowerCase(), t = String(pref.text || '').toLowerCase();
-  const named = pref.days.filter((d) => new RegExp(`\\b(?:${d}|${DAY_WORDS[d]})s?\\b`).test(s));
+  const except = exceptDays(s);
+  let named = pref.days.filter((d) => !except.includes(d) && new RegExp(`\\b(?:${d}|${DAY_WORDS[d]})s?\\b`).test(s));
+  // a RANGE with an exception ("any morning apart from Monday"): the days the model read are the range, kept when they are not excluded
+  if (except.length && RANGE.test(s)) named = [...new Set([...named, ...pref.days.filter((d) => !except.includes(d))])];
   const rel = [];
   if (nowMs && pref.status === 'available') for (const [re, n] of REL_DAYS) {
     if (!re.test(s)) continue;
@@ -93,7 +114,7 @@ function heard(pref, said, nowMs = null) {
     const ok = words.length ? words.some((w) => (/^\d+$/.test(w) ? new RegExp(`(?:^|\\D)${w}(?:\\D|$)`) : new RegExp(`\\b${w}`)).test(s)) : /\bany ?time\b|\bwhenever\b|\bflexible\b/.test(s);
     if (!ok) times = null;
   }
-  return { ...pref, weeks, days, times, soon: rel.length > 0 };
+  return { ...pref, weeks, days: days.filter((d) => !except.includes(d)), times, soon: rel.length > 0, ...(except.length ? { except } : {}) };
 }
 // "Reasonable" = something a person can book from: the customer is AVAILABLE and named a day, "any day", a time of day, or a week. "Not sure", "I'll let you know", "I'm abroad" and "another time" alone are not.
 const reasonable = (p) => !!(p && p.status === 'available' && (p.days.length || p.anyDay || p.times || (p.weeks && p.weeks !== 'other')));
@@ -102,13 +123,14 @@ function describe(pref, nowMs) {
   if (!reasonable(pref)) return null;
   const week = pref.weeks && pref.weeks !== 'other' ? weekOf(nowMs, pref.weeks) : null;
   const weekLabel = week ? `${{ this: 'This week', next: 'Next week', following: 'The week after next' }[pref.weeks]} (${week.label})` : null;
-  const days = pref.days.map((d) => { const i = WEEKDAYS.indexOf(d), cap = d[0].toUpperCase() + d.slice(1); return week ? `${cap} ${week.days[i].d} ${MONTHS[week.days[i].m - 1]}` : cap; });
-  const parts = [weekLabel, pref.anyDay ? 'any day' : null, days.length ? days.join(', ') : null, pref.times].filter(Boolean);
-  // The date the booking form opens on: the first day they named, else the first day of the week they named (the screen never opens it in the past).
+  const cap = (d) => d[0].toUpperCase() + d.slice(1), except = Array.isArray(pref.except) ? pref.except : [];
+  const days = pref.days.map((d) => { const i = WEEKDAYS.indexOf(d); return week ? `${cap(d)} ${week.days[i].d} ${MONTHS[week.days[i].m - 1]}` : cap(d); });
+  const parts = [weekLabel, pref.anyDay ? 'any day' : null, days.length ? days.join(', ') : null, pref.times, except.length ? 'not ' + except.map(cap).join(' or ') : null].filter(Boolean);
+  // The date the booking form opens on: the first day they named, else the first day of the week they named that they did not exclude (the screen never opens it in the past).
   const iso = (x) => `${x.y}-${String(x.m).padStart(2, '0')}-${String(x.d).padStart(2, '0')}`;
-  const firstIdx = pref.days.length ? Math.min(...pref.days.map((d) => WEEKDAYS.indexOf(d))) : -1;
-  const firstDate = week ? iso(firstIdx >= 0 ? week.days[firstIdx] : week.monday) : null;
-  return { weeks: pref.weeks, days: pref.days, anyDay: pref.anyDay, times: pref.times, customerWords: pref.text, weekLabel, dayLabels: days, text: parts.join(' · '), firstDate, status: 'available' };
+  const firstIdx = pref.days.length ? Math.min(...pref.days.map((d) => WEEKDAYS.indexOf(d))) : WEEKDAYS.findIndex((d) => !except.includes(d));
+  const firstDate = week && firstIdx >= 0 ? iso(week.days[firstIdx]) : null;
+  return { weeks: pref.weeks, days: pref.days, anyDay: pref.anyDay, times: pref.times, customerWords: pref.text, weekLabel, dayLabels: days, text: parts.join(' · '), firstDate, status: 'available', ...(except.length ? { except } : {}) };
 }
 // What a customer who is not available (or will let us know) said: kept as a NOTE in their own words. It has no days or times and is never a booking request.
 function noteOf(pref) {
@@ -190,6 +212,25 @@ const NEGATIVE = /\b(?:no|nope|nah|not|never|don'?t|dont|cancel|stop)\b/i;
 const keen = (words) => INTEREST.test(words) && !NEGATIVE.test(words);
 // ... or they ask about the next step or how it all works (the visit IS the next step, so it is offered with the answer; a plain question of fact still is not).
 const NEXT_STEP = /\b(?:what(?:'s|s| is)?\s+(?:the\s+)?(?:next|process|procedure)\b|what\s+(?:happens|do\s+(?:i|we)\s+do)\s+(?:next|now|after|from here)|how\s+(?:does|do|would)\s+(?:it|this|that|the process|the whole thing|it all)\s+work|how\s+(?:do|would|can)\s+(?:i|we)\s+(?:go about it|proceed|start|get started|go ahead|move forward)|where\s+do\s+(?:i|we)\s+go\s+from\s+here|next\s+steps?|what\s+are\s+the\s+steps)\b/i;
+// Audit repairs of 17 Oct 2026 (both audits), read from the customer's own words:
+// days given but not settled ("Tuesday or Thursday, but I need to check with my partner": Astra F3 B036) are a note, not a booking request;
+const TENTATIVE = /\b(?:check with|need to check|have to check|got to check|let (?:you|u) know|get back to (?:you|u)|come back to (?:you|u)|not sure|confirm with|ask (?:my|the) (?:husband|wife|partner|other half|boss)|before anything is (?:arranged|booked|set)|i'?ll see|we'?ll see|subject to)\b/i;
+// away for a long time, or they will contact us ("away for the next six weeks", "I'll contact you when the building work finishes": Astra F3 B034, B040): no more questions about weeks, no booking request;
+const LONG_AWAY = /\b(?:weeks|months?|a while|for a bit|until|till|til|after (?:christmas|xmas|the new year|easter|the summer|the holidays)|in the new year|next year|when (?:the|our|we|i|it)\b[^.?!]{0,40}\b(?:finish\w*|done|back|over|ready|sorted|complete\w*)|(?:i'?ll|we'?ll|i will|we will)\s+(?:contact|ring|call|message|text|get in touch|be in touch|let (?:you|u) know|get back|come back))\b/i;
+// a booked customer who cancels and refuses another date, or has gone elsewhere (Astra F3 A082; our audit G12): the "do you want to move it?" question is not asked;
+const REFUSE_MOVE = /\b(?:(?:do ?n[o']?t|do not|no|not)\s+(?:want|need|looking for)\s+(?:a(?:nother|ny)?\s+(?:other\s+|new\s+|different\s+)?(?:date|day|time|visit|appointment)|to (?:re-?book|re-?schedule|move it|rearrange))|no (?:other|new|alternative|different) (?:date|day|time)|(?:another|other|a different) (?:company|crowd|firm|supplier|kitchen (?:company|supplier|fitter))|someone else|(?:gone|went|going|decided to go) with|no longer (?:need|want|interested|going ahead)|not (?:going ahead|interested any ?more)|changed (?:my|our) minds?)\b/i;
+// "stop messaging me": a person decides (and records it); nothing more is sent by the receptionist
+const STOP = /\b(?:stop (?:messaging|texting|contacting|sending)|unsubscribe|don'?t (?:message|text|contact) me|do not (?:message|text|contact) me|leave me alone|remove (?:me|my number))\b/i;
+// a request for ANOTHER customer's details (Astra F7 A096): a clear refusal, never "Good question, I'll check with the team"
+const PRIVACY = /\b(?:another|other|previous|last|a different|someone else'?s?)\s+(?:customer|client|person|household)s?'?\b[^.?!]{0,40}\b(?:address|number|phone|details|name|email|eircode|contact)\b|\b(?:address|number|phone|details|eircode|contact details)\b[^.?!]{0,30}\b(?:of|for)\s+(?:another|other|previous|the last|a)\s+(?:customer|client)s?\b/i;
+// the project in the acknowledgement follows what the customer says NOW ("a utility room, not a full kitchen": Astra F8 A005, B049), never overwriting the records
+function projectSaid(words) {
+  const w = String(words || ''), kitchenNo = /\b(?:not|no|rather than|instead of|n't need)\b[^.?!]{0,15}\bkitchen\b/i.test(w), kitchen = /\bkitchen\b/i.test(w) && !kitchenNo;
+  if (kitchen) return null;
+  if (/\butilit(?:y|ies)\b/i.test(w)) return 'Utility room';
+  if (/\bwardrobes?\b/i.test(w)) return 'Wardrobes';
+  return null;
+}
 // An answer that already opens with a greeting gets no second one from the code (problem 4).
 const GREETED = /^(?:hi|hello|hey|hiya|good (?:morning|afternoon|evening)|thanks|thank you)\b/i;
 // Our old bare acknowledgement (the dead end itself): a chat left at it is treated as if the customer had only said hello.
@@ -216,7 +257,11 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   const latest = latestMessages(messages, { natural }), words = latest.join('\n');
   // Automatic mode (nobody reads it first): the days and times must be in the customer's own latest words, and agreement to a visit counts only if we really offered one or their own words ask for one
   // (a "yes" to our welcome message labelled as agreement is not). In the staff flow a person reads the draft and the preference summary before anything is sent, so the model's reading stands there.
-  const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, prefHeard = natural ? heard(prefRaw, words, nowMs) : prefRaw, given = describe(prefHeard, nowMs);
+  const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, prefHeard = natural ? heard(prefRaw, words, nowMs) : prefRaw;
+  // Days given but not settled ("but I need to check with my partner") are kept as a note, never a booking request, whatever status the model gave them (Astra F3 B036).
+  const tentativeNow = natural && !!prefHeard && prefHeard.status === 'available' && TENTATIVE.test(words), given = tentativeNow ? null : describe(prefHeard, nowMs);
+  const prefStatus = tentativeNow ? 'tentative' : prefRaw && prefRaw.status;
+  const whoNow = natural && projectSaid(words) ? { ...(who || {}), projectType: projectSaid(words) } : who;       // the acknowledgement names the project they ask about now
   const line = (k) => ((kn && kn.lines) || ownLines || {})[k] || LINES[k];                // the owner's line (Knowledge Centre) when there is one, else the default
   // The line that acknowledges a preference: for a visit asked for today or tomorrow, the "straight away" line (audit 17 Oct 2026, problem 5), never a promise of a time.
   const passOn = given && prefHeard && prefHeard.soon ? line('soon') : LINES.acknowledge;
@@ -225,7 +270,7 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   const question = hand || !!d.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(d.intent);          // something a person has to answer (nothing is offered or asked meanwhile)
   // R3: the code-built acknowledgement (see ackLine). With no id from the model, an opener the model offered on the first message only means "say hello".
   const first = !out.some((m) => m.type !== 'template');
-  const ackOf = () => ackLine(ACKS.includes(d.ack) ? d.ack : (opener(d.schedule && d.schedule.opener, hasOutbound) ? 'hello' : ''), who, first);
+  const ackOf = () => ackLine(ACKS.includes(d.ack) ? d.ack : (opener(d.schedule && d.schedule.opener, hasOutbound) ? 'hello' : ''), whoNow, first);
 
   // 1. A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself). Decided by the model's
   //    label, its hand-over reason, OR the customer's own words: a truthful answer never depends on how the model worded a reason.
@@ -245,7 +290,11 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   // 2. A customer who already has a consultation booked. The booking is only ever changed by a person; nothing is said as done.
   if (booked && change !== 'none') {
     if (change === 'cancel') {
-      if (!said(LINES.cancel_ask)) return { step: 'cancel_ask', reply: LINES.cancel_ask, handover: { needed: true, reason: 'wants to cancel booking' }, preference: null };
+      // A cancellation that already says "no other date" or "we went with another company" is not asked "do you want to move it?" (Astra F3 A082; our audit G12). With published knowledge the customer gets
+      // the owner's short line (nothing said as done); otherwise, and after our one question, a person takes it from here.
+      const refused = natural && REFUSE_MOVE.test(words);
+      if (!said(LINES.cancel_ask) && !refused) return { step: 'cancel_ask', reply: LINES.cancel_ask, handover: { needed: true, reason: 'wants to cancel booking' }, preference: null };
+      if (natural && kn && refused) return { step: 'cancel_noted', reply: kn.lines.cancel_noted || LINES.cancel_noted, handover: { needed: true, reason: 'wants to cancel booking (no other date)' }, preference: null };
       return person('wants to cancel booking');                                          // they answered our one question (no / just cancel): a person takes it from here, silently
     }
     if (change === 'move') {
@@ -283,9 +332,12 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
       const links = ok ? linkLine : '', op = ok && first && (d.ack === 'hello' || opener(d.schedule && d.schedule.opener, hasOutbound)) && !GREETED.test(text) ? ackLine('hello', who, true) : '';
       const sep = links ? '\n' : ' ', answer = ok ? (op ? op + ' ' : '') + text + (links ? '\n' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
       if (!ok) {
+        // A request for ANOTHER customer's details gets a clear refusal, never "Good question, I'll check" (Astra F7 A096); a person is still told.
+        if (PRIVACY.test([words, reason, d.unknown].join(' '))) return { step: 'privacy', reply: line('privacy'), handover: { needed: true, reason: 'asked for another customer\'s details (privacy)' }, preference: null, kn: info };
         // They also said when they are free ("can someone come out today?", "I can only do Saturdays"): recorded for the booking card while a person answers (audit 17 Oct 2026, problem 5). A visit asked
-        // for today or tomorrow gets the "straight away" line instead of "Good question"; a real question keeps the holding line.
-        if (given && !booked) return { step: 'acknowledge', reply: prefHeard.soon ? line('soon') : kn.lines.holding, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + (reason || 'a question that needs the team') + unknown }, preference: given, kn: info };
+        // for today or tomorrow gets the "straight away" line; otherwise the customer is told their day was passed on and that the question will be checked (Astra F6 B076: "Wednesday suits. Will you bring
+        // samples?" used to get only "Good question, I'll check with the team").
+        if (given && !booked) return { step: 'acknowledge', reply: prefHeard.soon ? line('soon') : passOn + ' ' + (kn.lines.partly || kn.lines.holding), handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + (reason || 'a question that needs the team') + unknown }, preference: given, kn: info };
         return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
       }
       if (state === 'partly') {
@@ -303,6 +355,8 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
       // step, so it is offered with the answer (audit 17 Oct 2026, problem 2: 0 of 27 customers who asked it were offered the visit).
       // A customer who is just looking at options gets the answer and no offer either.
       if (core.step === 'offer_visit' && ((d.intent === 'asking_info' && !NEXT_STEP.test(words)) || d.special === 'browsing')) return { step: 'answer', reply: answer, handover: null, preference: null, kn: info };
+      // "Send me your portfolio but don't arrange a visit yet": the answer is all they need, nothing for a person to do (Astra F5 A059 was handed over in silence after the links).
+      if (core.step === 'declined' || core.step === 'thinking' || (core.step === 'none' && core.quiet)) return { step: 'answer', reply: answer, handover: null, preference: null, kn: info };
       if (core.step === 'none') return { step: 'answer', reply: answer, handover: core.handover, preference: core.preference, kn: info };
       return { ...core, reply: answer + sep + core.reply, kn: info };
     }
@@ -318,10 +372,15 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   if (booked) return none;                                                                 // booked and nothing about the booking: no consultation questions at all
   // No, not now, maybe later, or "can I think about it?": one friendly line, no hand-over and no booking request (owner's decision, 16 Oct 2026). Said once: after that, a repeat needs nothing.
   if (visit === 'declined') {
-    if (!(natural && kn && !question)) return person('customer declined or wants to wait');
+    // "Stop messaging me": no reply from the receptionist; a person decides (and records it).
+    if (natural && STOP.test(words)) return person('customer asked us to stop messaging: please do not contact');
+    // A decline with nothing asked gets the owner's line and no pause, also when the model wanted the owner told ("we've gone with someone else", "filled the form by accident": our audit F12, F14 were
+    // handed over in silence). The owner still gets the push in that case; the chat stays open for the customer.
+    const plain = !d.hasQuestion && !['asking_info', 'asking_price', 'complaint'].includes(d.intent);
+    if (!(natural && (kn || ownLines) && plain)) return person('customer declined or wants to wait');
     const k = THINKING.test(words) ? 'thinking' : 'declined';
-    if (said(kn.lines.declined) || said(kn.lines.thinking)) return { ...none, quiet: true };
-    return { step: k, reply: kn.lines[k], handover: null, preference: null };
+    if (said(line('declined')) || said(line('thinking'))) return { ...none, quiet: true };
+    return { step: k, reply: line(k), handover: hand ? { needed: true, reason: reason || 'customer declined' } : null, preference: null };
   }
 
   // 4. They said when they are free: that is agreement. Record it (also when they ALSO asked something that needs a person: the question goes to the person together with the preference).
@@ -337,10 +396,12 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
 
   // 5. They will check / are not available: no booking request, no pushing.
   const asks = asksSoFar(consult, messages);
-  if (prefRaw && prefRaw.status === 'tentative') return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer will let us know' }, preference: noteOf(prefRaw) };
-  if (prefRaw && prefRaw.status === 'unavailable') {
-    if (asks === 1) return { step: 'ask_following_week', reply: LINES.ask_following_week, handover: null, preference: null };
-    if (asks >= MAX_ASKS) return { step: 'no_preference', reply: LINES.no_preference, handover: { needed: true, reason: 'no preference given after two questions' }, preference: noteOf(prefRaw) };
+  if (prefRaw && prefStatus === 'tentative') return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer will let us know' }, preference: noteOf({ ...prefRaw, status: 'tentative' }) };
+  if (prefRaw && prefStatus === 'unavailable') {
+    // One question about the following week only for a plain "not next week". Someone away for weeks, or who says they will contact us, gets "just let us know when suits" and a note: never a second
+    // week question and never a booking request (Astra F3 B034, B040: "we'll be in touch to arrange a time" and a booking request for someone who said they would contact us).
+    if (asks === 1 && !(natural && LONG_AWAY.test(words))) return { step: 'ask_following_week', reply: LINES.ask_following_week, handover: null, preference: null };
+    if (asks >= MAX_ASKS && !natural) return { step: 'no_preference', reply: LINES.no_preference, handover: { needed: true, reason: 'no preference given after two questions' }, preference: noteOf(prefRaw) };
     return { step: 'tentative', reply: LINES.tentative, handover: { needed: true, reason: 'customer not available: ' + (prefRaw.text || 'no detail') }, preference: noteOf(prefRaw) };
   }
 
@@ -401,8 +462,9 @@ function advance(consult, step, preference, nowMs) {
 // The only steps whose words are sent by themselves by the automatic receptionist. All are written by code (the fixed lines above and the owner's knowledge lines) or are an answer that passed the answer checker.
 const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on',
   'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
-  'declined', 'thinking', 'price_concern', 'browsing', 'attachment', 'late', 'booking_confirm', 'booking_specific']);      // the owner's lines added on 16 Oct 2026
+  'declined', 'thinking', 'price_concern', 'browsing', 'attachment', 'late', 'booking_confirm', 'booking_specific',      // the owner's lines added on 16 Oct 2026
+  'cancel_noted', 'privacy']);                                                                                              // audit repairs of 17 Oct 2026 (proposed wording)
 // After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
 const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
-  'attachment', 'late', 'booking_confirm', 'booking_specific']);      // declined, thinking, price_concern and browsing do NOT pause: the customer may write again
+  'attachment', 'late', 'booking_confirm', 'booking_specific', 'cancel_noted', 'privacy']);      // declined, thinking, price_concern and browsing do NOT pause: the customer may write again
 module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, ACKS, THINKING, INTEREST, NEXT_STEP, cleanPreference, heard, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, ackLine, firstName, latestMessages, latestBurst, asksIfAi, ASKS_VISIT, plan, advance };

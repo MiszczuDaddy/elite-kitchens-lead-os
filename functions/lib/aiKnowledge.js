@@ -42,12 +42,16 @@ const DEFAULT_LINES = {
   // Added after the audit of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval; the same defaults as aiSchedule LINES).
   still_looking: 'Are you still looking at a new kitchen?',
   soon: 'Thanks, I\'ll pass that on to the team straight away and they\'ll get back to you.',
+  // Audit repairs of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval; the same defaults as aiSchedule LINES). cancel_noted reuses the owner's approved "running late" words.
+  cancel_noted: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
+  privacy: 'Sorry, we can\'t share other customers\' details.',
 };
 const LINE_LABELS = { holding: 'Not sure / need to check', partly: 'Part answered, the rest needs checking', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', complaint: 'A complaint or an upset customer', links_intro: 'Before the portfolio links',
   declined: 'Customer says no, not now or maybe later (no hand-over)', thinking: 'Customer wants to think about it (no hand-over)', price_concern: 'Customer finds the price more than expected (no hand-over)', browsing: 'Customer is just looking at options (no hand-over)',
   photo: 'Customer sends a photo (then a person takes over)', voice: 'Customer sends a voice note (then a person takes over)', file: 'Customer sends a video or file (then a person takes over)',
   late: 'Booked customer is running late (then a person takes over)', booking_confirm: 'Booked customer asks the time or to confirm (then a person takes over)', booking_specific: 'Booked customer asks for a specific day or time (then a person takes over)',
-  still_looking: 'Customer only says hello (the question after our greeting)', soon: 'Customer asks for a visit today or tomorrow (then a person takes over)' };
+  still_looking: 'Customer only says hello (the question after our greeting)', soon: 'Customer asks for a visit today or tomorrow (then a person takes over)',
+  cancel_noted: 'Booked customer cancels and wants no other date (then a person takes over)', privacy: 'Customer asks for another customer\'s details (then a person takes over)' };
 const URLISH = /@|https?:|www\.|\.(?:ie|com|net|org|co|uk)\b|€|\d/i;
 
 const emptyData = () => ({ sections: [], links: [], contact: { email: '', website: '', whatsapp: '' }, lines: { ...DEFAULT_LINES }, instructions: '', examples: [] });
@@ -153,7 +157,8 @@ function digitise(t) {
 }
 const numbersIn = (t) => {
   const out = new Set(), s = digitise(t);
-  for (const m of s.matchAll(/(\d[\d,]*(?:\.\d+)?)(\s?k\b)?/gi)) { const v = parseFloat(m[1].replace(/,/g, '')); if (Number.isFinite(v)) out.add(String(m[2] ? v * 1000 : v)); }
+  // "7k", "7 thousand", "seven thousand" (digitised to "7 thousand") and "7 grand" are 7000 (Astra F4 A018: the customer's "seven thousand euro" counted as 7, so the answer's "€7,000" was blocked)
+  for (const m of s.matchAll(/(\d[\d,]*(?:\.\d+)?)(\s?(?:k|thousand|grand)\b)?/gi)) { const v = parseFloat(m[1].replace(/,/g, '')); if (Number.isFinite(v)) out.add(String(m[2] ? v * 1000 : v)); }
   return out;
 };
 const durationsIn = (t) => {
@@ -187,7 +192,8 @@ const sentencesOf = (t) => String(t).split(/(?<=[.!?])\s+|\n+/).map((s) => s.tri
 // an OPEN item leaves it unconfirmed. So when the owner edits the knowledge ("we now have a showroom"), the check follows without a deploy. A claim the knowledge says nothing about is not judged here (the
 // number, address and wording checks still apply). A "not" counts only right next to the claim, inside its own clause: "We can't give an exact price, it comes after the free home visit" does not deny the free visit,
 // and "We have no showroom, but the design is done at a free home visit" is two claims.
-const FREE_LINK = new Set(['with', 'and', 'or', 'but', 'so', 'too', 'as', 'at', 'to', 'for', 'if', 'on', 'in', 'there', 'here', 'when', 'until', 'then', 'which', 'that', 'is', 'are', 'nothing']);
+const FREE_LINK = new Set(['with', 'and', 'or', 'but', 'so', 'too', 'as', 'at', 'to', 'for', 'if', 'on', 'in', 'there', 'here', 'when', 'until', 'then', 'which', 'that', 'is', 'are', 'nothing',
+  'though', 'anyway', 'also', 'either']);         // "The home visit is free though" (our audit, B04) names nothing that is free
 const AFFIRM_NO =/\bno (?:problem|worries|bother|obligation|rush|pressure|hassle)\b|\bnot a problem\b|\bno matter\b/gi;
 const NEG_CLAIM = /\b(not|no|never|cannot|can't|cant|won't|isn't|aren't|don't|doesn't|didn't|unable|neither|nor|decline|declines|outside)\b|n't\b/i;
 const unNo = (t) => String(t).replace(AFFIRM_NO, (m) => ' '.repeat(m.length));                    // "no problem" is not a "no" (same length, so positions stay)
@@ -225,12 +231,16 @@ const SUBJECTS = [
   { id: 'flooring', claim: doneByUs('floor(?:s|ing)', TRADE_VERBS), why: 'says we do the flooring' },
   { id: 'painting', claim: doneByUs('paint(?:ing)?|decorat\\w*', TRADE_VERBS), why: 'says we do painting or decorating' },
   { id: 'old_kitchen', claim: /\b(?:remov\w*|take away|takes away|taking away|rip(?:ping)? out|strip(?:ping)? out)\b[^.?!]{0,30}\bold kitchen\b|\bold kitchen\b[^.?!]{0,30}\b(?:remov\w*|taken away|ripped out)\b/i, why: 'says the old kitchen is not removed' },
-  { id: 'stone_included', claim: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,40}\b(?:included|as standard|standard|at no extra cost|no extra cost|free)\b|\b(?:includ\w*|comes? with)\b[^.?!,;]{0,30}\b(?:stone|quartz|dekton|granite|sintered)\b/i,
+  // "standard" right before "laminate" is about the laminate ("stone costs extra on top of the standard laminate": Astra F4 A013), not a claim that stone is standard
+  { id: 'stone_included', claim: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,40}\b(?:included|as standard|standard(?!\s+laminate)|at no extra cost|no extra cost|free)\b|\b(?:includ\w*|comes? with)\b[^.?!,;]{0,30}\b(?:stone|quartz|dekton|granite|sintered)\b/i,
     counter: /\b(?:stone|quartz|dekton|granite|sintered)\b[^.?!]{0,60}\b(?:extra|optional|priced separately|separately|on top)\b/i, why: 'says stone worktops are included' },
   { id: 'laminate_included', claim: /\blaminate\b[^.?!]{0,30}\bworktops?\b[^.?!]{0,30}\b(?:included|as standard)\b|\b(?:includ\w*|comes? with)\b[^.?!,;]{0,40}\blaminate\b|\blaminate worktops? (?:is|are) included\b/i, why: 'says the laminate worktop is not included' },
   { id: 'wardrobes', claim: new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:do|does|make|makes|fit|fits|offer|offers|supply|supplies|design|designs|build|builds|install|installs)\\b[^.?!]{0,40}\\bwardrobes?\\b|\\bwardrobes?\\b[^.?!]{0,30}\\b(?:can be ordered|are available|available)\\b`, 'i'), why: 'says we do not do wardrobes' },
   { id: 'utility', claim: new RegExp(`\\b${AGENT}\\b[^.?!]{0,30}\\b(?:do|does|make|makes|fit|fits|offer|offers|supply|supplies|design|designs|build|builds|install|installs)\\b[^.?!]{0,60}\\butilit(?:y|ies)\\b|\\butilit(?:y|ies)\\b[^.?!]{0,30}\\b(?:can be ordered|are available|available)\\b`, 'i'), why: 'says we do not do utility rooms' },
   { id: 'part_jobs', claim: /\b(?:just|only)\s+(?:the\s+|new\s+|replace\w*\s+|change\w*\s+)?(?:doors?|worktops?|fronts?)\b|\b(?:doors?|worktops?|fit)[- ]only\b|\bunits? (?:you|they) (?:bought|got|ordered) elsewhere\b|\brepairs? (?:to|on|of) (?:kitchens?|units?) (?:supplied|fitted|made) by\b/i, why: 'says we take on a job we decline' },
+  // Which drawers are standard (Astra F10: "Our standard drawers are Blum." passed). The knowledge says Cemux are standard and Blum drawers are an optional upgrade; the stance follows the knowledge.
+  { id: 'blum_drawers_standard', claim: /\bblum (?:soft[- ]close )?drawers?\b[^.?!,;]{0,30}\b(?:are |come |is )?(?:as )?standard\b|\b(?:standard|our) drawers?\b[^.?!,;]{0,15}\b(?:are|is)\s+(?:\w+\s+){0,2}?blum\b|\bdrawers?\s+(?:are|come)\s+(?:all\s+)?(?:from\s+)?blum\b/i,
+    counter: /\bblum drawers?\b[^.?!]{0,40}\b(?:optional|upgrade|extra)\b/i, why: 'says Blum drawers are standard' },
   { id: 'handleless', claim: /\b(?:handleless|gola)\b/i, why: 'says we do not do handleless' },
   { id: 'shaker', claim: /\bshaker\b/i, why: 'says we do not do shaker' },
   { id: 'visit_free', claim: /\b(?:home visit|visit|consultation|design)\b[^.?!]{0,40}?\b(?:free|free of charge|complimentary)\b|\bfree\b[^.?!]{0,15}\b(?:home visit|visit|consultation|design)\b/i,
@@ -272,7 +282,10 @@ function contradictions(t, F, customer) {
     if (HEDGE.test(c)) continue;                                                                    // "I'll check whether we bring samples" claims nothing
     for (const x of SUBJECTS) {
       const s = F.stance[x.id]; if (!s) continue;
-      const says = [...claimsIn(x.claim, c).map((m) => !m.neg), ...(x.counter ? claimsIn(x.counter, c).map((m) => m.neg) : [])];       // true = the clause says it is so
+      // true = the clause says it is so. A clause that states the opposite outright ("stone is an optional extra") is read as that statement: words of the claim in the same clause ("laminate included and
+      // stone as an optional extra") do not turn it into the claim (Astra F4 A079).
+      const counters = x.counter ? claimsIn(x.counter, c) : [], plain = counters.some((m) => !m.neg);
+      const says = [...(plain ? [] : claimsIn(x.claim, c).map((m) => !m.neg)), ...counters.map((m) => m.neg)];
       if (!says.length) continue;
       if (s.open && !s.yes && !s.no) { add('answers something the knowledge leaves open: ' + x.id); continue; }
       if (says.some(Boolean) && (s.no || s.never) && !s.yes) add('contradicts the approved knowledge: ' + x.id);
@@ -321,12 +334,21 @@ function checkAnswer(text, K, { extra = '' } = {}) {
   for (const x of contradictions(t, K && K.facts, X.n)) add(x);                                    // claims the knowledge says are wrong, or leaves open (finding 6)
   for (const s of sentencesOf(t)) {
     const neg = NEG.test(unNo(s)), hedge = HEDGE.test(s), soft = neg || hedge;                     // "No problem, your visit is confirmed" is not a negative sentence
-    if (/\bsolid\s+(oak|wood|timber)\b/i.test(s) && !neg) add('calls veneer solid wood');
+    // "solid oak" is denied only by words right in front of it ("a wood-look finish rather than solid oak", "it isn't solid oak"), not by a "not" elsewhere in the sentence (Astra F4 A092)
+    for (const m of s.matchAll(/\bsolid\s+(?:oak|wood|timber)\b/gi)) if (!/\b(?:not|never|no|rather than|instead of|than|isn'?t|aren'?t|wasn'?t)\b[^.?!,;]{0,25}$|n't\b[^.?!,;]{0,25}$/i.test(s.slice(0, m.index))) { add('calls veneer solid wood'); break; }
     if (/\bfamily[\s-]*(run|owned|business|firm)\b|\brun by\b/i.test(s) && !neg) add('says who runs the business');
     if (/\b(guarantee[sd]?|warranty|warranties|guaranteed)\b/i.test(s) && !soft) {
       const blum = /\bblum\b/i.test(s) && /\b(lifetime|mechanical)\b/i.test(s) && /\bblum\b/i.test(hay) && /\blifetime\b/i.test(hay);
-      if (!blum) add('mentions a guarantee or warranty that is not approved');
+      // Blum's guarantee covers Blum HARDWARE: a sentence that puts the kitchen, the units or the doors under it widens it (Astra F10: "The whole kitchen is covered by Blum's lifetime mechanical guarantee" passed)
+      const widened = blum && /\b(?:whole|entire|everything|every part|kitchens?|units?|cabinets?|carcass\w*|doors?|worktops?|appliances?|fitting|workmanship)\b/i.test(s) && !/\b(?:hardware|hinges?|drawers?|runners?|mechanisms?|fittings?|soft[- ]close)\b/i.test(s);
+      if (!blum) add('mentions a guarantee or warranty that is not approved'); else if (widened) add('widens the Blum guarantee beyond the Blum hardware');
     }
+    // Who employs the fitters is not in the knowledge: "our own fitters", "in-house", "we never subcontract" answer an open question by implication (our audit, D14: asked "is it subcontracted?").
+    if (/\bour own\s+(?:\w+\s+)?(?:fitters?|team|staff|installers?|joiners?|carpenters?|crew|people|employees)\b|\bin[- ]house\b|\bdirectly employed\b|\b(?:never|don'?t|do not|no|not)\s+(?:use\s+)?sub-?contract\w*/i.test(s) && !/\b(?:own fitters|in[- ]house|employ\w*|sub-?contract\w*)\b/i.test(hay)) add('says who employs the fitters, which the knowledge does not');
+    // A visit stated as booked, confirmed, moved or cancelled, whatever polite words come with it (Astra F10: "We can confirm your visit is booked." passed because "can ... confirm" read as "I'll check").
+    // Not when it is denied right there ("isn't booked yet") or only a condition ("once it's booked", "until the visit is confirmed", "whether").
+    { const m = s.match(/\b(?:visit|appointment|consultation|booking|survey|measure[- ]?up|home visit)\b[^.?!]{0,25}?\b(?:is|has been|'s|are|was|have been)\s+(?:now\s+|all\s+)?(?:booked|confirmed|scheduled|cancell?ed|moved|rescheduled|arranged|locked in|pencilled in|in the diary)\b|\b(?:we|i)\s+(?:can\s+|have\s+|'ve\s+)?confirm(?:ed)?\s+(?:that\s+)?(?:your|the)\s+(?:visit|appointment|booking|consultation)\b/i);
+      if (m && !/\b(?:once|until|till|when|after|before|if|whether|as soon as|whenever)\b/i.test(s.slice(0, m.index + m[0].length))) add('says a visit is booked or confirmed'); }
     if (/\b(100%|definitely will|for sure|i promise|we promise|guaranteed?)\b/i.test(s) && !soft && !/\bblum\b/i.test(s)) add('makes a promise');
     if (/\b(discount|% off|special offer|price match|knock\s+\w+\s+off|cheaper)\b/i.test(s) && !soft) add('mentions a discount');
     const visitish = /\b(visit|appointment|consultation|call(?:ing)? out|come out|measure|measuring|slot|fitting|installation|you'?re (?:all )?(?:set|sorted|down))\b/i.test(s);

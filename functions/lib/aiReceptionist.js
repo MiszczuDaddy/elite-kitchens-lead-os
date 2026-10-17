@@ -54,13 +54,37 @@ const quiet = (t) => hourOf(t) < QUIET_UNTIL_HOUR;
 const isWelcome = (x, welcomeTemplate) => x.type === 'template' && !!welcomeTemplate && typeof x.body === 'string' && x.body.startsWith('[template: ' + welcomeTemplate + ']');
 
 // Hand the chat over: stop the receptionist for this chat and tell the owner (a push with no names and no words).
+// The owner's alert is DURABLE (audit 17 Oct 2026, Astra F1): it is written on the chat together with the pause, BEFORE the push is tried, and it is only cleared once the push went out. A push that fails is
+// tried again by the next run for this chat (the 5-minute check runs it for every paused chat), with the same key, so the owner is never alerted twice; after three failures the chat is marked
+// `receptionist.notifyFailed` (and an error is logged) instead of being dropped silently.
+const NOTIFY_TRIES = 3;
 async function handOver(deps, ref, phone, why, nowMs, { notify = true } = {}) {
-  await ref.update({ 'receptionist.paused': why, 'receptionist.pausedAt': Timestamp.fromMillis(nowMs) });
-  if (notify) await ping(deps, phone, nowMs);
+  await ref.update({ 'receptionist.paused': why, 'receptionist.pausedAt': Timestamp.fromMillis(nowMs), ...(notify ? { 'receptionist.notify': { key: 'h' + nowMs, tries: 0, why: String(why).slice(0, 80) } } : {}) });
+  if (notify) await notifyPending(deps, ref, phone, nowMs);
 }
+// Was the alert DELIVERED? push.safeNotify never throws: it answers { failed: true } when it could not try, { sent, failed } after trying (sent 0 = no device got it, e.g. every device refused or
+// none is registered) and { duplicate: true } when this exact alert was already handled. Before 17 Oct 2026 every answer counted as delivered, so a failed alert was never tried again.
+// Each retry uses its own key (key.1, key.2): a retry under the first key would only find the first attempt's record and send nothing.
 async function ping(deps, phone, nowMs, key = nowMs) {
   if (!deps.push) return true;
-  try { await deps.push.notify({ kind: 'handover', sourceId: phone + '|' + key, phone, backendReceivedAt: nowMs }); return true; } catch (e) { log('error', 'handover push failed'); return false; }
+  try {
+    const r = await deps.push.notify({ kind: 'handover', sourceId: phone + '|' + key, phone, backendReceivedAt: nowMs });
+    if (!r || typeof r !== 'object' || r.duplicate) return true;                          // a hook that reports nothing (tests), or this very attempt already handled by a parallel run
+    if (r.failed === true || r.timedOut) return false;
+    return typeof r.sent === 'number' ? r.sent > 0 : true;
+  } catch (e) { log('error', 'handover push failed'); return false; }
+}
+const tryKey = (key, tries) => String(key) + (tries ? '.' + tries : '');
+// Send the owner's alert that is still owed for this chat, if any. Returns true when nothing is owed any more.
+async function notifyPending(deps, ref, phone, nowMs) {
+  const s = await ref.get(), n = s.exists && s.data().receptionist && s.data().receptionist.notify;
+  if (!n || !n.key) return true;
+  if (await ping(deps, phone, nowMs, tryKey(n.key, Number(n.tries) || 0))) { await ref.update({ 'receptionist.notify': FieldValue.delete() }); return true; }
+  const tries = (Number(n.tries) || 0) + 1;
+  if (tries < NOTIFY_TRIES) { await ref.update({ 'receptionist.notify.tries': tries }); return false; }
+  log('error', 'handover push failed ' + tries + ' times');
+  await ref.update({ 'receptionist.notify': FieldValue.delete(), 'receptionist.notifyFailed': { at: Timestamp.fromMillis(nowMs), why: n.why || null, tries } });
+  return false;
 }
 // WHICH customer message a run is about (audit 16 Oct 2026, finding 9C). Every inbound message has a number in its conversation (store.storeInbound: inboundSeq); "answered" is the highest number answered
 // (receptionist.handledSeq), the claim of the answer is keyed by it, and "a newer message arrived" means a higher number. Two messages in the same second therefore never look like one, and a late webhook is a
@@ -80,10 +104,15 @@ async function applyEffects(deps, ref, phone, eff, nowMs) {
   if (eff.draftId) { try { await ai.draftOutcome({ db }, ACTOR, { draftId: eff.draftId, outcome: 'used_unchanged' }, { uid: 'receptionist' }); } catch (e) { if (!(e && e.code === 'not-found')) throw e; } }     // a repeat is answered as a repeat
   if (eff.pause) await handOver(deps, ref, phone, eff.pause, nowMs, { notify: false });
   const key = eff.key || String(eff.lastIn), claimRef = outbound.claimRef(db, phone, 'auto_' + key);          // effects stored before the numbers existed carry no key: they used the time
-  if (eff.notify && !(await ping(deps, phone, nowMs, key))) {                      // the owner was not told: try again on the next run (the same push key, so never twice), three times at most
-    const cs = await claimRef.get(), n = ((cs.exists && cs.data().pushTries) || 0) + 1;
-    await claimRef.update({ pushTries: n }).catch(() => {});
-    if (n < 3) throw new Error('push not delivered');
+  if (eff.notify) {                                                                  // the owner was not told: try again on the next run (a new key per attempt), three times at most, then mark it visibly
+    const cs = await claimRef.get(), tries = (cs.exists && cs.data().pushTries) || 0;
+    if (!(await ping(deps, phone, nowMs, tryKey(key, tries)))) {
+      const n = tries + 1;
+      await claimRef.update({ pushTries: n }).catch(() => {});
+      if (n < NOTIFY_TRIES) throw new Error('push not delivered');
+      log('error', 'handover push failed ' + n + ' times');
+      await ref.update({ 'receptionist.notifyFailed': { at: Timestamp.fromMillis(nowMs), why: eff.pause || eff.step || null, tries: n } }).catch(() => {});
+    }
   }
   await db.runTransaction(async (tx) => {
     const [cs, c] = await Promise.all([tx.get(claimRef), tx.get(ref)]);
@@ -92,6 +121,19 @@ async function applyEffects(deps, ref, phone, eff, nowMs) {
     if (c.exists) tx.update(ref, { 'receptionist.handledMs': Math.max(cur.handledMs || 0, eff.lastIn), ...(eff.seq != null ? { 'receptionist.handledSeq': Math.max(cur.handledSeq || 0, eff.seq) } : {}), 'receptionist.day': eff.day, 'receptionist.count': (cur.day === eff.day ? cur.count || 0 : 0) + 1, 'receptionist.last': { step: eff.step, at: Timestamp.fromMillis(nowMs), delayMs: Math.max(0, nowMs - eff.lastIn) }, 'receptionist.tries': 0 });
     if (cs.exists) tx.update(claimRef, { effectsDone: true });
   });
+}
+
+// Every automatic message that went out but whose job is not finished, found by its OWN claim (not by the latest customer message). Returns how many were finished now (n) and how many are still
+// unfinished after this try (failed: the next run tries again).
+async function finishPending(deps, ref, phone, nowAt) {
+  const q = await ref.collection('sendRequests').where('state', '==', 'sent').get();
+  let n = 0, failed = 0;
+  for (const d of q.docs) {
+    const x = d.data();
+    if (!d.id.startsWith('auto_') || x.effectsDone === true || !x.effects) continue;
+    try { await applyEffects(deps, ref, phone, x.effects, nowAt()); n++; } catch (e) { failed++; log('error', 'receptionist recovery not finished', { code: String((e && (e.code || e.message)) || 'unknown').slice(0, 60) }); }
+  }
+  return { n, failed };
 }
 
 // A NEW Meta lead's chat is switched on by itself the first time the customer has written (never an existing conversation, never a customer who is not a Meta lead). Decided once and recorded,
@@ -119,9 +161,11 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     const c = snap.data(), r = c.receptionist || {}, at = ms(r.at), lastIn = ms(c.lastInboundAt), seq = seqOf(c), key = keyOf(seq, lastIn);
     if (r.on !== true) return 'off';
     if (r.paused) {
-      // A send whose job did not finish (the claim says sent, the effects are not done) is finished even though the chat is already paused by its own effects.
-      if (lastIn > at && !answered(c, r, lastIn)) { const prior = await outbound.peek(db, phone, 'auto_' + key); if (prior && prior.state === 'sent' && !prior.effectsDone && prior.effects) { await applyEffects(deps, ref, phone, prior.effects, nowAt()); return 'already_sent'; } }
-      return 'paused';
+      // A send whose job did not finish (the claim says sent, the effects are not done) is finished even though the chat is already paused by its own effects, and even if the customer has written
+      // again since (audit 17 Oct 2026, Astra F1: it used to be looked up by the LATEST customer message only, so a "thanks" made an unsent alert unreachable). An owed hand-over alert is sent too.
+      const done = await finishPending(deps, ref, phone, nowAt);
+      if (r.notify) await notifyPending(deps, ref, phone, nowAt());
+      return done.n ? 'already_sent' : done.failed ? 'error' : 'paused';
     }
     if (personWrote(r)) { await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }          // recorded before the person's message was sent: it cannot fall out of a window of messages
     if (!lastIn || lastIn <= at) return 'nothing_new';                           // only messages sent after it was switched on
@@ -142,6 +186,8 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     });
     if (got !== 'ok') return got;
     locked = true;
+    // An EARLIER automatic message whose job did not finish (for example its booking request or its pause failed) is finished first; if that pauses the chat, this message is the owner's.
+    if ((await finishPending(deps, ref, phone, nowAt)).n) { const cur = ((await ref.get()).data() || {}).receptionist || {}; if (cur.paused) return 'already_sent'; }
     // This customer message may already have been answered by an earlier run that died before it finished the job (the claim says so): finish it, ask the model nothing, send nothing.
     const prior = await outbound.peek(db, phone, 'auto_' + key);
     if (prior && prior.state === 'sent') {
@@ -164,7 +210,9 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     const report = (outcome) => ai.draftOutcome({ db }, ACTOR, { draftId: res.draftId, outcome }, { uid: 'receptionist' }).catch(() => {});
     if (!SEND_STEPS.has(step) || !res.draft || !res.structured || warnings.length) {
       const burst = []; for (const x of recent.docs.map((d) => d.data())) { if (x.direction !== 'in') break; burst.push(x); }              // the customer's messages since our last one
-      if (step === 'none' && !needs && !warnings.length && res.structured && (QUIET_INTENTS.has(res.intent) || courtesyOnly(burst) || (res.schedule && res.schedule.quiet === true))) {        // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered
+      // ordinary chatter that needs no answer (e.g. a thank-you after booking): nothing sent, nobody bothered. The model marking the message as a plain thanks or hello, with no question and no hand-over,
+      // counts too (Astra F5 A054, B028, B030: "Thanks, I will send the plans there", "Thanks, I'm still at work" became silent "needs a person" pauses).
+      if (step === 'none' && !needs && !warnings.length && res.structured && (QUIET_INTENTS.has(res.intent) || courtesyOnly(burst) || (res.schedule && res.schedule.quiet === true) || ['thanks', 'hello'].includes(res.ack))) {
         await report('discarded'); await ref.update(handledMark(lastIn, seq)); return 'quiet_skip';
       }
       await report('discarded');                                                           // not a simple case, or the draft failed a check: nothing is sent, a person takes over

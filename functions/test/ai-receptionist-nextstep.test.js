@@ -142,7 +142,8 @@ test('E04, E05: "Can someone come out today?" and "tomorrow at 10?" are recorded
 
 test('E08: "Do you work weekends? I can only do Saturdays" is recorded (Saturday on the booking card) while a person answers the question', () => {
   const e08 = run({ intent: 'asking_info', hasQuestion: true, answerState: 'none', unknown: 'whether we work weekends or can do Saturdays', handover: { needed: true, reason: 'asks if we work weekends / Saturday availability, not in knowledge' }, ...pref({ status: 'available', days: ['saturday'], text: 'I can only do Saturdays' }) }, { messages: [WELCOME, inn('Do you work weekends? I can only do Saturdays')], name: 'Hazel' });
-  assert.deepEqual([e08.step, e08.sent, e08.handover.needed], ['acknowledge', K.lines.holding, true], 'a real question: the holding line, and the preference is kept');
+  // the day is acknowledged and the question will be checked (audit repairs 17 Oct 2026, Astra F6 B076: "Good question" alone did not tell them their day was passed on)
+  assert.deepEqual([e08.step, e08.sent, e08.handover.needed], ['acknowledge', L.acknowledge + ' ' + K.lines.partly, true], 'a real question: the day is passed on and the question checked; the preference is kept');
   assert.deepEqual(e08.plan.preference.days, ['saturday']); assert.match(e08.handover.reason, /weekends/);
   assert.equal(S.advance(null, e08.step, e08.plan.preference, NOW).needsBooking, true);
   // without a usable day (or for a booked customer) the question is simply held, as before
