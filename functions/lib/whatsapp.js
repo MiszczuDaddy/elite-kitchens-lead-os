@@ -10,8 +10,20 @@ class WhatsAppError extends Error {
 // not a WhatsAppError at all, a network failure or timeout: the message may or may not have gone out).
 const refusal = (message, details, definite, code) => Object.assign(new WhatsAppError(message, details), { definite, ...(code ? { code } : {}) });
 
-// cfg: { phoneId, token, version, template, lang }; fetchImpl is injectable for tests.
+// Phase 10: how long a send waits for the health record of its outcome (cfg.onOutcome). Never longer: the record is a safety net, the message is what matters.
+const OUTCOME_CAP_MS = 1500;
+
+// cfg: { phoneId, token, version, template, lang, onOutcome }; fetchImpl is injectable for tests.
+// cfg.onOutcome (Phase 10, optional): told how each send ended ({ ok, status, code, definite }: no number, no text), so a fault that stops ALL sending (an expired access key, a
+// blocked account, a deleted template) raises an alert. It can never change, delay for long or fail a send: it is awaited at most OUTCOME_CAP_MS and any error is ignored.
 function createClient(cfg, fetchImpl = fetch) {
+  async function note(o) {
+    if (typeof cfg.onOutcome !== 'function') return;
+    let timer;
+    try { await Promise.race([Promise.resolve().then(() => cfg.onOutcome(o)), new Promise((r) => { timer = setTimeout(r, OUTCOME_CAP_MS); })]); }
+    catch (e) { /* the health record is best effort */ }
+    finally { clearTimeout(timer); }
+  }
   // timeoutMs (optional) gives up on a Meta call that hangs, so the caller can report "not confirmed" instead of being cut off.
   async function post(payload, { timeoutMs } = {}) {
     if (!cfg.phoneId || !cfg.token) throw refusal('WhatsApp is not configured (phone number id / access token missing).', undefined, true);
@@ -29,14 +41,17 @@ function createClient(cfg, fetchImpl = fetch) {
         ...(ac ? { signal: ac.signal } : {}),
       });
       try { data = await res.json(); } catch (e) { data = {}; bodyLost = !!(ac && ac.signal.aborted); }
-    } finally { if (timer) clearTimeout(timer); }
-    if (bodyLost && res.ok) throw refusal('Meta API answer was not received in time', undefined, false);
+    } catch (e) { if (timer) clearTimeout(timer); await note({ ok: false, status: 0, code: null, definite: false }); throw e; }      // no answer at all (network, timeout)
+    finally { if (timer) clearTimeout(timer); }
+    if (bodyLost && res.ok) { await note({ ok: false, status: res.status, code: null, definite: false }); throw refusal('Meta API answer was not received in time', undefined, false); }
     if (!res.ok) {
       const e = data.error || {};
+      await note({ ok: false, status: res.status, code: e.code == null ? null : e.code, definite: res.status >= 400 && res.status < 500 });
       throw refusal(`Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data, res.status >= 400 && res.status < 500, e.code);
     }
     const id = data.messages && data.messages[0] && data.messages[0].id;
-    if (!id) throw refusal('Meta API returned no message id', data, false);
+    if (!id) { await note({ ok: false, status: res.status, code: null, definite: false }); throw refusal('Meta API returned no message id', data, false); }
+    await note({ ok: true, status: res.status, code: null, definite: true });
     return id;
   }
   const base = () => `${cfg.apiBase || 'https://graph.facebook.com'}/${cfg.version || 'v21.0'}`;
@@ -45,6 +60,7 @@ function createClient(cfg, fetchImpl = fetch) {
     if (res.ok) return res;
     const data = await res.json().catch(() => ({}));
     const e = data.error || {};
+    if (res.status === 401 || e.code === 190) await note({ ok: false, status: res.status, code: e.code == null ? null : e.code, definite: true, media: true });   // the access key itself was refused (Phase 10)
     throw Object.assign(new WhatsAppError(`${what}: Meta API error ${res.status}${e.code ? ` (code ${e.code})` : ''}: ${e.message || 'unknown'}`, data), e.code ? { code: e.code } : {});
   }
   return {

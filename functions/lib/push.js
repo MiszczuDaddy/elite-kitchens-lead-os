@@ -13,10 +13,10 @@ const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp } = require('firebase-admin/firestore');
 
-const KINDS = ['message', 'lead', 'test', 'handover'];       // handover (Phase 9 R3): the receptionist passed a chat to the owner
+const KINDS = ['message', 'lead', 'test', 'handover', 'alert'];       // handover (Phase 9 R3): the receptionist passed a chat to the owner; alert (Phase 10): something in "Needs attention"
 const PLATFORMS = ['windows', 'android', 'other'];
 const TOKEN = /^[\w:.\-]{50,4096}$/;                         // an FCM registration token
-const EVENT_ID = /^[mlth]_[0-9a-f]{24}$/, DEVICE_ID = /^[0-9a-f]{32}$/;
+const EVENT_ID = /^[mltha]_[0-9a-f]{24}$/, DEVICE_ID = /^[0-9a-f]{32}$/;
 const TTL_SECONDS = 6 * 3600;                                // a "new message" alert is useless after six hours
 const SEND_CAP_MS = 2500;                                    // the webhook never waits longer than this for Firebase
 const DEAD_TOKEN = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'];

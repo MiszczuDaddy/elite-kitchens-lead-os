@@ -160,6 +160,14 @@ function buildMessage({ from, fromName, to, replyTo, subject, text, attachment, 
   ].join(CRLF);
   return head + CRLF + CRLF + body;
 }
+// Phase 10: a plain-text message with no attachment (the owner's fault alerts). The same header rules as above.
+function buildTextMessage({ from, fromName, to, replyTo, subject, text, date = new Date() }) {
+  const head = [
+    `From: ${mailbox(fromName, from)}`, `To: ${addr(to)}`, `Reply-To: ${addr(replyTo || from)}`, `Subject: ${headerText(subject)}`,
+    `Date: ${date.toUTCString()}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: quoted-printable',
+  ].join(CRLF);
+  return head + CRLF + CRLF + quotedPrintable(text);
+}
 const toRaw = (message) => Buffer.from(message, 'utf8').toString('base64url');
 
-module.exports = { GMAIL_SCOPE, EMAIL_RE, GmailError, delegatedTokenProvider, createGmailClient, buildMessage, toRaw, quotedPrintable, headerText };
+module.exports = { GMAIL_SCOPE, EMAIL_RE, GmailError, delegatedTokenProvider, createGmailClient, buildMessage, buildTextMessage, toRaw, quotedPrintable, headerText };

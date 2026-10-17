@@ -36,6 +36,7 @@ Reports go to `/pushReceipt` (a Hosting rewrite to a public function: strict, on
 * **Android (Chrome / the installed app):** delivered through FCM even when closed; battery optimisation may delay it. iPhone is not included.
 
 ## Data and privacy
+* **Phase 10:** a fifth kind, `alert` ("Elite OS needs attention"), for a problem or a Meta lead that could not be added; tapping it opens "Needs attention". Tapping a hand-over alert now opens that chat (it used to open only Elite OS: the screen did not recognise `h_` ids). A hand-over alert that failed three times is retried by the health check and falls back to email (`docs/PHASE10_SAFETY_NET.md`).
 * `pushDevices/{id}`: the FCM token, the e-mail, the device type, on/off. Readable by staff (the existing rule); no write from a browser.
 * `pushEvents/{id}`: the customer's phone (to open the chat), the kind, the timings. **Erased with the customer** (`deleteCustomer`), like projects.
 * Google (FCM) sees opaque ids only.

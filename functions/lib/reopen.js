@@ -12,6 +12,7 @@ const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const store = require('./store');
 const WS = require('./windowState');
 const { normalizePhone } = require('./whatsapp');
+const CB = require('./contactBlock');
 
 const TZ = 'Europe/Dublin';
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,100}$/;
@@ -90,6 +91,7 @@ async function reopen({ db, wa, cfg }, actor, data, { nowMs = Date.now() } = {})
     if (!conv.exists) throw new HttpsError('not-found', 'Customer not found.');
     const c = conv.data();
     if (c.reopen && c.reopen.requestId === requestId) return { existing: true, state: c.reopen.state, error: c.reopen.error || null };
+    CB.assertAllowed(c);                                                     // Phase 10: "do not contact" (inside the claim)
     const msg = c.reopen && c.reopen.wamid ? await tx.get(convRef.collection('messages').doc(c.reopen.wamid)) : null;
     const st = WS.windowStatus(c, nowMs, msg && msg.exists ? msg.data() : null);
     if (st.state === 'open') throw refused('The 24-hour window is open: just send a normal message.');

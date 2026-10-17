@@ -26,13 +26,20 @@ const LANG = defineString('WHATSAPP_TEMPLATE_LANG', { default: 'en' });
 const API_VERSION = defineString('WHATSAPP_API_VERSION', { default: 'v21.0' });
 
 const SECRETS = [ACCESS_TOKEN, APP_SECRET, VERIFY_TOKEN];   // bound on every function so .value() is always safe
+// Phase 10 (docs/PHASE10_SAFETY_NET.md): every WhatsApp send also tells the health check how it ended (success, or Meta's error code: never a number or text), so a fault that stops ALL
+// sending (an expired key, a blocked account, a deleted template) raises a problem in "Needs attention". It can never fail or hold up a send (lib/whatsapp.js caps it).
+const waOutcome = (o) => health.noteWhatsApp(getFirestore(), o, { health: healthHook() });
 const cfg = () => ({
   phoneId: PHONE_ID.value(), allowedEmails: ALLOWED_EMAILS.value(), template: TEMPLATE.value(), lang: LANG.value(),
   version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), appSecret: APP_SECRET.value().trim(), verifyToken: VERIFY_TOKEN.value().trim(),
+  onOutcome: waOutcome,
 });
 const bucketName = () => process.env.STORAGE_BUCKET || `${process.env.GCLOUD_PROJECT}.firebasestorage.app`;
 // Phase 8: push.notify never throws and gives up after a few seconds (lib/push.js), so the webhook and the lead intake can call it freely.
 const pushHook = () => ({ notify: (ev) => push.safeNotify({ db: getFirestore(), messaging: getMessaging(), allowed: ALLOWED_EMAILS.value() }, ev) });
+// Phase 10: report / resolve a problem. Never throws, gives up after a few seconds; a new problem gets its first push straight away (the health check sends the rest and the email).
+const health = require('./lib/health');
+const healthHook = () => health.hook({ db: getFirestore(), notify: pushHook().notify });
 const deps = () => { const c = cfg(); return { db: getFirestore(), adminAuth: getAuth(), cfg: c, wa: createClient(c), bucket: getStorage().bucket(bucketName()), push: pushHook() }; };
 
 // Public: Meta calls this. Reachable at https://<project>.web.app/webhook via a Hosting rewrite.
@@ -64,13 +71,14 @@ const leads = require('./lib/leads');
 exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeoutSeconds: 60 }, async (req, res) => {
   try {
     const c = { phoneId: PHONE_ID.value(), template: TEMPLATE.value(), lang: LANG.value(), version: API_VERSION.value(),
-      apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), apiKeys: LEADS_API_KEY.value() };
+      apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), apiKeys: LEADS_API_KEY.value(), onOutcome: waOutcome };
     const r = await leads.handleLeadRequest({ method: req.method, headers: req.headers, rawBody: req.rawBody, body: req.body },
-      { db: getFirestore(), wa: createClient(c), cfg: c, push: pushHook() });
+      { db: getFirestore(), wa: createClient(c), cfg: c, push: pushHook(), health: healthHook() });
     Object.entries(r.headers || {}).forEach(([k, v]) => res.set(k, v));
     res.status(r.status).json(r.body);
   } catch (e) {   // unexpected: 500 makes Make retry, which is safe because processing is idempotent. No lead data in the log.
     console.error(JSON.stringify({ level: 'error', msg: 'leadIntake crashed', err: String(e && e.message).replace(/\+?\d[\d\s().\-]{5,}\d/g, '[number]').slice(0, 300) }));
+    await healthHook().report('lead_error');                                          // Phase 10: shown in "Needs attention" (no lead data in it)
     res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
@@ -137,7 +145,7 @@ const REOPEN_LANG = defineString('WHATSAPP_REOPEN_TEMPLATE_LANG', { default: 'en
 const reopenDeps = () => ({
   db: getFirestore(),
   cfg: { allowedEmails: ALLOWED_EMAILS.value(), reopenTemplate: REOPEN_TEMPLATE.value().trim(), reopenLang: REOPEN_LANG.value().trim() },
-  wa: createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim() }),
+  wa: createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome }),
 });
 exports.reopenConversation = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 60 }, (req) => h.reopenConversation(req.auth, req.data, reopenDeps()));
 
@@ -171,7 +179,7 @@ function mailChannel() {
 }
 const deliveryDeps = () => {
   const db = getFirestore(), bucket = getStorage().bucket(bucketName());
-  const wa = createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim() });
+  const wa = createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome });
   return { db, bucket, cfg: { allowedEmails: ALLOWED_EMAILS.value() }, channels: { whatsapp: quoteChannelLib.whatsappChannel({ db, bucket, wa, quoteTemplate: quoteTemplate() }), email: mailChannel().channel } };
 };
 exports.deliverQuote = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 180, memory: '512MiB' }, (req) => h.deliverQuote(req.auth, req.data, deliveryDeps()));
@@ -221,7 +229,8 @@ exports.setReceptionist = onCall({}, (req) => h.setReceptionist(req.auth, req.da
 // whatever the event path missed and everything that arrived during quiet hours. It answers only the chats the owner switched on or new Meta leads, and only while every AI switch is on.
 const receptionist = require('./lib/aiReceptionist');
 exports.receptionistSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', secrets: [...SECRETS, ANTHROPIC_API_KEY], timeoutSeconds: 180, retryCount: 0 }, async () => {
-  const r = await receptionist.sweep({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook(), welcomeTemplate: TEMPLATE.value() });
+  const r = await receptionist.sweep({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook(), welcomeTemplate: TEMPLATE.value(), health: healthHook() });
+  await health.beat(getFirestore(), 'receptionistSweep', { result: r.skipped || 'ran' }).catch(() => {});          // Phase 10: "it ran" (a check that stops is a problem in "Needs attention")
   console.log(JSON.stringify({ level: 'info', msg: 'receptionist sweep', ...r }));
 });
 // R3 (event-driven): the moment a message is saved in a chat, the receptionist is asked. Only a message FROM THE CUSTOMER does anything (everything else returns at once). It waits the reply delay (30 seconds by
@@ -230,9 +239,35 @@ const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 exports.receptionistOnMessage = onDocumentCreated({ document: 'conversations/{phone}/messages/{messageId}', region: 'europe-west1', secrets: [...SECRETS, ANTHROPIC_API_KEY], timeoutSeconds: 180, memory: '256MiB', maxInstances: 10, retry: false }, async (event) => {
   const m = event.data && event.data.data();
   if (!m || m.direction !== 'in') return;                                                  // our own messages, a person's and the welcome template: nothing to do
-  const r = await receptionist.onMessage({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook(), welcomeTemplate: TEMPLATE.value() }, event.params.phone, m);
+  const r = await receptionist.onMessage({ db: getFirestore(), wa: createClient(cfg()), model: aiModel(), owners: AI_OWNER_EMAILS.value(), push: pushHook(), welcomeTemplate: TEMPLATE.value(), health: healthHook() }, event.params.phone, m);
   console.log(JSON.stringify({ level: 'info', msg: 'receptionist event', result: r }));
 });
 exports.aiCheckModels = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60 }, (req) => h.aiCheckModels(req.auth, req.data, aiDeps()));
 
 exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { res.sendStatus(await h.pushReceipt(req, { db: getFirestore() })); });
+
+// ---- Phase 10: the safety net (docs/PHASE10_SAFETY_NET.md). Staff-only callables with no WhatsApp, Google or AI secret (least privilege): "do not contact" and the buttons of
+// "Needs attention". Neither sends anything to a customer. Nothing above is changed except where noted (the WhatsApp outcome, the lead intake's problems, the receptionist's heartbeat).
+exports.setDoNotContact = onCall({}, (req) => h.setDoNotContact(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
+exports.attentionAction = onCall({}, (req) => h.attentionAction(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
+// Who gets the alert emails (comma-separated; empty = no alert emails, the phone alerts and the screen still work). They are sent through the quote mailer (MAIL_* settings), so
+// only while email sending is on. A plain setting, not a secret.
+const ALERT_EMAILS = defineString('ALERT_EMAILS', { default: '' });
+const alertMail = () => {
+  const m = mailChannel(), to = ALERT_EMAILS.value().split(',').map((s) => s.trim()).filter((s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+  return { enabled: m.enabled, sender: m.sender, fromName: 'Elite OS', gmail: gmailClient, to };
+};
+// The health check, every 10 minutes: leads arriving, WhatsApp reporting back, the receptionist's own check running, alerts reaching a device; and the alerts still owed (push, email).
+// Not callable from outside. Holds no WhatsApp, Google or AI secret.
+exports.healthSweep = onSchedule({ schedule: 'every 10 minutes', timeZone: 'Europe/Dublin', timeoutSeconds: 120, retryCount: 0 }, async () => {
+  const r = await health.sweep({ db: getFirestore(), notify: pushHook().notify, allowed: ALLOWED_EMAILS.value(), mail: alertMail() });
+  console.log(JSON.stringify({ level: 'info', msg: 'health sweep', opened: r.opened, resolved: r.resolved, leadAlerts: r.leadAlerts || 0, handoverAlerts: r.handoverAlerts || 0 }));
+});
+// Every write to a chat message: one that came FROM Meta (a customer message, a delivery tick) proves WhatsApp still reaches Elite OS; our own writes are ignored. One write, no read,
+// no secret, no retry. It never touches the message.
+const { onDocumentWritten } = require('firebase-functions/v2/firestore');
+exports.healthOnMessageWrite = onDocumentWritten({ document: 'conversations/{phone}/messages/{messageId}', region: 'europe-west1', timeoutSeconds: 30, memory: '256MiB', maxInstances: 5, retry: false }, async (event) => {
+  const before = event.data && event.data.before && event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+  await health.onMessageWrite(getFirestore(), before, after).catch(() => {});
+});

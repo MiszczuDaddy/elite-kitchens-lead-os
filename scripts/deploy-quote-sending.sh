@@ -37,6 +37,8 @@
 #                                                switches it on in the screen. Run it BEFORE "live". No existing function is touched.
 #   ./scripts/deploy-quote-sending.sh receptionist  Phase 9 R3: the automatic receptionist (receptionistOnMessage answers when a message arrives; receptionistSweep is the 5-minute backup) and pushReceipt. Run it after "ai" and BEFORE "live". It does nothing until the owner switches
 #                                                it on in Assistant > Settings AND for a chat. Switch it off there at any time.
+#   ./scripts/deploy-quote-sending.sh safety     Phase 10 (docs/PHASE10_SAFETY_NET.md): "do not contact" in every send, problems and rejected leads in "Needs attention", the 10-minute health check
+#                                                and the delivery-tick watcher. Asks for the alert email address(es). Does NOT deploy the webhook. Run it BEFORE "live". Backups: scripts/setup-backups.sh.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
@@ -71,6 +73,9 @@ PUSH_CHANGED="webhook leadIntake"                                               
 PUSH_FUNCS="$PUSH_NEW $PUSH_CHANGED"
 AI_NEW="aiChat aiStatus setAiSettings aiCheckModels aiDecide aiSuggestReply aiDraftOutcome aiDismissConsult setReceptionist aiKnowledge aiKnowledgeTest"                                                                                      # Phase 9: new, staff-only (each checks the signed-in account); no existing function changes
 AI_FUNCS="$AI_NEW"
+SAFETY_NEW="setDoNotContact attentionAction healthSweep healthOnMessageWrite"                                       # Phase 10: new. The two callables are made public (each checks the signed-in staff account); healthSweep (every 10 minutes) and healthOnMessageWrite (a trigger) cannot be called from outside
+SAFETY_CHANGED="sendReply sendMedia startConversation reopenConversation deliverQuote retryQuoteDelivery sendQuote leadIntake receptionistSweep receptionistOnMessage pushReceipt"   # Phase 10: "do not contact" in every send, the WhatsApp outcome, rejected leads, the receptionist's heartbeat
+SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
 REC_FUNCS="receptionistSweep receptionistOnMessage pushReceipt"                                                      # Phase 9 R3: the receptionist (a message-arrival trigger plus a 5-minute backup; neither callable from outside) and pushReceipt (it now knows the "handover" notification)
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
@@ -78,7 +83,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,47p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,49p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -391,6 +396,34 @@ case "${1:-}" in
     deploy_functions $REC_FUNCS
     echo "Done. Next: $0 live (the screen). To stop it: switch 'Automatic receptionist' off in Assistant > Settings, or firebase functions:delete receptionistSweep --region $REGION --project $PROJECT"
     ;;
+  safety)
+    [ -f functions/lib/health.js ] || { echo "This checkout has no Phase 10 (safety net) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
+    [ -n "$(serving_revision receptionistsweep)" ] || { echo "Deploy the receptionist first: $0 receptionist"; exit 1; }
+    check_settings; check_access; check_routing $SAFETY_FUNCS
+    # healthOnMessageWrite is a Firestore trigger: it must run in the database's region (the same check as the receptionist stage).
+    DB_LOC="$(gcloud firestore databases describe --database="(default)" --project "$PROJECT" --format="value(locationId)" 2>/dev/null || true)"
+    [ -n "$DB_LOC" ] || { echo "Could not read the Firestore database location. Check you are logged in (gcloud auth list) and try again."; exit 1; }
+    [ "$DB_LOC" = "$REGION" ] || { echo "STOP: the database is in $DB_LOC but the trigger is set for $REGION. Nothing was deployed. Report this location."; exit 1; }
+    echo "Functions: $SAFETY_FUNCS"
+    echo "New: setDoNotContact and attentionAction (the screen's buttons; staff only), healthSweep (the health check, every 10 minutes) and healthOnMessageWrite (notes that WhatsApp still reports back)."
+    echo "Changed: every way a message is sent refuses a customer marked \"do not contact\"; the lead intake keeps rejected leads for \"Needs attention\"; the receptionist says when it ran."
+    echo "NOT deployed: the WhatsApp webhook (unchanged). Nothing is sent to any customer by this stage."
+    emails=$(value "$ENVF" ALERT_EMAILS)
+    if [ -z "$emails" ]; then read -r -p "Email address(es) for problem alerts, comma-separated (press Enter for none: phone alerts and the screen only): " emails; fi
+    emails=$(printf '%s' "$emails" | tr -d ' ')
+    for e in $(printf '%s' "$emails" | tr ',' ' '); do case "$e" in *@*.*) ;; *) echo "\"$e\" does not look like an email address. Nothing was changed."; exit 1 ;; esac; done
+    if [ -n "$emails" ]; then echo "Problem alerts by email to: $emails (sent from $MAIL_SENDER_DEFAULT while email sending is on: MAIL_SEND=$(value "$ENVF" MAIL_SEND))."; else echo "No alert emails (phone alerts and the screen only)."; fi
+    confirm "Deploy the Phase 10 safety net to the LIVE project? (the webhook is NOT redeployed)"
+    [ -z "$emails" ] || setting "$ENVF" ALERT_EMAILS "$emails"
+    install; save_revisions $SAFETY_CHANGED; deploy_functions $SAFETY_FUNCS
+    echo "==> making the 2 new staff functions reachable (each checks the signed-in staff account itself)"
+    for f in setDoNotContact attentionAction; do
+      gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+    done
+    check_reachable "setDoNotContact attentionAction sendReply sendMedia startConversation reopenConversation deliverQuote retryQuoteDelivery sendQuote leadIntake"
+    echo "Done. Next: $0 live (the screen: Needs attention and the Do not contact button). Backups are separate: ./scripts/setup-backups.sh status"
+    echo "To go back: git checkout ead6662 -- functions, then firebase deploy --only $(for f in $SAFETY_CHANGED; do printf 'functions:%s,' "$f"; done | sed 's/,$//'), and firebase functions:delete $SAFETY_NEW --region $REGION --project $PROJECT"
+    ;;
   preview)
     [ -n "$(serving_revision deliverquote)" ] || { echo "Deploy the backend first: $0 backend"; exit 1; }
     no_test_folders
@@ -427,6 +460,7 @@ case "${1:-}" in
     if [ -f functions/lib/projects.js ] && [ -z "$(serving_revision createproject)" ]; then echo "Deploy the Projects backend first: $0 projects"; exit 1; fi
     if [ -f functions/lib/push.js ] && [ -z "$(serving_revision pushreceipt)" ]; then echo "Deploy the push notifications backend first: $0 push"; exit 1; fi        # Phase 8: the screen and the /pushReceipt rewrite need these functions
     if [ -f functions/lib/ai.js ] && [ -z "$(serving_revision aichat)" ]; then echo "Deploy the AI assistant backend first: $0 ai"; exit 1; fi
+    if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact
     if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions
     no_test_folders
     echo "This publishes the screen files of this checkout (the commit shown at the top) to everyone who uses Elite OS. Hosting only: no function, rule or setting changes."

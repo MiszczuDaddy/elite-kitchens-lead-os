@@ -175,6 +175,7 @@ auth.onAuthStateChanged(async (user) => {
   startAccessRenewal();
   watchList();
   if (window.CONSULT) CONSULT.start();                // Phase 9 R2b: consultation requests waiting for a booking
+  if (window.ATTN) ATTN.start();                      // Phase 10: problems, failed alerts and rejected leads ("Needs attention")
   routeFromHash();
   if (window.PUSH) PUSH.start();                    // Phase 8: keeps this device's notification address fresh; opens the chat a clicked notification was about
 });
@@ -194,6 +195,7 @@ function stopListening() {
   if (window.ASSIST) ASSIST.stop();
   if (window.REPLY) REPLY.stop();
   if (window.CONSULT) CONSULT.stop();
+  if (window.ATTN) ATTN.stop();
   if (window.PUSH) PUSH.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
@@ -268,6 +270,8 @@ function convItem(c) {
   const tag = [S.query.trim() ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
   if (tag) body.append(el('div', 'conv-sub', tag));
   if (window.CONSULT && CONSULT.has(c)) body.append(el('div', 'conv-consult', 'Needs booking'));
+  if (dncOf(c)) body.append(el('div', 'conv-dnc', 'Do not contact'));                                                  // Phase 10
+  if (c.receptionist && c.receptionist.notifyFailed) body.append(el('div', 'conv-alert', 'Alert did not reach your phone'));   // Phase 10: see Needs attention
   const prev = el('div', 'conv-prev');
   prev.append(el('span', 't', previewOf(c) || ' '));
   if (unread) {
@@ -647,20 +651,57 @@ function windowNote(c, w) {
   else if (r) t += ` The template sent ${whenText(r.at)} got no reply.`;
   return t;
 }
+// Phase 10: "do not contact". The server refuses every send to such a customer; the screen says why and switches the message box off.
+const dncOf = (c) => !!(c && c.doNotContact && c.doNotContact.on === true);
 function updateComposer() {
   if (!S.selected) return;
   const c = selectedConv();
   const w = c ? windowInfo(c) : null;
-  const open = !!w && w.state === 'open';
+  const dnc = dncOf(c);
+  const open = !!w && w.state === 'open' && !dnc;
   $('composer').classList.toggle('disabled', !open);
   $('text').disabled = !open; $('send').disabled = !open; $('attach-btn').disabled = !open;
-  $('window-note').hidden = open || !c;
-  if (c && !open) {
+  $('dnc-note').hidden = !dnc;
+  if (dnc) $('dnc-text').textContent = AttentionModel.dncText(c.doNotContact, Date.now());
+  $('window-note').hidden = open || !c || dnc;
+  if (c && !open && !dnc) {
     $('window-text').textContent = windowNote(c, w);
     $('tpl-btn').hidden = !(w.state === 'closed' && w.canReopen);
   }
-  $('text').placeholder = open ? 'Type a message…' : w && w.state === 'awaiting' ? `Waiting for ${c.name || 'the customer'} to reply…` : 'Replies are disabled until the customer messages again';
+  $('text').placeholder = dnc ? 'This customer asked not to be contacted' : open ? 'Type a message…' : w && w.state === 'awaiting' ? `Waiting for ${c.name || 'the customer'} to reply…` : 'Replies are disabled until the customer messages again';
+  // the customer's details: the same switch, with who set it and why
+  $('dnc-state').textContent = dnc ? AttentionModel.dncText(c.doNotContact, Date.now()) : 'Messages to this customer are allowed.';
+  $('dnc-state').classList.toggle('on', dnc);
+  $('dnc-btn').textContent = dnc ? 'Allow contact again…' : 'Do not contact…';
+  if (S.dncShown !== dnc) { S.dncShown = dnc; if (window.REPLY && REPLY.render) REPLY.render(); }       // "Suggest reply" goes away for them
 }
+// The "do not contact" dialog: switch it on (with an optional note) or off (after confirming). The server checks it on every send.
+const dncDlg = $('dnc-dlg');
+let dncWant = null;                                             // { phone, on } while the dialog is open
+function openDnc(on) {
+  const c = selectedConv(); if (!c) return;
+  dncWant = { phone: c.id, on };
+  $('dnc-title').textContent = on ? 'Do not contact' : 'Allow contact again';
+  $('dnc-hint').textContent = on
+    ? `${c.name || 'This customer'} will get no more messages, files, templates or quotes from Elite OS, by anyone, until someone allows contact again. Their own messages still arrive.`
+    : `Only do this if ${c.name || 'the customer'} has asked to hear from you again. Messages, templates and quotes to them will be allowed again.`;
+  $('dnc-note-label').hidden = !on; $('dnc-note-in').value = '';
+  $('dnc-go').textContent = on ? 'Do not contact' : 'Allow contact'; $('dnc-go').className = 'btn ' + (on ? 'btn-danger' : 'btn-primary');
+  $('dnc-err').textContent = ''; $('dnc-go').disabled = false;
+  if (typeof dncDlg.showModal === 'function') dncDlg.showModal(); else dncDlg.setAttribute('open', '');
+}
+$('dnc-btn').onclick = () => openDnc(!dncOf(selectedConv()));
+$('dnc-allow').onclick = () => openDnc(false);
+$('dnc-cancel').onclick = () => dncDlg.close();
+$('dnc-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const d = dncWant; if (!d) return;
+  $('dnc-go').disabled = true; $('dnc-err').textContent = '';
+  try {
+    await call('setDoNotContact')({ phone: d.phone, on: d.on, ...(d.on && $('dnc-note-in').value.trim() ? { note: $('dnc-note-in').value.trim() } : {}) });
+    dncDlg.close();
+  } catch (err) { $('dnc-err').textContent = errText(err); $('dnc-go').disabled = false; }
+});
 setInterval(() => { if (S.selected) updateComposer(); }, 60000);          // a window closing, or a Reopen's day running out, while the chat is open
 
 // composer: Enter sends, Shift+Enter = new line
@@ -953,7 +994,7 @@ let custDone = null;
 function openAddCustomer(prefill = {}, onDone = null) {
   custDone = onDone;
   $('c-phone').value = prefill.phone || ''; $('c-name').value = prefill.name || '';
-  for (const k of ['email', 'address', 'location', 'source']) $('c-' + k).value = '';
+  for (const k of ['email', 'address', 'location', 'source']) $('c-' + k).value = prefill[k] || '';           // Phase 10: a rejected Meta lead comes with its email, area and source
   $('c-err').textContent = ''; $('c-go').disabled = false;
   if (typeof custDlg.showModal === 'function') custDlg.showModal(); else custDlg.setAttribute('open', '');
   (prefill.phone ? (prefill.name ? $('c-email') : $('c-name')) : $('c-phone')).focus();

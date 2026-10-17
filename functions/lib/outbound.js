@@ -11,6 +11,7 @@
 // the message is sent as before, except that "accepted" is still never reported as "failed".
 const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp } = require('firebase-admin/firestore');
+const CB = require('./contactBlock');
 
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const STUCK_MS = 3 * 60 * 1000;                      // "sending" for longer than this is "not confirmed"
@@ -42,6 +43,7 @@ async function begin(db, phone, requestId, nowMs = Date.now(), { guard = null, e
     if (!conv.exists) throw new HttpsError('not-found', 'Conversation not found.');            // erased meanwhile: no claim is left behind
     const now = Timestamp.fromMillis(nowMs);
     if (s.exists && s.data().state === 'sent') return { done: true, effects: s.data().effects || null, effectsDone: s.data().effectsDone === true };
+    CB.assertAllowed(conv.data());                                                                 // Phase 10: "do not contact", inside the claim (a switch set while this send was prepared stops it)
     if (guard) { const why = await guard(tx, conv); if (why) throw new HttpsError('failed-precondition', 'Not sent: ' + why, { reason: 'guard', why }); }
     if (!s.exists) { tx.create(ref, { state: 'sending', claimedAt: now, ...(effects ? { effects, effectsDone: false } : {}) }); return { go: true }; }
     const d = s.data();
