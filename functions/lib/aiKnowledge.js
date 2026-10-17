@@ -39,11 +39,15 @@ const DEFAULT_LINES = {
   late: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
   booking_confirm: 'I\'ll pass this to the team and they\'ll confirm the time with you.',
   booking_specific: 'I\'ll pass that on to the team and they\'ll come back to you about it.',
+  // Added after the audit of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval; the same defaults as aiSchedule LINES).
+  still_looking: 'Are you still looking at a new kitchen?',
+  soon: 'Thanks, I\'ll pass that on to the team straight away and they\'ll get back to you.',
 };
 const LINE_LABELS = { holding: 'Not sure / need to check', partly: 'Part answered, the rest needs checking', human: 'Customer asks for a person', outside_area: 'Outside the areas we cover', declined_job: 'A job we politely decline', other_language: 'Message not in English', complaint: 'A complaint or an upset customer', links_intro: 'Before the portfolio links',
   declined: 'Customer says no, not now or maybe later (no hand-over)', thinking: 'Customer wants to think about it (no hand-over)', price_concern: 'Customer finds the price more than expected (no hand-over)', browsing: 'Customer is just looking at options (no hand-over)',
   photo: 'Customer sends a photo (then a person takes over)', voice: 'Customer sends a voice note (then a person takes over)', file: 'Customer sends a video or file (then a person takes over)',
-  late: 'Booked customer is running late (then a person takes over)', booking_confirm: 'Booked customer asks the time or to confirm (then a person takes over)', booking_specific: 'Booked customer asks for a specific day or time (then a person takes over)' };
+  late: 'Booked customer is running late (then a person takes over)', booking_confirm: 'Booked customer asks the time or to confirm (then a person takes over)', booking_specific: 'Booked customer asks for a specific day or time (then a person takes over)',
+  still_looking: 'Customer only says hello (the question after our greeting)', soon: 'Customer asks for a visit today or tomorrow (then a person takes over)' };
 const URLISH = /@|https?:|www\.|\.(?:ie|com|net|org|co|uk)\b|€|\d/i;
 
 const emptyData = () => ({ sections: [], links: [], contact: { email: '', website: '', whatsapp: '' }, lines: { ...DEFAULT_LINES }, instructions: '', examples: [] });

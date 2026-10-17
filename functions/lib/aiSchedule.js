@@ -30,6 +30,11 @@ const LINES = {
   // A customer who will check or let us know (owner's wording, 15 Oct 2026).
   tentative: 'No problem at all, just let us know when suits.',
   no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.',
+  // Audit of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval). With published knowledge both are the owner's lines in the Knowledge Centre (aiKnowledge DEFAULT_LINES, the same defaults).
+  // The question after our greeting when a new lead only says hello, so the reply never ends in a dead end.
+  still_looking: 'Are you still looking at a new kitchen?',
+  // A visit asked for today or tomorrow: passed on at once (a push), never "Good question" and never a promise of a time.
+  soon: 'Thanks, I\'ll pass that on to the team straight away and they\'ll get back to you.',
 };
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const WEEKS = ['this', 'next', 'following', 'other'];
@@ -64,17 +69,31 @@ function cleanPreference(raw) {
 // (the model once turned "I work all day though" into "evenings"). Weeks and "any day" are kept as they are.
 const DAY_WORDS = { monday: 'mon', tuesday: 'tues?', wednesday: 'weds?', thursday: 'thu(?:rs?)?', friday: 'fri', saturday: 'sat', sunday: 'sun' };
 const TIME_STOP = new Set(['the', 'any', 'and', 'after', 'before', 'from', 'around', 'about', 'time', 'ish', 'between', 'until', 'til', 'till', 'only', 'are', 'best', 'free', 'suit', 'work']);
-function heard(pref, said) {
+// "today" and "tomorrow" name a day too (audit 17 Oct 2026, problem 5: "can someone come out today?" was not recorded). The day is worked out from the Irish date, never taken from the model's guess, and only when the
+// customer wrote the word AND the model read it as a day they can do (it gave that day, or its own summary of their words has the word without a "not" in front: "not today, Friday" gives Friday only).
+const REL_DAYS = [[/\b(?:today|tonight)\b/, 0], [/\b(?:tomorrow|tmrw|tmr|2moro|2morrow)\b/, 1]];
+const NOT_BEFORE = /\b(?:not|no|never|can'?t|cannot|won'?t|couldn'?t|isn'?t|doesn'?t|don'?t)\b[\s\w']{0,12}$/;
+function heard(pref, said, nowMs = null) {
   if (!pref) return null;
-  const s = String(said || '').toLowerCase();
-  const days = pref.days.filter((d) => new RegExp(`\\b(?:${d}|${DAY_WORDS[d]})s?\\b`).test(s));
+  const s = String(said || '').toLowerCase(), t = String(pref.text || '').toLowerCase();
+  const named = pref.days.filter((d) => new RegExp(`\\b(?:${d}|${DAY_WORDS[d]})s?\\b`).test(s));
+  const rel = [];
+  if (nowMs && pref.status === 'available') for (const [re, n] of REL_DAYS) {
+    if (!re.test(s)) continue;
+    const x = plusDays(ymdOf(nowMs), n), day = WEEKDAYS[x.dow], m = t.match(re);
+    if (!named.includes(day) && (pref.days.includes(day) || (m && !NOT_BEFORE.test(t.slice(0, m.index))))) rel.push(x);
+  }
+  const days = [...named, ...rel.map((x) => WEEKDAYS[x.dow]).filter((d) => !named.includes(d))];
+  // the week of a day named only as "today" or "tomorrow" is the week that date is in (tomorrow on a Sunday is next week)
+  const ymd = (x) => x.y * 1e4 + x.m * 100 + x.d;
+  const weeks = rel.length && !named.length ? (ymd(rel[0]) > ymd(weekOf(nowMs, 'this').sunday) ? 'next' : 'this') : pref.weeks;
   let times = pref.times;
   if (times) {
     const words = (times.toLowerCase().match(/[a-z]{2,}|\d+/g) || []).map((w) => (/^[a-z]{4,}s$/.test(w) ? w.slice(0, -1) : w)).filter((w) => !TIME_STOP.has(w));
     const ok = words.length ? words.some((w) => (/^\d+$/.test(w) ? new RegExp(`(?:^|\\D)${w}(?:\\D|$)`) : new RegExp(`\\b${w}`)).test(s)) : /\bany ?time\b|\bwhenever\b|\bflexible\b/.test(s);
     if (!ok) times = null;
   }
-  return { ...pref, days, times };
+  return { ...pref, weeks, days, times, soon: rel.length > 0 };
 }
 // "Reasonable" = something a person can book from: the customer is AVAILABLE and named a day, "any day", a time of day, or a week. "Not sure", "I'll let you know", "I'm abroad" and "another time" alone are not.
 const reasonable = (p) => !!(p && p.status === 'available' && (p.days.length || p.anyDay || p.times || (p.weeks && p.weeks !== 'other')));
@@ -164,6 +183,17 @@ const ASKS_VISIT = /\b(visit|call (?:out|over|round|around|to the house)|calling
 // ("do you have an automatic opening bin", "is a machine used to cut the doors", "can I see the computer design" are questions about kitchens; audit review of 16 Oct 2026). Any such question gets the honest line.
 const ASKS_AI = /\b(?:are|r|were|is)\s+(?:you|u|ya)\s+(?:(?:a|an|actually|really|just)\s+)*(?:bot|robot|chat ?bot|chatgpt|a\.?i\.?|artificial intelligence|human|real person|real human|actual person|person|automated|machine|computer|virtual assistant)\b|\b(?:is|was)\s+this\s+(?:(?:a|an|actually|really)\s+)*(?:bot|robot|chat ?bot|chatgpt|ai|automated|human|real person|real human|a person)\b|\b(?:am\s+i|are\s+we)\s+(?:talking|speaking|chatting|texting|messaging|writing|typing)\s+(?:to|with)\s+(?:(?:a|an|some)\s+)*(?:real\s+|actual\s+)?(?:person|human|bot|robot|chat ?bot|ai|machine|computer|someone real|somebody real)\b|\b(?:u|you)\s+a\s+(?:bot|robot|ai|real person|human)\b/i;
 const asksIfAi = (text) => ASKS_AI.test(String(text || ''));
+// Audit 17 Oct 2026, problems 1 and 2 (a lead who replied "Hi", "Yes interested" or "what happens next?" was left with nothing to answer). Read from the customer's own words, not the model's labels:
+// they say yes or that they are interested (not a visit agreement: the visit is OFFERED, once) ...
+const INTEREST = /\b(?:yes+|yeah|yea|yeh|yep|yup|aye|interested|still looking|definitely|absolutely|sure|go on|go ahead|let'?s do it|sounds good|count me in)\b/i;
+const NEGATIVE = /\b(?:no|nope|nah|not|never|don'?t|dont|cancel|stop)\b/i;
+const keen = (words) => INTEREST.test(words) && !NEGATIVE.test(words);
+// ... or they ask about the next step or how it all works (the visit IS the next step, so it is offered with the answer; a plain question of fact still is not).
+const NEXT_STEP = /\b(?:what(?:'s|s| is)?\s+(?:the\s+)?(?:next|process|procedure)\b|what\s+(?:happens|do\s+(?:i|we)\s+do)\s+(?:next|now|after|from here)|how\s+(?:does|do|would)\s+(?:it|this|that|the process|the whole thing|it all)\s+work|how\s+(?:do|would|can)\s+(?:i|we)\s+(?:go about it|proceed|start|get started|go ahead|move forward)|where\s+do\s+(?:i|we)\s+go\s+from\s+here|next\s+steps?|what\s+are\s+the\s+steps)\b/i;
+// An answer that already opens with a greeting gets no second one from the code (problem 4).
+const GREETED = /^(?:hi|hello|hey|hiya|good (?:morning|afternoon|evening)|thanks|thank you)\b/i;
+// Our old bare acknowledgement (the dead end itself): a chat left at it is treated as if the customer had only said hello.
+const DEAD_END = /^(?:Hi\b[^.?!]{0,30}, )?thanks for getting back to us\.$/i;
 
 // The plan for this message. Returns { step, reply, handover, preference }:
 //   step 'none'     nothing is said by the system (a person takes over if handover.needed; otherwise the model's own reply is only a draft for staff)
@@ -176,7 +206,8 @@ function tidy(text, { partly = false, links = false } = {}) {
   const parts = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean), keep = parts.filter((s) => !(partly && FOLLOWUP.test(s)) && !(links && SHOWING.test(s)));
   return keep.join(' ').trim();
 }
-function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null, who = null }) {
+// `ownLines`: the owner's lines when the knowledge path asks this plan for the consultation step after an answer (it passes no `kn`, so the knowledge branch is not entered twice).
+function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null, who = null, ownLines = null }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
   const visit = d.visit || (d.wantsConsultation ? 'asked' : 'none');
@@ -185,7 +216,10 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   const latest = latestMessages(messages, { natural }), words = latest.join('\n');
   // Automatic mode (nobody reads it first): the days and times must be in the customer's own latest words, and agreement to a visit counts only if we really offered one or their own words ask for one
   // (a "yes" to our welcome message labelled as agreement is not). In the staff flow a person reads the draft and the preference summary before anything is sent, so the model's reading stands there.
-  const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, given = describe(natural ? heard(prefRaw, words) : prefRaw, nowMs);
+  const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, prefHeard = natural ? heard(prefRaw, words, nowMs) : prefRaw, given = describe(prefHeard, nowMs);
+  const line = (k) => ((kn && kn.lines) || ownLines || {})[k] || LINES[k];                // the owner's line (Knowledge Centre) when there is one, else the default
+  // The line that acknowledges a preference: for a visit asked for today or tomorrow, the "straight away" line (audit 17 Oct 2026, problem 5), never a promise of a time.
+  const passOn = given && prefHeard && prefHeard.soon ? line('soon') : LINES.acknowledge;
   const person = (why) => ({ step: 'none', reply: null, handover: { needed: true, reason: why }, preference: null });
   const offered = !!(consult && consult.offered) || said(LINES.visit_offer), agreed = (visit === 'asked' || visit === 'agreed') && (!natural || offered || ASKS_VISIT.test(words));
   const question = hand || !!d.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(d.intent);          // something a person has to answer (nothing is offered or asked meanwhile)
@@ -204,7 +238,8 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   if (natural && d.intent === 'complaint') return { step: 'complaint', reply: (kn && kn.lines.complaint) || LINES.complaint, handover: { needed: true, reason: 'complaint: upset customer' }, preference: null, ...(kn ? { kn: { state: 'special', special: 'complaint', blocked: [], topics: [] } } : {}) };
   if (kn && natural) {
     const special = { wants_person: ['human', kn.lines.human, 'asked for a person'], outside_area: ['outside_area', kn.lines.outside_area, 'outside the areas we cover: please review'], declined_job: ['declined_job', kn.lines.declined_job, 'a job we usually decline: please review'], other_language: ['other_language', kn.lines.other_language, 'message not in English'] }[d.special];
-    if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
+    // A customer who asks for a person and says when they are free: the days are recorded for the booking card too (audit 17 Oct 2026, problem 5).
+    if (special) return { step: special[0], reply: special[1], handover: { needed: true, reason: special[2] }, preference: special[0] === 'human' && given && !booked ? given : null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
   }
 
   // 2. A customer who already has a consultation booked. The booking is only ever changed by a person; nothing is said as done.
@@ -227,10 +262,10 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
 
 
   // 2a'. A photo, voice note, video or file (the receptionist cannot see or hear them): the owner's short thank-you line, then a person takes over (owner's decision, 16 Oct 2026). Read from the message
-  //      types, not from the model. A sticker is not an attachment (it is treated like an emoji).
+  //      types, not from the model. A sticker is not an attachment (it is treated like an emoji). A day in the caption ("Thursday suits") is recorded for the booking card (audit 17 Oct 2026, problem 5).
   if (natural && kn) {
     const types = latestBurst(messages, { natural }).map((m) => m.type), kind = types.includes('image') ? 'photo' : types.includes('audio') ? 'voice' : types.some((x) => x === 'video' || x === 'document') ? 'file' : null;
-    if (kind && kn.lines[kind]) return { step: 'attachment', reply: kn.lines[kind], handover: { needed: true, reason: { photo: 'customer sent a photo', voice: 'customer sent a voice note', file: 'customer sent a video or file' }[kind] + ': please have a look' }, preference: null };
+    if (kind && kn.lines[kind]) return { step: 'attachment', reply: kn.lines[kind], handover: { needed: true, reason: { photo: 'customer sent a photo', voice: 'customer sent a voice note', file: 'customer sent a video or file' }[kind] + ': please have a look' }, preference: given && !booked ? given : null };
   }
 
   // 2b. Step C: the owner has published knowledge, and this is the automatic receptionist. A customer who asks for a person, or whose job is outside our areas, a job we decline, or not in English, gets the
@@ -244,22 +279,30 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
       const linkLine = kn.linksText(d.links), text = tidy(raw, { partly: hand || d.answerState === 'partly', links: !!linkLine }) || (linkLine ? 'Of course.' : '');
       const has = !!text && d.answerState !== 'none', chk = has ? kn.check(text) : { ok: true, reasons: [] }, ok = has && chk.ok;
       const state = ok ? (hand || d.answerState === 'partly' ? 'partly' : 'answered') : 'none', unknown = d.unknown ? ': ' + d.unknown : '';
-      const links = ok ? linkLine : '', op = ok && first && (d.ack === 'hello' || opener(d.schedule && d.schedule.opener, hasOutbound)) ? ackLine('hello', who, true) : '';      // a greeting before the first answer: written by code
+      // A greeting before the first answer: written by code, and only when the answer does not already open with one (audit 17 Oct 2026, problem 4: "Hi Megan, thanks… Hi, thanks…").
+      const links = ok ? linkLine : '', op = ok && first && (d.ack === 'hello' || opener(d.schedule && d.schedule.opener, hasOutbound)) && !GREETED.test(text) ? ackLine('hello', who, true) : '';
       const sep = links ? '\n' : ' ', answer = ok ? (op ? op + ' ' : '') + text + (links ? '\n' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
-      if (!ok) return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
+      if (!ok) {
+        // They also said when they are free ("can someone come out today?", "I can only do Saturdays"): recorded for the booking card while a person answers (audit 17 Oct 2026, problem 5). A visit asked
+        // for today or tomorrow gets the "straight away" line instead of "Good question"; a real question keeps the holding line.
+        if (given && !booked) return { step: 'acknowledge', reply: prefHeard.soon ? line('soon') : kn.lines.holding, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + (reason || 'a question that needs the team') + unknown }, preference: given, kn: info };
+        return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
+      }
       if (state === 'partly') {
         const why = (reason || 'part of the question needs the team') + unknown;
-        if (given && !booked) return { step: 'acknowledge', reply: answer + sep + LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + why }, preference: given, kn: info };
+        if (given && !booked) return { step: 'acknowledge', reply: answer + sep + passOn, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + why }, preference: given, kn: info };
         return { step: 'answer_holding', reply: answer + sep + (kn.lines.partly || kn.lines.holding), handover: { needed: true, reason: why }, preference: null, kn: info };
       }
-      // fully answered: the answer goes first, then whatever the consultation flow would have said, with the question taken out of the picture
-      const neutral = { ...d, hasQuestion: false, reply: '', answerState: null, special: 'none', links: [], handover: { needed: false, reason: null }, schedule: { preference: d.schedule && d.schedule.preference, opener: '' },
-        intent: ['asking_info', 'asking_price'].includes(d.intent) ? 'answering_questions' : d.intent };
-      const core = plan({ decision: neutral, consult, messages, booked, nowMs, natural, kn: null });
+      // fully answered: the answer goes first, then whatever the consultation flow would have said, with the question taken out of the picture. No acknowledgement goes between the two: the answer
+      // is the acknowledgement, and the only greeting is the one in front of it (problem 4). A greeting that came with a question is a message about their project like any other.
+      const neutral = { ...d, hasQuestion: false, reply: '', answerState: null, special: 'none', links: [], ack: 'none', handover: { needed: false, reason: null }, schedule: { preference: d.schedule && d.schedule.preference, opener: '' },
+        intent: ['asking_info', 'asking_price', 'greeting'].includes(d.intent) ? 'answering_questions' : d.intent };
+      const core = plan({ decision: neutral, consult, messages, booked, nowMs, natural, kn: null, who, ownLines: kn.lines });
       // A plain question of fact (does it include, do you supply, how long, what do you cover) is just answered: the visit is not attached to it. The offer waits for a message where they talk about their own project
-      // or ask what kitchens cost, and is still made only once. (Owner's decision, 15 Oct 2026.)
+      // or ask what kitchens cost, and is still made only once. (Owner's decision, 15 Oct 2026.) A question about the next step or how it works ("what happens next?") is not a plain fact: the visit IS the next
+      // step, so it is offered with the answer (audit 17 Oct 2026, problem 2: 0 of 27 customers who asked it were offered the visit).
       // A customer who is just looking at options gets the answer and no offer either.
-      if (core.step === 'offer_visit' && (d.intent === 'asking_info' || d.special === 'browsing')) return { step: 'answer', reply: answer, handover: null, preference: null, kn: info };
+      if (core.step === 'offer_visit' && ((d.intent === 'asking_info' && !NEXT_STEP.test(words)) || d.special === 'browsing')) return { step: 'answer', reply: answer, handover: null, preference: null, kn: info };
       if (core.step === 'none') return { step: 'answer', reply: answer, handover: core.handover, preference: core.preference, kn: info };
       return { ...core, reply: answer + sep + core.reply, kn: info };
     }
@@ -268,7 +311,7 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   // 3. A general question about what kitchens cost is answered with the owner's fixed line; then, once, the offer of a visit (never a question about days before they agree).
   if (d.intent === 'asking_price_general' && !hand) {
     if (booked || visit === 'declined' || (consult && consult.stage === 'preference_given')) return { step: 'price_general', reply: LINES.price_general, handover: null, preference: null };
-    if (given) return { step: 'acknowledge', reply: LINES.price_general + ' ' + LINES.acknowledge, handover: { needed: true, reason: 'consultation preference received: over to you to book' }, preference: given };
+    if (given) return { step: 'acknowledge', reply: LINES.price_general + ' ' + passOn, handover: { needed: true, reason: 'consultation preference received: over to you to book' }, preference: given };
     if (agreed) { const next = askNext(consult, messages, null); return { ...next, reply: LINES.price_general + ' ' + next.reply }; }
     return offered ? { step: 'price_general', reply: LINES.price_general, handover: null, preference: null } : { step: 'price_offer', reply: LINES.price_general + ' ' + LINES.visit_offer, handover: null, preference: null };
   }
@@ -284,10 +327,11 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   // 4. They said when they are free: that is agreement. Record it (also when they ALSO asked something that needs a person: the question goes to the person together with the preference).
   if (given && d.intent !== 'complaint') {
     const extra = hand || !!d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent);
-    return { step: 'acknowledge', reply: LINES.acknowledge, handover: { needed: true, reason: extra ? 'consultation preference received; they also asked something that needs you' + (reason ? ': ' + reason : '') : 'consultation preference received: over to you to book' }, preference: given };
+    return { step: 'acknowledge', reply: passOn, handover: { needed: true, reason: extra ? 'consultation preference received; they also asked something that needs you' + (reason ? ': ' + reason : '') : 'consultation preference received: over to you to book' }, preference: given };
   }
   // A customer unsure who is writing ("Who is this?") gets the code's one line saying who we are, whatever intent the model gave it (a real-model run on 16 Oct 2026 labelled it "other" and the chat was handed over in silence).
-  if (natural && d.ack === 'confused' && !hand && ['other', 'greeting'].includes(d.intent)) return { step: 'ack_only', reply: ackLine('confused', who, first), handover: null, preference: null };
+  // With no visit offered yet it goes on with the owner's question, so the reply does not end in a dead end (audit 17 Oct 2026, problem 1).
+  if (natural && d.ack === 'confused' && !hand && ['other', 'greeting'].includes(d.intent)) return { step: 'ack_only', reply: ackLine('confused', who, first) + (offered ? '' : ' ' + line('still_looking')), handover: null, preference: null };
   if (consult && consult.stage === 'preference_given') return none;                       // already handed over; nothing new to ask or offer (a corrected preference was handled above)
   if (question) return none;                                                               // a question we cannot answer: a person answers it; nothing is offered or asked meanwhile
 
@@ -306,11 +350,22 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     return next.step === 'ask_next_week' ? { ...next, reply: (o ? o + ' ' : '') + next.reply } : next;
   }
 
-  // 7. No agreement. A greeting, "ok", an emoji or confusion gets a friendly acknowledgement only; an enquiry or interest gets the offer of a visit, once.
+  // 7. No agreement. An enquiry or interest gets the offer of a visit, once.
   //    In the STAFF flow (a person reads the draft) a reply the model wrote itself is kept as the draft: the person adds the offer if they want it.
   if (!natural && String(d.reply || '').trim()) return none;
   const ack = natural ? ackOf() : '', op = natural ? ack : opener(d.schedule && d.schedule.opener, hasOutbound);
-  if (d.intent === 'greeting') {                                                          // only the FIRST reply: after that, "ok" and "thanks" need no answer
+  if (d.intent === 'greeting') {
+    // Automatic mode, no visit offered yet (audit 17 Oct 2026, problem 1: "Hi", "Yes", "Yes interested" got only "Hi Leo, thanks for getting back to us." and 24 of 200 leads went cold). The reply always ends
+    // with a next step: "yes", "interested" (or any answer to our "still looking?" question that is not a no) get the offer of a visit; anything else on the first reply ("Hi", "Hello", "ok", an emoji) gets
+    // the greeting and the owner's question. A chat left at the old bare acknowledgement is picked up the same way when the customer writes again.
+    if (natural && !offered) {
+      const last = String((out[out.length - 1] || {}).body || '').trim(), askedStill = last.includes(line('still_looking')), deadEnd = DEAD_END.test(last);
+      if (keen(words) || (askedStill && !NEGATIVE.test(words))) return first && !ack ? person('could not write a safe reply to the greeting') : { step: 'offer_visit', reply: (ack ? ack + ' ' : '') + LINES.visit_offer, handover: null, preference: null };
+      if (first) return ack ? { step: 'ack_only', reply: ack + ' ' + line('still_looking'), handover: null, preference: null } : person('could not write a safe reply to the greeting');
+      if (deadEnd) return { step: 'ack_only', reply: line('still_looking'), handover: null, preference: null };
+      return none;
+    }
+    // Otherwise (staff drafts, or after the offer) a greeting gets a friendly acknowledgement on the FIRST reply only: after that, "ok" and "thanks" need no answer.
     return first ? (ack ? { step: 'ack_only', reply: ack, handover: null, preference: null } : person('could not write a safe reply to the greeting')) : none;
   }
   if (offered) return none;                                                                // the offer was made: never repeated, never turned into a question about days
@@ -326,8 +381,11 @@ function askNext(consult, messages) {
 }
 
 // What to remember on the conversation once a person (or the receptionist) has sent the message.
+// A day given with a photo or with a request for a person is recorded like any other (audit 17 Oct 2026, problem 5): the booking card shows it, and the chat is already the owner's.
+const WITH_PREFERENCE = new Set(['attachment', 'human']);
 function advance(consult, step, preference, nowMs) {
   const cur = consult && typeof consult === 'object' ? consult : {};
+  if (WITH_PREFERENCE.has(step)) step = preference && preference.status === 'available' ? 'acknowledge' : step;
   if (cur.stage === 'preference_given' && step !== 'acknowledge') return null;            // never move back
   if (step === 'offer_visit' || step === 'price_offer') return cur.asks > 0 ? null : { stage: cur.stage || 'offered_visit', offered: true };
   if (step === 'ask_next_week') return { stage: 'asked_next_week', asks: Math.max(1, cur.asks || 0), offered: true };
@@ -347,4 +405,4 @@ const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_as
 // After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
 const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
   'attachment', 'late', 'booking_confirm', 'booking_specific']);      // declined, thinking, price_concern and browsing do NOT pause: the customer may write again
-module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, ACKS, THINKING, cleanPreference, heard, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, ackLine, firstName, latestMessages, latestBurst, asksIfAi, ASKS_VISIT, plan, advance };
+module.exports = { SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, ACKS, THINKING, INTEREST, NEXT_STEP, cleanPreference, heard, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, ackLine, firstName, latestMessages, latestBurst, asksIfAi, ASKS_VISIT, plan, advance };

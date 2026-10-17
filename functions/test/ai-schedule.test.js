@@ -20,7 +20,7 @@ const out = (text, type = 'text') => ({ direction: 'out', type, body: text }), i
 const sent = (p) => p.reply || '';
 
 test('the owner\'s approved lines are in place and make no promise, no date and no availability claim (the price line is the only one with a figure)', () => {
-  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'change_ask', 'complaint', 'no_preference', 'price_general', 'tentative', 'visit_offer']);
+  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'change_ask', 'complaint', 'no_preference', 'price_general', 'soon', 'still_looking', 'tentative', 'visit_offer']);
   assert.equal(L.visit_offer, 'Would you like us to call out and have a look at your space?'); assert.equal(L.cancel_ask, 'No problem, do you want to move it to any other date?'); assert.equal(L.tentative, 'No problem at all, just let us know when suits.');
   assert.equal(L.acknowledge, 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.');
   for (const [k, l] of Object.entries(L)) if (k !== 'price_general') assert.doesNotMatch(l, /\b(booked|confirmed available|availability|\d)\b/i, k);
@@ -108,8 +108,9 @@ test('ANSWER FIRST, OFFER ONCE: the offer follows the reply to what they said; i
   const staff = S.plan({ decision: D({ intent: 'new_enquiry', schedule: { preference: null, opener: 'Hi Anna, thanks for getting in touch.' } }), consult: null, messages: [], booked: false, nowMs: TUE, natural: false }); assert.equal(staff.step, 'offer_visit'); assert.equal(asksDays(sent(staff)), false); assert.match(sent(staff), /^Hi Anna, thanks for getting in touch\./);
 });
 
-test('A GREETING gets one friendly acknowledgement and nothing else; after our first reply "ok" and "thanks" need no answer', () => {
-  const hello = P({ intent: 'greeting', ack: 'hello', reply: 'Hi Eimear, we are a family-run firm.' }, { who: { name: 'Eimear Byrne' } }); assert.equal(hello.step, 'ack_only'); assert.equal(sent(hello), 'Hi Eimear, thanks for getting back to us.');
+test('A GREETING gets one friendly acknowledgement and one question (audit 17 Oct 2026: never a dead end), no pitch; after the offer "ok" and "thanks" need no answer', () => {
+  const hello = P({ intent: 'greeting', ack: 'hello', reply: 'Hi Eimear, we are a family-run firm.' }, { who: { name: 'Eimear Byrne' } }); assert.equal(hello.step, 'ack_only'); assert.equal(sent(hello), 'Hi Eimear, thanks for getting back to us. ' + L.still_looking);
+  assert.equal(offersVisit(sent(hello)) || asksDays(sent(hello)), false, 'a hello is not an invitation to pitch');
   const unsafe = P({ intent: 'greeting', reply: 'Hi, call tomorrow at 5pm?' }); assert.equal(unsafe.step, 'none'); assert.equal(unsafe.handover.needed, true, 'no safe words: a person looks at it, nobody is left in silence without an alert');
   assert.equal(P({ intent: 'greeting', reply: 'Thanks again.' }, { messages: [out(L.visit_offer, 'text'), inn('ok')] }).step, 'none');
   assert.equal(P({ intent: 'greeting', ack: 'thanks' }, { messages: [out('welcome...', 'template')] }).step, 'ack_only', 'our welcome template is not "our first reply"');
