@@ -227,6 +227,17 @@ const PRIVACY = /\b(?:another|other|previous|last|a different|someone else'?s?)\
 // the model's "what is still open" says nothing but the visit and its day ("visit availability this Saturday"), so there is no "rest" to check (re-run N29); "weekend working", "samples" are real questions
 const VISIT_DAY_WORDS = /\b(?:home|visits?|consultations?|appointments?|availability|available|come|coming|call|calling|out|over|round|slots?|dates?|days?|times?|weeks?|this|next|following|specific|requests?|requested|asks?|asking|wants?|whether|if|we|can|could|someone|on|at|for|a|an|the|to|be|is|are|of|and|or|tomorrow|today|tonight|mornings?|afternoons?|evenings?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thur?s?|fri|sat|sun)\b/gi;
 const visitDayOnly = (t) => !String(t || '').replace(VISIT_DAY_WORDS, ' ').replace(/[^a-z]+/gi, ' ').trim();
+// Live test of 17 Oct 2026: "I've a budget of about €12,000. Does that include quartz worktops, Blum drawers and appliances? Also, is there a charge for the home consultation?" was answered in full, yet got
+// "I'll check the rest": the model wanted a person for the budget, or named an exact cost nobody asked for as the open part (also Astra A031, "would Blum drawers cost extra?"). The line now goes only when
+// something is really left open: a question the answer did not cover, or an amount the customer did ask for ("how much", "a quote", "the price of"). A person is still told whenever the model asked for one.
+const ASKS_AMOUNT = /\bhow much\b|\bwhat(?:'s|s|\s+is|\s+are|\s+would|\s+will|\s+does|\s+do)?\s+(?:(?:it|that|this|they|you|the(?:\s+\w+){0,3})\s+)?(?:cost|come to|charge)\b|\b(?:prices?|costs?|pricing)\s+(?:of|for|on)\b|\b(?:quote|quotation|estimate|ballpark|price list)\b|\b(?:give|tell|send)\s+(?:me|us)\s+(?:(?:a|an|the|your)\s+)?(?:prices?|figure|cost|number)\b|\bwhat\s+(?:are|is)\s+(?:your|the)\s+(?:prices?|rates?)\b/i;
+const PRICE_ITEM = /\b(?:exact|precise|specific|actual|final|full|detailed|individual|itemi[sz]ed|extra|additional|upgrade)\s+(?:costs?|prices?|pricing|figures?|quotes?|amounts?)\b|\b(?:costs?|prices?|pricing)\s+(?:of|for)\b|\bhow much\b|(?:budget|€\s?\d|\d[\d,.]*\s?(?:k|euros?|eur)\b)[^.?!;]{0,60}\b(?:covers?|includes?|enough|stretch|within|fits?)\b|\b(?:covers?|includes?|enough|within)\b[^.?!;]{0,40}(?:budget|€\s?\d)/i;
+const priceOnly = (t) => String(t).split(/;|,(?!\d)|\b(?:and|also|plus)\s+(?=(?:whether|if|how|what|when|where|who|which|do|does|can|could|is|are|will|would)\b)/i).map((x) => x.trim()).filter(Boolean).every((x) => PRICE_ITEM.test(x));
+function restOpen(d, flagged, words) {
+  const amount = ASKS_AMOUNT.test(words), item = String(d.unknown || '').trim();
+  if (item) return amount || !priceOnly(item);                   // what the model says is open: a real question, or an amount they did ask for
+  return d.answerState === 'answered' ? flagged && amount : true; // nothing named: "answered" means nothing is left unless they asked for an amount; no label at all (older answers) keeps the line
+}
 // the project in the acknowledgement follows what the customer says NOW ("a utility room, not a full kitchen": Astra F8 A005, B049), never overwriting the records
 function projectSaid(words) {
   const w = String(words || ''), kitchenNo = /\b(?:not|no|rather than|instead of|n't need)\b[^.?!]{0,15}\bkitchen\b/i.test(w), kitchen = /\bkitchen\b/i.test(w) && !kitchenNo;
@@ -247,8 +258,10 @@ const DEAD_END = /^(?:Hi\b[^.?!]{0,30}, )?thanks for getting back to us\.$/i;
 // taken out, so the customer is not told the same thing twice. Nothing is added or reworded; a reply that is only such sentences is not used.
 const FOLLOWUP = /\b(?:the team|a member of the team|one of the team|someone|we(?:'ll| will)|i(?:'ll| will))\b[^.?!]*\b(?:come back|get back|be in touch|follow up|check|confirm|go through|call you|ring you)\b/i;
 const SHOWING = /\bhere(?:'s| is| are)\b[^.?!]*\b(?:work|photos?|pictures?|kitchens?|projects?|links?|look)\b/i;
+// A follow-up the model promises on its own ("I'll check the rest… and get back to you") with nothing flagged for a person: taken out, and you are told, so no promise goes out that nobody knows about.
+const PROMISE = /\b(?:get|come) back to (?:you|u)\b|\bbe in touch\b|\bcheck the rest\b/i;
 function tidy(text, { partly = false, links = false } = {}) {
-  const parts = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean), keep = parts.filter((s) => !(partly && FOLLOWUP.test(s)) && !(links && SHOWING.test(s)));
+  const parts = String(text || '').split(/(?<=[.!?])\s+/).filter(Boolean), keep = parts.filter((s) => !(partly && (FOLLOWUP.test(s) || PROMISE.test(s))) && !(links && SHOWING.test(s)));
   return keep.join(' ').trim();
 }
 // `ownLines`: the owner's lines when the knowledge path asks this plan for the consultation step after an answer (it passes no `kn`, so the knowledge branch is not entered twice).
@@ -329,9 +342,10 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     if ((d.special === 'price_concern' || d.special === 'browsing') && !hand && !d.hasQuestion && kn.lines[d.special]) return { step: d.special, reply: kn.lines[d.special], handover: null, preference: null, kn: { state: 'special', special: d.special, blocked: [], topics: [] } };
     const raw = String(d.reply || '').trim(), asking = d.hasQuestion || ['asking_info', 'asking_price'].includes(d.intent) || (d.intent === 'asking_price_general' && !!raw);
     if (asking && d.intent !== 'complaint') {
-      const linkLine = kn.linksText(d.links), text = tidy(raw, { partly: hand || d.answerState === 'partly', links: !!linkLine }) || (linkLine ? 'Of course.' : '');
+      const promised = !hand && d.answerState !== 'partly' && PROMISE.test(raw), flagged = hand || promised || d.answerState === 'partly';
+      const linkLine = kn.linksText(d.links), text = tidy(raw, { partly: flagged, links: !!linkLine }) || (linkLine ? 'Of course.' : '');
       const has = !!text && d.answerState !== 'none', chk = has ? kn.check(text) : { ok: true, reasons: [] }, ok = has && chk.ok;
-      const state = ok ? (hand || d.answerState === 'partly' ? 'partly' : 'answered') : 'none', unknown = d.unknown ? ': ' + d.unknown : '';
+      const state = ok ? (flagged ? 'partly' : 'answered') : 'none', unknown = d.unknown ? ': ' + d.unknown : '';
       // A greeting before the first answer: written by code, and only when the answer does not already open with one (audit 17 Oct 2026, problem 4: "Hi Megan, thanks… Hi, thanks…").
       const links = ok ? linkLine : '', op = ok && first && (d.ack === 'hello' || opener(d.schedule && d.schedule.opener, hasOutbound)) && !GREETED.test(text) ? ackLine('hello', who, true) : '';
       const sep = links ? '\n' : ' ', answer = ok ? (op ? op + ' ' : '') + text + (links ? '\n' + links : '') : '', info = { state, blocked: chk.reasons, topics: d.topics || [] };
@@ -347,8 +361,10 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
         return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
       }
       if (state === 'partly') {
-        const why = (reason || 'part of the question needs the team') + unknown;
+        const why = (reason || (promised ? 'the AI said the team would get back to them: please check' : 'part of the question needs the team')) + unknown;
         if (given && !booked) return { step: 'acknowledge', reply: answer + sep + passOn, handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + why }, preference: given, kn: info };
+        // Answered in full (nothing open, see restOpen): the answer goes alone, with no "I'll check the rest", and a person is still told and takes the chat (live test 17 Oct 2026).
+        if (!restOpen(d, hand || promised, words)) return { step: 'answer', reply: answer, handover: { needed: true, reason: why }, preference: null, kn: { ...info, state: 'answered' } };
         return { step: 'answer_holding', reply: answer + sep + (kn.lines.partly || kn.lines.holding), handover: { needed: true, reason: why }, preference: null, kn: info };
       }
       // fully answered: the answer goes first, then whatever the consultation flow would have said, with the question taken out of the picture. No acknowledgement goes between the two: the answer
