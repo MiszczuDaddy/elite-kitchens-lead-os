@@ -76,6 +76,13 @@ All recoveries use `scripts/restore-docs.js`. It works the same way every time:
 - **It shows first.** Without `--apply` it only lists what it would bring back. Nothing is changed.
 - **It adds only what is missing.** With `--apply` it writes only the records that are **missing** from the live database. A deleted customer comes back, and nothing that exists now is changed.
 - **It can put old versions back.** `--overwrite` also replaces records that exist now with their old version. It asks again first.
+- **It never undoes what is true now.** Even with `--overwrite`, a chat that exists keeps, exactly as they are today:
+  - do not contact (the customer may have asked to stop after the backup);
+  - the numbering of the customer's messages and the receptionist's "answered up to" record;
+  - the receptionist's state;
+  - the last-message and unread fields.
+
+  Only the rest of the record (name, stage, dates, notes) comes back. Send claims (the record that stops a message going out twice) are never overwritten. A record that is **missing** comes back exactly as it was.
 - **It never deletes anything.**
 - **It knows a customer's whole record.** `--customer <number>` brings back:
   - their chat and every message;

@@ -90,6 +90,22 @@ function forLive(p, data) {
   return { ...data, sync: { ...data.sync, google: { ...g, state: 'pending', attempts: 0, failingSince: null, nextAttemptAt: Timestamp.now(), leaseUntil: null } } };
 }
 
+// REVIEW FIX (17 Oct 2026): putting back the OLD version of a record that exists now must never undo what is true NOW.
+//  * A chat's control fields are kept exactly as they are live: do not contact (a customer may have asked to stop after the backup), the numbering of customer messages and the "answered up to"
+//    record of the receptionist (an old, lower number would let new customer messages reuse numbers already marked answered, so they would never be answered), the receptionist's state and
+//    any Reopen in progress, the unread count, the times of the last message. Only the rest of the record (name, status, dates, notes...) comes back from the backup.
+//  * A send claim (conversations/{phone}/sendRequests/*) is never overwritten: it is what stops a message being sent twice.
+// A record that is MISSING live comes back exactly as it was (a customer erased by mistake had no live state to protect).
+const LIVE_CHAT_FIELDS = ['doNotContact', 'doNotContactHistory', 'inboundSeq', 'lastInboundAt', 'lastMessage', 'lastMessageType', 'lastMessageDirection', 'unreadCount', 'lastReadAt', 'receptionist', 'reopen', 'consult', 'updatedAt'];
+const isChat = (p) => /^conversations\/[^/]+$/.test(p), isClaim = (p) => /^conversations\/[^/]+\/sendRequests\/[^/]+$/.test(p);
+function overwriteData(p, old, liveData) {
+  if (isClaim(p)) return null;
+  if (!isChat(p)) return old;
+  const out = { ...old };
+  for (const k of LIVE_CHAT_FIELDS) { if (liveData && k in liveData) out[k] = liveData[k]; else delete out[k]; }
+  return out;
+}
+
 async function confirm(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const a = await new Promise((r) => rl.question(question + ' Type yes: ', r)); rl.close();
@@ -107,25 +123,28 @@ async function main(argv, { live = null, restored = null, log = console.log, ask
   const docs = await plan(o, reader(o, live, restored));
   if (!docs.size) { log('Nothing found to bring back (check the number, the path or the time). Nothing was changed.'); return { found: 0, written: 0 }; }
   const exists = new Map();
-  for (const p of docs.keys()) exists.set(p, (await live.doc(p).get()).exists);
+  const liveData = new Map();
+  for (const p of docs.keys()) { const s = await live.doc(p).get(); exists.set(p, s.exists); if (s.exists) liveData.set(p, s.data()); }
   const missing = [...docs.keys()].filter((p) => !exists.get(p)), present = [...docs.keys()].filter((p) => exists.get(p));
   const kinds = (list) => Object.entries(list.reduce((m, p) => { const k = p.split('/').length > 2 ? p.split('/')[2] : p.split('/')[0]; m[k] = (m[k] || 0) + 1; return m; }, {})).map(([k, n]) => `${n} ${k}`).join(', ') || 'none';
   log(`Found ${docs.size} records. Missing from the live database (would come back): ${kinds(missing)}. Present in the live database now: ${kinds(present)}.`);
-  const write = o.overwrite ? [...docs.keys()] : missing;
+  const write = o.overwrite ? [...docs.keys()].filter((p) => !exists.get(p) || overwriteData(p, docs.get(p), liveData.get(p)) !== null) : missing;
+  const kept = o.overwrite ? present.filter((p) => isClaim(p)).length : 0;
   if (!o.apply) { log(`DRY RUN: nothing was changed. To bring back the ${missing.length} missing records, run the same command with --apply${present.length ? ' (add --overwrite to also replace the ' + present.length + ' that exist now with their old version)' : ''}.`); return { found: docs.size, written: 0, missing: missing.length, present: present.length }; }
   if (!write.length) { log('Every record already exists in the live database. Nothing was changed (use --overwrite to put the old versions back).'); return { found: docs.size, written: 0 }; }
   const q = `Write ${write.length} records into the LIVE database${o.overwrite && present.length ? `, REPLACING ${present.length} that exist now with their old version` : ''}? Nothing will be deleted.`;
   if (!o.yes && !(await ask(q))) { log('Cancelled. Nothing was changed.'); return { found: docs.size, written: 0, cancelled: true }; }
   for (let i = 0; i < write.length; i += 400) {
     const b = live.batch();
-    for (const p of write.slice(i, i + 400)) b.set(live.doc(p), forLive(p, docs.get(p)));
+    for (const p of write.slice(i, i + 400)) b.set(live.doc(p), forLive(p, exists.get(p) ? overwriteData(p, docs.get(p), liveData.get(p)) : docs.get(p)));
     await b.commit();
   }
+  if (o.overwrite && present.length) log(`Kept as they are NOW (never taken from the backup): do not contact, message numbers, the receptionist's state and the last-message fields of any chat that exists, and ${kept} send claim(s).`);
   log(`Done: ${write.length} records written. Appointments that came back are put in the shared Google calendar again by the 5-minute calendar check (docs/BACKUPS.md).`);
   return { found: docs.size, written: write.length };
 }
 
-module.exports = { main, args, plan, reader, SUB, BY_PHONE };
+module.exports = { main, args, plan, reader, overwriteData, LIVE_CHAT_FIELDS, SUB, BY_PHONE };
 if (require.main === module) {
   main(process.argv.slice(2)).then(() => process.exit(0), (e) => { console.error('Stopped: ' + (e && e.message ? e.message : e)); process.exit(1); });
 }

@@ -71,6 +71,47 @@ test('records that exist now are left alone unless --overwrite is given; nothing
   assert.equal(cancelled.cancelled, true, 'without "yes" nothing is written');
 });
 
+test('REVIEW FIX: --overwrite brings back the old content of a chat but NEVER undoes what is true now (do not contact, message numbers, the receptionist\'s state, last-message fields) and never overwrites a send claim', async () => {
+  // the backup: the chat as it was (name "Old", numbering at 3, answered up to 3, no stop request, a claim still "sending")
+  await copy.doc('contacts/' + P).set({ phone: P, name: 'Ciara Old' });
+  await copy.doc('conversations/' + P).set({ phone: P, name: 'Ciara Old', inboxStatus: 'booked', notes: 'old notes', inboundSeq: 3, unreadCount: 0, lastMessage: 'old message', lastInboundAt: ts(NOW - 9e6),
+    receptionist: { on: true, handledSeq: 3, handledMs: NOW - 9e6 }, doNotContact: { on: true, by: 'old@example.com', source: 'staff' } });
+  await copy.doc(`conversations/${P}/sendRequests/auto_s3`).set({ state: 'sending', claimedAt: ts(NOW - 9e6) });
+  await copy.doc(`conversations/${P}/messages/wamid.OLD`).set({ direction: 'in', type: 'text', body: 'old', createdAt: ts(NOW - 9e6), seq: 3 });
+  // the live chat today: moved on (7 messages, answered up to 6), the customer has since asked us to stop, and the reply to message 3 was really sent
+  await live.doc('contacts/' + P).set({ phone: P, name: 'Ciara New' });
+  await live.doc('conversations/' + P).set({ phone: P, name: 'Ciara New', inboxStatus: 'quoted', inboundSeq: 7, unreadCount: 2, lastMessage: 'live message', lastInboundAt: ts(NOW - 1e3), updatedAt: ts(NOW),
+    receptionist: { on: true, paused: 'customer asked us to stop', handledSeq: 6 }, doNotContact: { on: true, by: 'customer', source: 'customer' }, doNotContactHistory: [{ on: true, by: 'customer' }] });
+  await live.doc(`conversations/${P}/sendRequests/auto_s3`).set({ state: 'sent', wamid: 'wamid.REAL' });
+  const out = [];
+  const r = await restoreDocs.main(['--from-database', COPY, '--customer', P, '--apply', '--overwrite', '--yes'], { live, restored: copy, log: (m) => out.push(m) });
+  assert.ok(r.written >= 3, 'the content came back');
+  const c = (await live.doc('conversations/' + P).get()).data();
+  assert.deepEqual([c.name, c.inboxStatus, c.notes], ['Ciara Old', 'booked', 'old notes'], 'the old content is back');
+  assert.equal(c.doNotContact.on, true); assert.equal(c.doNotContact.by, 'customer', 'do not contact is exactly as it is now');
+  assert.deepEqual(c.doNotContactHistory, [{ on: true, by: 'customer' }]);
+  assert.equal(c.inboundSeq, 7, 'the numbering of customer messages did not go backwards'); assert.deepEqual([c.receptionist.handledSeq, c.receptionist.paused], [6, 'customer asked us to stop']);
+  assert.deepEqual([c.unreadCount, c.lastMessage], [2, 'live message']);
+  assert.equal((await live.doc(`conversations/${P}/sendRequests/auto_s3`).get()).data().state, 'sent', 'a send claim is never overwritten');
+  assert.match(out.join('\n'), /Kept as they are NOW/);
+  // the other way round: stop NOT requested now (the owner allowed contact again), but the backup says it was on: it stays off
+  await live.doc('conversations/' + P).update({ doNotContact: { on: false, by: 'owner' } });
+  await restoreDocs.main(['--from-database', COPY, '--customer', P, '--apply', '--overwrite', '--yes'], { live, restored: copy, log: quiet });
+  assert.equal((await live.doc('conversations/' + P).get()).data().doNotContact.on, false, 'the old "on" is not brought back over the owner\'s decision');
+  // pure rule
+  assert.equal(restoreDocs.overwriteData('conversations/' + P + '/sendRequests/x', { state: 'sending' }, { state: 'sent' }), null);
+  assert.deepEqual(restoreDocs.overwriteData('contacts/' + P, { name: 'a' }, { name: 'b' }), { name: 'a' }, 'other records come back whole');
+  const noLive = restoreDocs.overwriteData('conversations/' + P, { name: 'a', doNotContact: { on: true }, inboundSeq: 1 }, { name: 'b' });
+  assert.deepEqual(noLive, { name: 'a' }, 'a control field that does not exist live is not invented from the backup');
+});
+
+test('a chat MISSING live (an erased customer) comes back exactly as it was, with its stop request and numbering', async () => {
+  await copy.doc('conversations/' + P).set({ phone: P, name: 'Back', inboundSeq: 4, doNotContact: { on: true, by: 'customer', source: 'customer' }, receptionist: { on: true, handledSeq: 4 } });
+  await restoreDocs.main(['--from-database', COPY, '--customer', P, '--apply', '--yes'], { live, restored: copy, log: quiet });
+  const c = (await live.doc('conversations/' + P).get()).data();
+  assert.deepEqual([c.inboundSeq, c.doNotContact.on, c.receptionist.handledSeq], [4, true, 4]);
+});
+
 test('the options are strict: never the live database as the source, a target is required, a point in time is rounded to the minute and read inside a read-only transaction', async () => {
   for (const bad of [[], ['--customer', P], ['--from-database', '(default)', '--customer', P], ['--from-database', COPY, '--read-time', '2026-10-18T09:30:00Z', '--customer', P],
     ['--from-database', COPY], ['--from-database', COPY, '--customer', '12'], ['--from-database', COPY, '--doc', '../x'], ['--from-database', COPY, '--customer', P, '--overwrite'], ['--read-time', 'yesterday', '--customer', P]]) {

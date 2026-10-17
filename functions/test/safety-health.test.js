@@ -78,6 +78,30 @@ test('WhatsApp outcomes: only faults that stop ALL sending are problems; one cus
   for (const code of [131026, 131047, 131049, 131050, 131056]) assert.equal(c({ ok: false, status: 400, code, definite: true }), 'ignore', String(code));
   assert.equal(c({ ok: false, status: 0, definite: false }), 'unconfirmed'); assert.equal(c({ ok: false, status: 503, definite: false }), 'unconfirmed');
   assert.equal(c({ ok: false, status: 404, definite: true, media: true }), 'ignore');
+  // REVIEW FIX (17 Oct 2026): the REAL client sends code: null when Meta gave no code. Number(null) is 0, which is a key error, so a network blip used to look like an expired key.
+  for (const code of [null, undefined, '', ' ']) {
+    assert.equal(c({ ok: false, status: 0, code, definite: false }), 'unconfirmed', 'no answer, code ' + JSON.stringify(code));
+    assert.equal(c({ ok: false, status: 503, code, definite: false }), 'unconfirmed', '5xx without a code');
+    assert.equal(c({ ok: false, status: 200, code, definite: false }), 'unconfirmed', 'an answer with no message id');
+  }
+  assert.equal(c({ ok: false, status: 400, code: null, definite: true }), 'ignore', 'a 4xx with no code is not a system fault');
+  assert.equal(c({ ok: false, status: 400, code: 0, definite: true }), 'whatsapp_auth', 'an explicit code 0 from Meta is still a key error');
+  assert.equal(c({ ok: false, status: 400, code: '190', definite: true }), 'whatsapp_auth', 'a code given as text');
+});
+
+test('REVIEW FIX: a network failure through the REAL client and the REAL health record never opens "WhatsApp is refusing the access key"', async () => {
+  const f = async () => { throw new TypeError('fetch failed'); };
+  const wa = createClient({ phoneId: '111', token: 'tok', onOutcome: (o) => H.noteWhatsApp(db, o, { nowMs: NOW }) }, f);
+  for (let i = 0; i < 2; i++) await assert.rejects(wa.sendText(P, 'hi'), /fetch failed/);
+  assert.deepEqual(await openKinds(), [], 'two blips are not a fault');
+  await assert.rejects(wa.sendText(P, 'hi'), /fetch failed/);
+  assert.deepEqual(await openKinds(), ['whatsapp_failing'], 'three in a row are "failing", never "access key"');
+  const noId = createClient({ phoneId: '111', token: 'tok', onOutcome: (o) => H.noteWhatsApp(db, o, { nowMs: NOW + HOUR }) }, async () => new Response(JSON.stringify({ messages: [] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  await assert.rejects(noId.sendText(P, 'hi'));
+  assert.ok(!(await openKinds()).includes('whatsapp_auth'));
+  const refused = createClient({ phoneId: '111', token: 'tok', onOutcome: (o) => H.noteWhatsApp(db, o, { nowMs: NOW + 2 * HOUR }) }, async () => new Response(JSON.stringify({ error: { code: 190, message: 'expired' } }), { status: 401, headers: { 'content-type': 'application/json' } }));
+  await assert.rejects(refused.sendText(P, 'hi'));
+  assert.ok((await openKinds()).includes('whatsapp_auth'), 'a REAL key refusal still opens it');
 });
 
 test('3 unconfirmed sends in a row (within 30 minutes) open "failing"; an expired key opens at once; ONE success closes them all and resets the count', async () => {

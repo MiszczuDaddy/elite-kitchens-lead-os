@@ -98,7 +98,9 @@ function hook({ db, notify = null, capMs = 3000 }) {
 // Called by the WhatsApp client after every send (whatsapp.js, cfg.onOutcome): { ok, status, code, definite }. One read and one write; the problems are opened or closed here.
 function classify(o) {
   if (o.ok) return 'ok';
-  const code = typeof o.code === 'number' ? o.code : Number(o.code);
+  // No error code at all (a network failure, a timeout, an answer with no message id) is NO code: Number(null) is 0, and 0 is one of Meta's key errors, so a blip used to look like an expired key.
+  const given = o.code !== null && o.code !== undefined && String(o.code).trim() !== '';
+  const code = given ? Number(o.code) : NaN;
   if (o.status === 401 || AUTH_CODES.has(code) || (code >= 200 && code <= 299)) return 'whatsapp_auth';
   if (ACCOUNT_CODES.has(code)) return 'whatsapp_account';
   if (TEMPLATE_CODES.has(code)) return 'whatsapp_template';
