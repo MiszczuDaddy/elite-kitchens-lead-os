@@ -231,5 +231,48 @@ Step-by-step recovery for each case is in `docs/BACKUPS.md`.
 
 ---
 
-## 9. Build record
-See section 10 (filled in after the tests).
+## 9. Build record (17 Oct 2026)
+
+**Commit:** `0c0be90` on `phase-10-safety-net`. Not pushed, merged or deployed. Nothing was changed in Google Cloud.
+
+### New automatic tests
+| File | What it proves | Result |
+|---|---|---|
+| `functions/test/safety-dnc.test.js` | Every way a message leaves Elite OS refuses a do-not-contact customer, including:<br>• inside each send's own claim;<br>• the quote retry;<br>• the Meta lead welcome;<br>• the receptionist, with no AI call and with the race;<br>• "stop messaging me" in any chat, and ordinary uses of "stop" ignored.<br>Allowing contact again works. | 12/12 |
+| `functions/test/safety-health.test.js` | • Problems open, count, close and re-open.<br>• The WhatsApp outcomes are classified.<br>• The client hook can never delay a send for long or change it.<br>• The "reporting back" signal; leads stopped; the receptionist stopped or blocked; the AI budget.<br>• Alerts are sent once, also with two checks running together.<br>• Retries are limited, then marked "not delivered".<br>• The hand-over alert retry falls back to email.<br>• Rejected leads are recorded, closed and erased.<br>• Wrong key, safety brake, buttons, tidying.<br>• No customer data in emails or pushes. | 17/17 |
+| `functions/test/safety-backups.test.js` | • Restore tools against a second emulator database: dry run, missing records only, overwrite, never deletes, strict options, read-only point-in-time read.<br>• The restore check and its record.<br>• `setup-backups.sh` with a pretend `gcloud`: status changes nothing; "on" only after "yes"; the drill restores into a NEW database. | 7/7 |
+| `functions/test/attention-model.test.js` | The "Needs attention" list, its words, the setting checks. | 3/3 |
+| `functions/test/pwa.test.js` (now part of `npm test`) | **New:** every page script is on the "always fresh" list. | 12/12 |
+| `test-ui/safety.e2e.js` (real page, real functions) | • The bar, the list and its buttons.<br>• "Add as customer" from a rejected lead.<br>• The setting.<br>• Do not contact on and off, refused by the server even when the screen is bypassed.<br>• Phone layout. | 11/11 |
+
+### Regression
+- **Whole server suite (839 tests):** 834 passed at first.
+  - 4 file-reading tests failed only because they were started from the wrong folder. Re-run from `functions/` (as `npm test` does): passed.
+  - 1 failure is the known flaky load check (`ai-receptionist-load` E, "several at once"). It also fails on unchanged `main` (1 of 2 runs), so it is not caused by this change.
+- **Deploy-script tests** for the new stage: passed.
+- **Existing browser suites** on the screens this touches:
+  - `ui` 57/57
+  - `quote-send` 10/10
+  - `assistant` 21/21
+  - `pwa` 8/8
+- **Not re-run here:** `push.e2e.js` and `reopen.e2e.js` (known not to pass on this PC, the same on `main`), and the rest of the browser suites. Run the full regression once more after the review fixes, before release.
+
+### Independent review (same day)
+The review found these. **None has been fixed yet** (the review step was read-only).
+1. **A network blip or a 5xx without an error code is classed as "WhatsApp is refusing the access key".** Meta's missing code becomes 0, which is on the "key" list. **Must be fixed before release**, or it raises false alarms.
+2. The tests used a slightly different shape of outcome than the real client sends, so they missed (1).
+3. `restore-docs --overwrite` on a customer also puts back the old do-not-contact state and the old chat counters. **Must be documented or guarded:** keep the live do-not-contact state and counters.
+4. Rare race: "Seen" pressed while the health check is retrying that alert can leave a stuck "Alert did not reach your phone" tag.
+5. **Smaller items:**
+   - the check delivers alerts one after another (could run past its 2-minute limit in a long outage);
+   - every send waits briefly for one shared health record;
+   - wrong-key requests to the public lead address each cause a database write;
+   - six-digit Meta codes are hidden in problem details;
+   - do-not-contact is enforced at each send path rather than once at the bottom layer;
+   - one duplicated phone helper.
+
+### Remaining risks
+- **"WhatsApp stopped reporting back" can false-alarm.** If the only messages sent in an hour went to phones that are switched off (no delivery tick), it raises a problem. Any customer message or tick closes it again.
+- **A real restore in Google Cloud has not been run.** That is what `setup-backups.sh drill` is for: run it once after switching backups on.
+- **Do-not-contact is switched on automatically from the customer's words.** A rare false match blocks messages until a person presses "Allow contact again". The do-not-contact note shows the reason.
+- **"Needs attention" on iPhone:** only through the bar, which appears only when something needs attention. Notifications (and so "System health") are not available on iPhone.
