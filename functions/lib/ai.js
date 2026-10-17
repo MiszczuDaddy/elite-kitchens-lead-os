@@ -438,7 +438,10 @@ async function replyCore({ db, model, settings, key, sheet, knowledge, reception
   const customerSaid = sheet.messages.filter((m) => m.direction === 'in').map((m) => m.body || '').join(' ') + ' ' + (sheet.lead || '') + ' ' + sheet.known.map((k) => k.value).join(' ');
   const kn = knowledge ? { lines: knowledge.lines, check: (x) => { const c = KN.checkAnswer(x, knowledge, { extra: customerSaid }), more = R.safety(x, { checked: true, names: knowledge.names }).filter((w) => !c.reasons.includes(w)); return { ok: c.ok && !more.length, reasons: [...c.reasons, ...more] }; }, linksText(ids) {
     const sent = (u) => sheet.messages.some((m) => m.direction === 'out' && String(m.body || '').toLowerCase().includes(u.toLowerCase()));
-    const list = (ids || []).map((id) => knowledge.links.find((l) => l.id === id)).filter((l) => l && !sent(l.url));
+    // A link already sent is not repeated, unless the customer's latest message asks for it again ("do you have an Instagram page?", "can you send the link again"): Astra F9 A051 was promised
+    // "I'll pop it in again here" and got no link.
+    const again = /\b(?:links?|again|resend|instagram|insta|website|web ?site|site|page)\b/i.test(SCH.latestMessages(sheet.messages, { natural: true }).join(' '));
+    const list = (ids || []).map((id) => knowledge.links.find((l) => l.id === id)).filter((l) => l && (again || !sent(l.url)));
     return list.length ? knowledge.lines.links_intro + ' ' + list.map((l) => l.url).join(' and ') : '';
   } } : null;
   // Arranging a consultation is a fixed flow decided by code: the wording of every scheduling line is ours, the model only read the chat (see aiSchedule.js).
@@ -480,7 +483,7 @@ async function suggestReply({ db, model, owners }, actor, data, { uid, nowMs = D
     readiness: analysis.readiness.state, step: plan.step, visit: asked.visit, change: asked.change, pref: plan.preference ? { weeks: plan.preference.weeks, days: plan.preference.days, anyDay: plan.preference.anyDay, times: plan.preference.times, text: plan.preference.customerWords, summary: plan.preference.text, firstDate: plan.preference.firstDate, status: plan.preference.status || 'available' } : null, warnings: analysis.warnings.length, hasDraft: !!decision.reply, structured: !!call,
     ...(knowledge ? { knowledgeVersion: knowledge.version, answerState: plan.kn ? plan.kn.state : (asked.answerState || null), blocked: plan.kn ? plan.kn.blocked : [], topics: plan.kn ? plan.kn.topics : [] } : {}), costEur: Math.round(cost * 1e8) / 1e8, outcome: null, ...(receptionist ? { auto: true } : {}) });                 // no words of the draft or the chat
   const st = await status({ db, model, owners }, actor, {}, { nowMs });
-  return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
+  return { draftId, model: key, structured: !!call, draft: decision.reply, intent: decision.intent, ack: asked.ack, wantsConsultation: decision.wantsConsultation, preferredTiming: decision.preferredTiming, handover: decision.handover,
     known: analysis.known.map(({ field, label, value, source }) => ({ field, label, value, source })), fromChat: analysis.fromChat, missing: analysis.missing, readiness: analysis.readiness, warnings: analysis.warnings,
     schedule: { step: plan.step, preference: plan.preference, ...(plan.quiet ? { quiet: true } : {}) }, window: sheet.window.state, costEur: Math.round(cost * 1e8) / 1e8, monthSpentEur: st.monthSpentEur, monthlyCapEur: st.monthlyCapEur, ...(receptionist ? { sendCheck } : {}) };
 }

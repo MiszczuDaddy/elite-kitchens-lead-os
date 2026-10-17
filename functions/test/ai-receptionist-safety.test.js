@@ -204,12 +204,12 @@ test('AFTER THE SEND (finding 4): if the run dies after WhatsApp accepted the me
   } finally { ai.draftOutcome = real; }
 });
 
-test('AFTER THE SEND (finding 4): a push that could not be delivered is tried again by the next run (the same key, never twice), and gives up after three tries', async () => {
+test('AFTER THE SEND (finding 4): a push that could not be delivered is tried again by the next run (a new key per attempt, so a retry is never blocked by the record of the failed first attempt), and gives up after three tries', async () => {
   await arm({ text: 'My kitchen door fell off, this is terrible' });
   const d = decision({ intent: 'complaint', handover: { needed: true, reason: 'upset' } });
   const w = waFake(), p = pushFake(1), m = model(d);
   assert.equal(await run(m, w, p), 'error'); assert.equal(w.sent.length, 1); assert.equal(w.sent[0], L.complaint); assert.equal(p.events.length, 0);
-  assert.equal(await run(m, w, p, NOW + 5 * 60 * SEC), 'already_sent'); assert.equal(w.sent.length, 1); assert.equal(p.events.length, 1, 'told on the second run'); assert.equal(p.events[0].sourceId, PH + '|s1', 'keyed by the customer message number');
+  assert.equal(await run(m, w, p, NOW + 5 * 60 * SEC), 'already_sent'); assert.equal(w.sent.length, 1); assert.equal(p.events.length, 1, 'told on the second run'); assert.equal(p.events[0].sourceId, PH + '|s1.1', 'keyed by the customer message number and the attempt (audit repairs 17 Oct 2026: under the first key a retry only found the record of the failed attempt and sent nothing)');
   assert.equal((await conv()).receptionist.paused, 'handover: complaint: upset customer');
   // a push that never works: three tries, then the chat is still finished (paused, answered), not stuck forever
   await arm({ text: 'This is a disgrace' }); const w2 = waFake(), p2 = pushFake(99), m2 = model(d);

@@ -106,7 +106,8 @@ test('SHEET: known facts come from the records by fixed rules (including the lea
   assert.deepEqual(sh.known.map((k) => [k.field, k.value]), [['name', 'Aoife Kavanagh'], ['projectType', 'Kitchen'], ['location', 'Swords'], ['address', 'K67 X123'], ['eircode', 'K67 X123'], ['budget', '€15,000–€20,000'], ['email', 'aoife@gmail.com']]);
   assert.equal(sh.messages.length, R.MESSAGES); assert.equal(sh.messages.at(-1).body.length, 1000); assert.equal(sh.messages.at(-2).type, 'image');
   const text = R.sheetText(sh);
-  assert.match(text, /\[customer [^\]]+\] \[image\]\n\[customer [^\]]+\] z{399}…$/); assert.doesNotMatch(text, /bulk 0\b/, 'only the latest 40 messages');
+  // the customer's latest message reaches the model in full (audit 17 Oct 2026: a 400-character cut lost the question at its end); older long messages are still shortened (ai-receptionist-nextstep.test.js)
+  assert.match(text, /\[customer [^\]]+\] \[image\]\n\[customer [^\]]+\] z{1000}$/); assert.doesNotMatch(text, /bulk 0\b/, 'only the latest 40 messages');
   assert.match(text, /KNOWN \(from the records\):\n- Name: Aoife Kavanagh/); assert.match(text, /Requirements: Shaker kitchen with island \| Wants quartz worktop/); assert.doesNotMatch(text, /Lead ID/); assert.match(text, /TIME NOW: Tue 13 Oct 2026, 11:00/);
   assert.match(text, /CONSULTATION ALREADY BOOKED: no/); assert.equal(sh.window.state, 'open');
   const order = text.slice(text.indexOf('CONVERSATION')); const idx = (s) => order.indexOf(s); assert.ok(idx('bulk 0') === -1 && idx('bulk 59') < idx('[image]') && idx('[image]') < idx('zzz'));

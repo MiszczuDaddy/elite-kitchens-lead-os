@@ -118,9 +118,20 @@ function leadAnswers(contact) {
   for (const raw of String(contact && contact.notes || '').split(/\r?\n/)) { const l = raw.replace(/^[\s•·*-]+/, '').trim(); if (l && !skip.test(l)) lines.push(clip(l, 200)); }
   return lines.slice(0, 12).join('\n');
 }
-const msgText = (m) => (m.body && String(m.body).trim()) ? clip(m.body, MESSAGE_CHARS) : `[${m.type || 'message'}]`;
+// The customer's LATEST messages (since our last one: what is being answered) reach the model in full, up to LATEST_CHARS each (audit 17 Oct 2026, problem 3: a 400-character cut lost the question at the end
+// of a long message). A longer one keeps its beginning and its end, where the question usually is. Older messages stay short, so the prompt stays small.
+const LATEST_CHARS = 2000, LATEST_COUNT = 6;
+function keepEnds(s, n) {
+  const t = String(s).replace(/\s+/g, ' ').trim();
+  if (t.length <= n) return t;
+  const head = Math.floor(n / 4);
+  return t.slice(0, head).trimEnd() + ' … ' + t.slice(t.length - (n - head - 3)).trimStart();
+}
+const msgText = (m, latest = false) => (m.body && String(m.body).trim()) ? (latest ? keepEnds(m.body, LATEST_CHARS) : clip(m.body, MESSAGE_CHARS)) : `[${m.type || 'message'}]`;
 function transcript(messages) {
-  return messages.map((m) => `[${m.direction === 'out' ? 'us' : 'customer'} ${m.at}] ${msgText(m)}`).join('\n');
+  let i = messages.length; while (i > 0 && messages[i - 1].direction !== 'out') i--;
+  const from = Math.max(i, messages.length - LATEST_COUNT);
+  return messages.map((m, k) => `[${m.direction === 'out' ? 'us' : 'customer'} ${m.at}] ${msgText(m, k >= from && m.direction === 'in')}`).join('\n');
 }
 
 // One customer's sheet, read once. Reads only; nothing is written.

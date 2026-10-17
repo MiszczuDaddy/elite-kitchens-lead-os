@@ -73,13 +73,13 @@ test('JOURNEY: a new Meta lead replies to the welcome template; nobody switches 
   await says(PH, 'Thanks, what time will that be?', NOW + 2400e3); const r4 = await REC.sweep(deps(m3, w, p), NOW + 2600e3); assert.equal(r4.paused, 1); assert.equal(w.sent.length, 3); assert.equal(await apptCount(), a0, 'nothing was booked');
 });
 
-test('ORDINARY MESSAGES: an enquiry is answered and a visit offered; "hello" or confusion gets a friendly reply and NO offer; a model sentence with a question, money, a promise or a day in it is dropped; nobody is asked about days', async () => {
+test('ORDINARY MESSAGES: an enquiry is answered and a visit offered; "hello" or confusion gets a friendly reply and a question but NO offer; a model sentence with a question, money, a promise or a day in it is dropped; nobody is asked about days', async () => {
   await newLead(PH); await says(PH, 'Hi, looking for a shaker style kitchen with an island', NOW - 120e3); const w = waFake();
   await REC.sweep(deps(fake([decision({ intent: 'answering_questions', ack: 'project', reply: 'Lovely, a shaker kitchen with an island sounds great.' })]), w, pushFake()), NOW);
   assert.equal(w.sent[0].body, 'Lovely, a new kitchen sounds great. ' + SCH.LINES.visit_offer, 'the acknowledgement is written by code from the records (audit 16 Oct 2026, finding 1)');
   await newLead(PH2); await says(PH2, 'Hello', NOW - 120e3); const w2 = waFake(), p2 = pushFake();
   const r2 = await REC.sweep(deps(fake([decision({ intent: 'greeting', ack: 'hello' })]), w2, p2), NOW); assert.equal(r2['sent:ack_only'], 1);
-  assert.deepEqual(w2.sent.map((x) => x.body), ['Hi Aoife, thanks for getting back to us.']); assert.equal(offersVisit(w2.sent[0].body) || asksDays(w2.sent[0].body), false, '"hello" is not agreement and not an invitation to pitch'); assert.equal((await conv(PH2)).receptionist.paused, null, 'still the receptionist\'s chat');
+  assert.deepEqual(w2.sent.map((x) => x.body), ['Hi Aoife, thanks for getting back to us. ' + SCH.LINES.still_looking], 'one question, so it is not a dead end (audit 17 Oct 2026)'); assert.equal(offersVisit(w2.sent[0].body) || asksDays(w2.sent[0].body), false, '"hello" is not agreement and not an invitation to pitch'); assert.equal((await conv(PH2)).receptionist.paused, null, 'still the receptionist\'s chat');
   await newLead(PH3); await says(PH3, 'Looking at a new kitchen', NOW - 120e3); const w3 = waFake();
   await REC.sweep(deps(fake([decision({ intent: 'new_enquiry', reply: 'Is that a good time? We can do it for 5000 euro, see you tomorrow!' })]), w3, pushFake()), NOW);
   assert.equal(w3.sent[0].body, SCH.LINES.visit_offer, 'the unsafe sentence is dropped: only the fixed offer goes out');

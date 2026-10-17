@@ -101,8 +101,10 @@ test('the code-written acknowledgements: built from the records only, never the 
   assert.equal(S.ackLine('hello', who, true), 'Hi Aoife, thanks for getting back to us.'); assert.equal(S.ackLine('hello', who, false), 'Thanks, Aoife.', 'hello only on the first reply');
   assert.equal(S.ackLine('project', { projectType: 'Fitted wardrobes' }, false), 'Lovely, new wardrobes sound great.'); assert.equal(S.ackLine('project', { projectType: 'something odd' }, false), 'Lovely, that sounds great.');
   assert.equal(S.ackLine('bogus', who, true), ''); assert.equal(S.firstName('aoife'), 'Aoife'); assert.equal(S.firstName("Mary-Kate O'Neill"), 'Mary-Kate'); assert.equal(S.firstName('<b>'), '');
-  // "Who is this?": the model picked "confused" but labelled the intent "other" (paid run, 16 Oct 2026). The code's line is sent, not silence; the chat stays with the receptionist.
-  for (const intent of ['other', 'greeting']) { const r = run({ intent, ack: 'confused' }, { messages: [WELCOME, inn('Who is this?')] }); assert.deepEqual([r.step, r.sent, r.handover.needed], ['ack_only', 'Hi Aoife, this is Elite Kitchens following up on your kitchen enquiry.', false], intent); }
+  // "Who is this?": the model picked "confused" but labelled the intent "other" (paid run, 16 Oct 2026). The code's line is sent, not silence; the chat stays with the receptionist. With no visit offered
+  // yet the owner's question follows, so the reply is not a dead end (audit 17 Oct 2026).
+  for (const intent of ['other', 'greeting']) { const r = run({ intent, ack: 'confused' }, { messages: [WELCOME, inn('Who is this?')] }); assert.deepEqual([r.step, r.sent, r.handover.needed], ['ack_only', 'Hi Aoife, this is Elite Kitchens following up on your kitchen enquiry. ' + L.still_looking, false], intent); }
+  assert.equal(run({ intent: 'other', ack: 'confused' }, { ...OFFERED, messages: [...OFFERED.messages, inn('sorry who is this?')] }).sent, 'This is Elite Kitchens following up on your kitchen enquiry.', 'after the offer: who we are, nothing more');
   assert.equal(run({ intent: 'new_enquiry', ack: 'confused' }, { messages: [WELCOME, inn('who is this? I want a kitchen')] }).step, 'offer_visit', 'interest still gets the offer');
   // a greeting with no choice from the model and no usable opener: nothing safe to say, so a person looks at it
   assert.equal(run({ intent: 'greeting', reply: 'Hi there!' }).step, 'none');
