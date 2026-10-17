@@ -90,12 +90,12 @@ All 11 checker cases are paired: the correct answer passes and the false claim i
 | O7 | A sticker alerted the owner. | ours I05 | **Fixed** in 4f21e52 |
 | O8 | Knowledge gaps that make the receptionist hold questions: samples at the visit, quote turnaround, carcass warranty, evening and weekend visits, subcontracting. | both | **Open:** facts only you can give |
 
-## Wording waiting for your approval (editable in the Knowledge Centre; nothing is sent until deployed)
+## New wording, approved by you on 17 Oct 2026 (editable in the Knowledge Centre; nothing is sent until deployed)
 
-| Line | When it is sent | Proposed wording | Branch |
+| Line | When it is sent | Approved wording | Branch |
 |---|---|---|---|
 | `still_looking` | after "Hi" with no interest shown | "Are you still looking at a new kitchen?" | 4f21e52 |
-| `soon` | a visit asked for today or tomorrow | "Thanks, I'll pass that on to the team straight away and they'll get back to you." | 4f21e52 |
+| `soon` | a visit asked for today or tomorrow | "Thanks, I'll pass your request on to the team and they'll get back to you." (your wording: "straight away" removed so no immediate response is implied) | 4f21e52, reworded on this branch |
 | `cancel_noted` | a booked customer who cancels and wants no other date | "No problem at all, thanks for letting us know. I'll tell the team." (your approved "running late" wording) | this branch |
 | `privacy` | a request for another customer's details | "Sorry, we can't share other customers' details." | this branch |
 
@@ -109,7 +109,7 @@ All 11 checker cases are paired: the correct answer passes and the false claim i
 
 ## Testing needed before a controlled launch
 
-1. **Approve or edit** the four lines above.
+1. ~~Approve or edit the four lines above~~: done on 17 Oct 2026 (line 2 reworded by you).
 2. **Full regression** of the whole app, including the browser tests. It takes more than 15 minutes, so warn first.
 3. **One paid re-run** of both audits' failed conversations, plus a fresh set of customers the fixes were not written against, on the real model. About €1.50–3; needs your OK.
    - Track separately: correct without help, right hand-over, unnecessary hand-over, unsafe message.

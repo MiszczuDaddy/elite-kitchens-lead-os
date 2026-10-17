@@ -36,6 +36,22 @@ const pushy = (t) => /move it|another date|other date|any day next week|suit you
 const claimsDone = (t) => /\b(cancelled|canceled|is booked|booked in|confirmed|all done)\b/i.test(t || '');
 const check = (text, said = '') => KN.checkAnswer(text, K, { extra: said });
 
+// ===================== the owner's approved wording (17 Oct 2026) =====================
+test('THE FOUR NEW LINES are exactly the owner\'s approved wording, the same in the code and in the Knowledge Centre defaults; "soon" implies no immediate response', () => {
+  const approved = {
+    still_looking: 'Are you still looking at a new kitchen?',
+    soon: 'Thanks, I\'ll pass your request on to the team and they\'ll get back to you.',
+    cancel_noted: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
+    privacy: 'Sorry, we can\'t share other customers\' details.',
+  };
+  for (const [k, v] of Object.entries(approved)) { assert.equal(L[k], v, k + ' (code default)'); assert.equal(KN.DEFAULT_LINES[k], v, k + ' (Knowledge Centre default)'); assert.equal(K.lines[k], v, k + ' (compiled knowledge)'); }
+  assert.ok(!/straight away|right away|immediately|at once/i.test(L.soon + K.lines.soon));
+  // and it is what a customer asking for a visit tomorrow receives, with the same hand-over and push as before
+  const r = run({ intent: 'wants_consultation', visit: 'asked', ...pref({ weeks: 'this', text: 'tomorrow' }) }, { messages: [WELCOME, inn('Can someone come out tomorrow?')] });
+  assert.equal(r.sent, approved.soon); assert.equal(r.step, 'acknowledge'); assert.ok(r.handover.needed && r.pause, 'handed to the owner with a push, the receptionist stops');
+  assert.equal(r.plan.preference.firstDate, '2026-10-20', 'the day is on the booking card');
+});
+
 // ===================== the answer checker =====================
 test('CHECKER FALSE POSITIVES (Astra F4 A013 A079 A092 A018; ours B04): correct approved answers are no longer blocked', () => {
   const ok = [

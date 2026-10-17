@@ -39,10 +39,10 @@ const DEFAULT_LINES = {
   late: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
   booking_confirm: 'I\'ll pass this to the team and they\'ll confirm the time with you.',
   booking_specific: 'I\'ll pass that on to the team and they\'ll come back to you about it.',
-  // Added after the audit of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval; the same defaults as aiSchedule LINES).
+  // Added after the audit of 17 Oct 2026 (the owner's approved wording, 17 Oct 2026; the same defaults as aiSchedule LINES). "soon" has no "straight away": no immediate response is implied.
   still_looking: 'Are you still looking at a new kitchen?',
-  soon: 'Thanks, I\'ll pass that on to the team straight away and they\'ll get back to you.',
-  // Audit repairs of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval; the same defaults as aiSchedule LINES). cancel_noted reuses the owner's approved "running late" words.
+  soon: 'Thanks, I\'ll pass your request on to the team and they\'ll get back to you.',
+  // Audit repairs of 17 Oct 2026 (the owner's approved wording, 17 Oct 2026; the same defaults as aiSchedule LINES). cancel_noted reuses the owner's approved "running late" words.
   cancel_noted: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
   privacy: 'Sorry, we can\'t share other customers\' details.',
 };

@@ -17,12 +17,12 @@ Branch `receptionist-next-step`. **Not merged, not live.** Nothing changes for c
 4. **Days and times are always written down**: "today", "tomorrow at 10", "only Saturdays", a photo with "Thursday suits", or "can I talk to someone, Friday suits". They show on the booking card even when the chat comes to you.
    - "Can someone come out today?" or "tomorrow?" no longer gets "Good question, I'll check". It gets the new line below, and you get a push.
 
-## New wording: please approve or change
+## New wording: approved by the owner on 17 Oct 2026
 
-| When | Proposed words |
+| When | Approved words |
 |---|---|
 | The customer only says hello | **Are you still looking at a new kitchen?** |
-| The customer asks for a visit today or tomorrow | **Thanks, I'll pass that on to the team straight away and they'll get back to you.** |
+| The customer asks for a visit today or tomorrow | **Thanks, I'll pass your request on to the team and they'll get back to you.** (the owner removed "straight away"; changed on branch `receptionist-audit-repairs`) |
 
 Once this is live, you can change both lines yourself. They are in the Knowledge Centre, under the other fixed lines:
 - "Customer only says hello";

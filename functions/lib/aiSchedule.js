@@ -29,16 +29,17 @@ const LINES = {
   cancel_ask: 'No problem, do you want to move it to any other date?',
   // A customer who will check or let us know (owner's wording, 15 Oct 2026).
   tentative: 'No problem at all, just let us know when suits.',
-  // Audit repairs of 17 Oct 2026, PROPOSED wording waiting for the owner's approval (owner-editable in the Knowledge Centre; the same defaults are in aiKnowledge.DEFAULT_LINES):
+  // Audit repairs of 17 Oct 2026, the owner's approved wording (17 Oct 2026; owner-editable in the Knowledge Centre; the same defaults are in aiKnowledge.DEFAULT_LINES):
   // a booked customer who cancels and wants no other date (the owner's already-approved "running late" wording: nothing is said as done), and a request for another customer's details.
   cancel_noted: 'No problem at all, thanks for letting us know. I\'ll tell the team.',
   privacy: 'Sorry, we can\'t share other customers\' details.',
   no_preference: 'No problem, I\'ll pass this on to the team and we\'ll be in touch to arrange a time.',
-  // Audit of 17 Oct 2026 (PROPOSED wording, waiting for the owner's approval). With published knowledge both are the owner's lines in the Knowledge Centre (aiKnowledge DEFAULT_LINES, the same defaults).
+  // Audit of 17 Oct 2026, the owner's approved wording (17 Oct 2026). With published knowledge both are the owner's lines in the Knowledge Centre (aiKnowledge DEFAULT_LINES, the same defaults).
   // The question after our greeting when a new lead only says hello, so the reply never ends in a dead end.
   still_looking: 'Are you still looking at a new kitchen?',
-  // A visit asked for today or tomorrow: passed on at once (a push), never "Good question" and never a promise of a time.
-  soon: 'Thanks, I\'ll pass that on to the team straight away and they\'ll get back to you.',
+  // A visit asked for today or tomorrow: passed on to the owner (a push), never "Good question" and never a promise of a time. The owner removed "straight away" (17 Oct 2026) so that no immediate
+  // response is implied.
+  soon: 'Thanks, I\'ll pass your request on to the team and they\'ll get back to you.',
 };
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const WEEKS = ['this', 'next', 'following', 'other'];
@@ -263,7 +264,7 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   const prefStatus = tentativeNow ? 'tentative' : prefRaw && prefRaw.status;
   const whoNow = natural && projectSaid(words) ? { ...(who || {}), projectType: projectSaid(words) } : who;       // the acknowledgement names the project they ask about now
   const line = (k) => ((kn && kn.lines) || ownLines || {})[k] || LINES[k];                // the owner's line (Knowledge Centre) when there is one, else the default
-  // The line that acknowledges a preference: for a visit asked for today or tomorrow, the "straight away" line (audit 17 Oct 2026, problem 5), never a promise of a time.
+  // The line that acknowledges a preference: for a visit asked for today or tomorrow, the owner's "pass your request on" line (audit 17 Oct 2026, problem 5), never a promise of a time.
   const passOn = given && prefHeard && prefHeard.soon ? line('soon') : LINES.acknowledge;
   const person = (why) => ({ step: 'none', reply: null, handover: { needed: true, reason: why }, preference: null });
   const offered = !!(consult && consult.offered) || said(LINES.visit_offer), agreed = (visit === 'asked' || visit === 'agreed') && (!natural || offered || ASKS_VISIT.test(words));
@@ -335,7 +336,7 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
         // A request for ANOTHER customer's details gets a clear refusal, never "Good question, I'll check" (Astra F7 A096); a person is still told.
         if (PRIVACY.test([words, reason, d.unknown].join(' '))) return { step: 'privacy', reply: line('privacy'), handover: { needed: true, reason: 'asked for another customer\'s details (privacy)' }, preference: null, kn: info };
         // They also said when they are free ("can someone come out today?", "I can only do Saturdays"): recorded for the booking card while a person answers (audit 17 Oct 2026, problem 5). A visit asked
-        // for today or tomorrow gets the "straight away" line; otherwise the customer is told their day was passed on and that the question will be checked (Astra F6 B076: "Wednesday suits. Will you bring
+        // for today or tomorrow gets the owner's "pass your request on" line; otherwise the customer is told their day was passed on and that the question will be checked (Astra F6 B076: "Wednesday suits. Will you bring
         // samples?" used to get only "Good question, I'll check with the team").
         if (given && !booked) return { step: 'acknowledge', reply: prefHeard.soon ? line('soon') : passOn + ' ' + (kn.lines.partly || kn.lines.holding), handover: { needed: true, reason: 'consultation preference received; they also asked something that needs you: ' + (reason || 'a question that needs the team') + unknown }, preference: given, kn: info };
         return { step: 'holding', reply: kn.lines.holding, handover: { needed: true, reason: (reason || 'a question that needs the team') + unknown }, preference: null, kn: info };
@@ -463,7 +464,7 @@ function advance(consult, step, preference, nowMs) {
 const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_ask', 'tentative', 'price_general', 'ask_next_week', 'ask_following_week', 'acknowledge', 'no_preference', 'asked_ai', 'change_ask', 'change_given', 'change_pass_on',
   'answer', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
   'declined', 'thinking', 'price_concern', 'browsing', 'attachment', 'late', 'booking_confirm', 'booking_specific',      // the owner's lines added on 16 Oct 2026
-  'cancel_noted', 'privacy']);                                                                                              // audit repairs of 17 Oct 2026 (proposed wording)
+  'cancel_noted', 'privacy']);                                                                                              // audit repairs of 17 Oct 2026 (owner-approved wording)
 // After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
 const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
   'attachment', 'late', 'booking_confirm', 'booking_specific', 'cancel_noted', 'privacy']);      // declined, thinking, price_concern and browsing do NOT pause: the customer may write again

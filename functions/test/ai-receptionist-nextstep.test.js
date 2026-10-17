@@ -122,7 +122,7 @@ test('C10, A20: an answer with the visit offer carries ONE greeting (the code\'s
 });
 
 // ---- recommendation 4: availability is recorded whenever it is given ----
-test('E04, E05: "Can someone come out today?" and "tomorrow at 10?" are recorded with the real date and get the owner\'s "straight away" line, not "Good question"', () => {
+test('E04, E05: "Can someone come out today?" and "tomorrow at 10?" are recorded with the real date and get the owner\'s "pass your request on" line, not "Good question"', () => {
   const e04 = run({ intent: 'scheduling', visit: 'asked', hasQuestion: true, answerState: 'none', unknown: 'same-day visit availability', handover: { needed: true, reason: 'asks for a same-day visit, needs a person to check availability' }, ...pref({ status: 'available', days: ['tuesday'], text: 'today', weeks: 'this' }) }, { messages: [WELCOME, inn('Can someone come out today?')], name: 'Dermot' });
   assert.deepEqual([e04.step, e04.sent, e04.handover.needed], ['acknowledge', K.lines.soon, true]); assert.doesNotMatch(e04.sent, /good question/i);
   assert.deepEqual([e04.plan.preference.days, e04.plan.preference.firstDate], [['tuesday'], '2026-10-13'], 'today is Tuesday 13 Oct');
