@@ -276,12 +276,21 @@ window.PROJ = (() => {
     catch (e) { P.opt.delete(key); note(e.message, 'err'); }
     P.busy.delete(key); if (P.project) renderProject();
   }
+  // Phase 12: the installation date is one entry in the calendar. Say what happened to it, and warn (never block) when it overlaps another visit.
+  function installNote(i) {
+    if (!i || i.action === 'none' || i.action === 'unchanged') return '';
+    const day = (t) => new Date(t).toLocaleDateString('en-IE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Dublin' });
+    const hm = (t) => new Date(t).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Dublin' });
+    if (i.action === 'cancelled') return '. Removed from the calendar.';
+    const clash = (i.clashes || []).length ? ' Heads up: it overlaps ' + i.clashes.map((c) => (c.name || 'a visit') + ' at ' + hm(c.start)).join(', ') + '.' : '';
+    return '. In the calendar: ' + day(i.start) + ', ' + hm(i.start) + ' to ' + hm(i.end) + '.' + clash;
+  }
   async function saveDetails() {
     const p = P.project; if (!p || P.busy.has('save')) return;
     const e = edit(); P.busy.add('save'); P.saveMsg = 'Saving…'; renderSave(); $('pj-reload').hidden = true;
     try {
-      await run('saveProject', { id: p.id, expectedRev: P.baseRev, installDate: e.date || null, notes: e.notes || null });
-      P.dirty = false; P.saved = { rev: P.baseRev + 1, date: e.date, notes: e.notes }; P.saveMsg = 'Saved';
+      const r = await run('saveProject', { id: p.id, expectedRev: P.baseRev, installDate: e.date || null, notes: e.notes || null });
+      P.dirty = false; P.saved = { rev: P.baseRev + 1, date: e.date, notes: e.notes }; P.saveMsg = 'Saved' + installNote(r && r.install);
     } catch (err) {
       P.saveMsg = err.message; if (/changed by someone else/i.test(err.message)) $('pj-reload').hidden = false;
     }

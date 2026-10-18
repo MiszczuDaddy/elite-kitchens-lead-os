@@ -156,6 +156,26 @@ const ph = { anna: '353860001001', brian: '353860001002', cara: '353860001003', 
   ok('the Appointments list shows what the customer knows and the button on a visit that was never confirmed');
   await entry.locator('.arow-menu').click(); assert.ok((await page.locator('.appt-menu button').allInnerTexts()).includes('Send confirmation…'), 'the visit menu offers it too'); await page.keyboard.press('Escape');
 
+  // ---- an installation date on a project is one entry in the calendar ----
+  const PID = 'm_' + 'cd'.repeat(12), blank = () => Object.fromEntries(['designApproved', 'carcassesOrdered', 'doorsOrdered', 'readyForInstall', 'installed'].map((k) => [k, { done: false, at: null, by: null }]));
+  await db.doc('projects/' + PID).set({ phone: ph.dan, customerName: 'Dan Walsh', quoteId: null, quoteRef: null, quoteOption: null, quoteStatus: null, status: 'active', steps: blank(), installDate: null, notes: null, render: null, rev: 1, createdVia: 'manual', createdAt: Timestamp.now(), createdBy: { kind: 'staff', id: 'x' }, completedAt: null, completedBy: null, updatedAt: Timestamp.now(), updatedBy: { kind: 'staff', id: 'x' }, history: [] });
+  await page.evaluate((id) => { location.hash = '#projects/' + id; }, PID);
+  await page.waitForSelector('#pj-date'); await page.waitForFunction(() => /Dan Walsh/.test(document.getElementById('pj-project-view').textContent)); await new Promise((r) => setTimeout(r, 600));
+  const sentBefore = graph.length;
+  await page.fill('#pj-date', dublin(Date.now() + DAY)); await page.click('#pj-save');
+  await page.waitForFunction(() => /Saved\. In the calendar: .*08:00 to 16:00\./.test(document.getElementById('pj-save-msg').textContent));
+  const saveMsg = await page.textContent('#pj-save-msg'); assert.match(saveMsg, /Heads up: it overlaps .*Dan Walsh at 15:00\./, 'a clash is a warning: ' + saveMsg);
+  const inst = (await apptsOf(ph.dan)).filter((a) => a.type === 'installation'); assert.equal(inst.length, 1); assert.equal(inst[0].projectId, PID);
+  assert.equal(graph.length, sentBefore, 'nothing is sent to the customer about an installation');
+  await page.click('#nav-appointments'); await page.click('#appts-view button[data-view="list"]'); await page.waitForSelector('#appts-list:not([hidden])');
+  const irow = page.locator('.arow', { hasText: 'Installation' }); await irow.first().waitFor();
+  assert.equal(await irow.first().locator('.appt-notice').count(), 0, 'no message is ever offered for an installation');
+  await irow.first().locator('.arow-menu').click();
+  assert.equal((await page.locator('.appt-menu button').allInnerTexts()).some((t) => /Send/.test(t)), false);
+  await page.locator('.appt-menu button', { hasText: 'Edit appointment' }).click(); await page.waitForSelector('#appt-dlg[open]');
+  assert.equal(await page.inputValue('#a-type'), 'installation', 'editing it keeps its type'); await page.click('#a-cancel');
+  ok('an installation date makes one calendar entry (with a clash warning), the entry offers no customer message, and editing it keeps its type');
+
   // ---- the phone ----
   await page.setViewportSize({ width: 390, height: 800 });
   await page.evaluate(() => { location.hash = ''; });

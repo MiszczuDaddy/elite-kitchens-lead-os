@@ -4,7 +4,7 @@
 // callables, which also bring the shared Google Calendar in line. Loaded after app.js (shares its helpers).
 window.APPT = (() => {
   const LIMIT = 300;
-  const TYPES = { consultation: 'Consultation', site_visit: 'Site visit', other: 'Other' };
+  const TYPES = { consultation: 'Consultation', site_visit: 'Site visit', installation: 'Installation', other: 'Other' };
   const A = {
     active: false, origin: false,
     list: [], loaded: false, hitLimit: false, failed: [], unsub: null, unsubFailed: null, showCancelled: false, menu: null, stale: false,
@@ -736,10 +736,17 @@ window.APPT = (() => {
     } catch (e) { if (seq === noteSeq) p.hidden = true; }                      // no warning is better than a wrong one
   }
   for (const id of ['a-date', 'a-time', 'a-duration']) $(id).addEventListener('change', dayNote);
+  // Installation visits are made by a project's installation date, not here: the choice is offered only when you edit one (so its type is not lost).
+  function typeChoices(current) {
+    const sel = $('a-type'), has = !!sel.querySelector('option[value=installation]');
+    if (current === 'installation' && !has) { const o = el('option', null, 'Installation'); o.value = 'installation'; sel.insertBefore(o, sel.querySelector('option[value=other]')); }
+    else if (current !== 'installation' && has) sel.querySelector('option[value=installation]').remove();
+  }
   function openBook(phone, date, time) {
     const c = convOf(phone) || {}, contact = (S.selected === phone && S.contact) || {};
     A.dlg = { mode: 'create', phone, requestId: newRequestId() };          // one id per booking: a double click or retry books it once
     $('a-date').value = date || dublinDate(Date.now() + DAY);
+    typeChoices(null);
     fillTimes(time || '10:00'); fillDuration(60); $('a-type').value = 'consultation';
     $('a-location').value = contact.location || c.location || ''; $('a-notes').value = '';
     openForm('Book appointment', (contact.name || c.name || formatPhone(phone)) + ' · ' + formatPhone(phone), 'Book appointment');
@@ -754,6 +761,7 @@ window.APPT = (() => {
   function openReschedule(a, focus = 'a-date') {
     A.dlg = { mode: 'update', phone: a.phone, appt: a };
     $('a-date').value = dublinDate(ts(a.start));
+    typeChoices(a.type);
     fillTimes(clock(ts(a.start))); fillDuration(a.durationMin || 60); $('a-type').value = Object.hasOwn(TYPES, a.type) ? a.type : 'consultation';
     $('a-location').value = a.location || ''; $('a-notes').value = a.notes || '';
     openForm('Edit appointment', nameOf(a) + ' · ' + formatPhone(a.phone), 'Save changes');

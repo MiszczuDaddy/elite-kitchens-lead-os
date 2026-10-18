@@ -12,7 +12,7 @@ const { eventIdFor } = require('./gcal');
 
 const TZ = 'Europe/Dublin';
 const MIN = 60 * 1000, DAY = 24 * 60 * MIN;
-const TYPES = { consultation: 'Consultation', site_visit: 'Site visit', other: 'Other' };
+const TYPES = { consultation: 'Consultation', site_visit: 'Site visit', installation: 'Installation', other: 'Other' };
 const STEP_MIN = 15;
 const DEFAULT_DURATION = 60;
 const MAX_DURATION = 8 * 60;
@@ -55,7 +55,7 @@ function text(v, max, label) {
   return t || null;
 }
 function typeOf(v) {
-  if (!Object.hasOwn(TYPES, v)) throw bad('Choose Consultation, Site visit or Other.');
+  if (!Object.hasOwn(TYPES, v)) throw bad('Choose Consultation, Site visit, Installation or Other.');
   return v;
 }
 // Date "YYYY-MM-DD" + time "HH:MM" (Dublin, 15-minute steps) + duration in minutes -> instants. No past/future check here.
@@ -98,6 +98,11 @@ const syncPending = (at) => ({ 'sync.google.state': 'pending', 'sync.google.atte
 const appointmentId = (phone, requestId) => 'a_' + crypto.createHash('sha256').update(phone + '|' + requestId).digest('hex').slice(0, 24);
 const withHistory = (a, entry) => [...(a.history || []), entry].slice(-HISTORY_MAX);
 const nameOf = (contact, conv) => (contact && contact.exists && contact.data().name) || (conv && conv.exists && conv.data().name) || null;
+// Phase 12: an installation visit belongs to a project (installVisits.js). Moving it to another day, or cancelling it, changes the project's installation date in the SAME transaction, so the two never disagree.
+const linkedProject = (db, a) => (a.projectId && a.type === 'installation' ? db.collection('projects').doc(a.projectId) : null);
+const dateKey = (t) => { const p = dublinParts(t); return `${p.y}-${pad(p.m)}-${pad(p.d)}`; };
+const projectDatePatch = (p, key, at, actor) => ({ installDate: key, rev: (p.rev || 0) + 1, updatedAt: at, updatedBy: actor,
+  history: [...(p.history || []), { action: key ? `installation date set to ${key} (moved in the calendar)` : 'installation date cleared (cancelled in the calendar)', at, by: actor.id }].slice(-60) });
 const summary = (id, a) => ({ id, status: a.status, version: a.version, start: a.start.toMillis(), end: a.end.toMillis() });
 
 // ---- create ----
@@ -161,6 +166,7 @@ async function update(db, actor, data, nowMs = Date.now()) {
     if (a.status === 'cancelled') throw new HttpsError('failed-precondition', 'This appointment was cancelled. Book a new one instead.');
     checkVersion(a, data.expectedVersion);
     const [conv, contact] = await Promise.all([tx.get(db.collection('conversations').doc(a.phone)), tx.get(db.collection('contacts').doc(a.phone))]);
+    const pRef = linkedProject(db, a), pSnap = pRef ? await tx.get(pRef) : null;
     const patch = {};
     let moved = false;
     if (wantsSlot) {
@@ -183,6 +189,7 @@ async function update(db, actor, data, nowMs = Date.now()) {
       history: withHistory(a, { action: rescheduled ? 'rescheduled' : 'edited', at, by: actor.id, start: patch.start || a.start }),
     }, syncPending(at));
     tx.update(ref, patch);
+    if (pSnap && pSnap.exists && patch.start) { const key = dateKey(patch.start.toMillis()); if (key !== pSnap.data().installDate) tx.update(pRef, projectDatePatch(pSnap.data(), key, at, actor)); }
     return { ...summary(ref.id, { ...a, ...patch }), unchanged: false };
   });
 }
@@ -199,12 +206,14 @@ async function cancel(db, actor, data, nowMs = Date.now()) {
     const a = snap.data();
     if (a.status === 'cancelled') return { ...summary(ref.id, a), alreadyCancelled: true };
     checkVersion(a, data.expectedVersion);
+    const pRef = linkedProject(db, a), pSnap = pRef ? await tx.get(pRef) : null;
     const at = Timestamp.fromMillis(nowMs);
     const patch = { status: 'cancelled', cancelledAt: at, cancelledBy: actor, cancelReason: reason,
       version: a.version + 1, updatedAt: at, updatedBy: actor, history: withHistory(a, { action: 'cancelled', at, by: actor.id }), ...syncPending(at) };
     tx.update(ref, patch);
+    if (pSnap && pSnap.exists && pSnap.data().installDate) tx.update(pRef, projectDatePatch(pSnap.data(), null, at, actor));
     return { ...summary(ref.id, { ...a, ...patch }), alreadyCancelled: false };
   });
 }
 
-module.exports = { TYPES, TZ, DEFAULT_DURATION, HISTORY_MAX, create, update, cancel, dublinToMs, dublinParts, appointmentId, isAppointmentId };
+module.exports = { TYPES, TZ, DEFAULT_DURATION, HISTORY_MAX, create, update, cancel, dublinToMs, dublinParts, appointmentId, isAppointmentId, newSync, syncPending };

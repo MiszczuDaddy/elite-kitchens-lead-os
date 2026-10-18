@@ -10,6 +10,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp } = require('firebase-admin/firestore');
 const { normalizePhone } = require('./whatsapp');
 const mediaLib = require('./media');
+const IV = require('./installVisits');       // Phase 12: the installation date is one entry in the calendar
 
 const STEPS = ['designApproved', 'carcassesOrdered', 'doorsOrdered', 'readyForInstall', 'installed'];
 const HISTORY_MAX = 60, NOTES_MAX = 2000, RENDER_MAX = 25 * 1024 * 1024;
@@ -127,12 +128,14 @@ async function save({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (!snap.exists) throw notFound('Project not found.');
     const p = snap.data();
     if (data.expectedRev !== p.rev) throw refused(CHANGED);
+    const ictx = date !== undefined && date !== (p.installDate || null) ? await IV.prepare(tx, db, ref.id, date) : null;        // reads first, then the writes
     const now = at(nowMs), patch = { rev: p.rev + 1, updatedAt: now, updatedBy: actor };
     if (date !== undefined) patch.installDate = date;
     if (notes !== undefined) patch.notes = notes;
     if (date !== undefined && date !== (p.installDate || null)) patch.history = capped(p.history, { action: date ? `installation date set to ${date}` : 'installation date cleared', at: now, by: actor.id });
     tx.update(ref, patch);
-    return view(ref.id, { ...p, ...patch });
+    const install = ictx ? IV.apply(tx, ictx, { p, projectId: ref.id, actor, nowMs }) : null;
+    return { ...view(ref.id, { ...p, ...patch }), ...(install ? { install } : {}) };
   });
 }
 
@@ -183,6 +186,8 @@ async function remove({ db, bucket }, actor, data, { nowMs = Date.now() } = {}) 
     const snap = await tx.get(ref);
     if (!snap.exists) return null;
     const p = snap.data();
+    const ictx = await IV.prepare(tx, db, ref.id, null);                          // the installation entry in the calendar goes with the project
+    IV.apply(tx, ictx, { p, projectId: ref.id, actor, nowMs });
     tx.delete(ref);
     tx.set(db.collection('auditLog').doc(), { action: 'deleteProject', projectId: ref.id, ticked: STEPS.filter((k) => p.steps && p.steps[k] && p.steps[k].done).length, hadRender: !!p.render, by: actor.id, at: at(nowMs) });
     return { phone: p.phone };
