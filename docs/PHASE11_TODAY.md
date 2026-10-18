@@ -88,7 +88,8 @@ All of these are plain numbers at the top of `public/today-model.js`.
 | `test-ui/today.e2e.js` (real page, 450+ chats) | Opens on Today; every task type with its text; closed customers and thank-yous absent; a lead that is **not** among the Inbox's 300 newest chats is listed; counters filter; open a chat and come Back to Today; cards leave by themselves only when handled and return on a new message; reminders add, snooze, done, undo; quote Followed up and Undo; rejected-lead buttons; the phone view | 11/11 |
 | `functions/test/scripts.test.js` | The new `today` stage: routing check before the question, never the webhook, `live` waits for it | passed |
 | `functions/test/pwa.test.js` | The two new screen files are on the "always fresh" list | passed |
-| Older browser suites (`ui`, `safety`, `appointments`, `quotes`, `assistant`, `pwa`, `projects`, `crm`) | Unchanged behaviour. They now press "Inbox" after signing in, because Elite OS opens on Today | see the build record |
+| 19 older browser suites | Unchanged behaviour. They now press "Inbox" after signing in, because Elite OS opens on Today. **Passed:** ui 57, safety 11, appointments 39, quotes 20, assistant 21, pwa 8, projects 13, crm 14, readability 11, conversion 10, dnd 13, lead 11, knowledge 11, access 7, quote-send 10, quote-delivery 18, quote-layout 4, quote-recovery 19 (it timed out once inside the long run, as it does on `main`, and passed alone). **Not passing here, the same on `main`:** `reopen` ("3 == 4") and `push` and `theme` (this PC's browser). | passed |
+| Server tests that touch what changed (`customers`, `audit`, `e2e` rules, `projects`, and Phases 10's suites) | Erasure, security rules, the safety net | 189/189 together with the new Today suites |
 
 ## Known limits
 - "Reply waiting" looks back **60 days**; an older unanswered chat is still in the Inbox.
@@ -96,3 +97,6 @@ All of these are plain numbers at the top of `public/today-model.js`.
 - On the first day, older hand-overs and unanswered chats from the last 60 days will appear. That is correct, but it can look like a lot.
 - A failed welcome is only checked for **today's** leads.
 - The Inbox's own "Needs booking" count still only sees the 300 newest chats. Today does not have this limit. I suggest moving the Inbox badge to the same question later.
+
+## Before release
+- Run the **full** server and browser regression once more after any further change (about 45 minutes). The full run of the whole server suite was **not** repeated for this phase; the 189 tests above are the ones that touch what changed.
