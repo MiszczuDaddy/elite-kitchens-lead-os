@@ -154,15 +154,17 @@
     const out = [];
     if (!BR) return out;
     for (const a of appts || []) {
-      const next = BR.nextAction(a, now), start = ms(a && a.start);
-      if (!next) continue;
-      const conv = convById.get(String(a.phone)) || {}, since = ms(a.updatedAt) || start;
+      // A message WhatsApp gave no answer to ("unknown") is listed until a person looks at the chat and says whether it arrived (it is never sent again by itself).
+      const issue = a && a.noticeIssue && a.noticeIssue.state === 'unknown' && BR.NOTIFIED_TYPES.includes(a.type) && a.status !== 'done' ? a.noticeIssue : null;
+      const next = issue ? 'resolve' : BR.nextAction(a, now), start = ms(a && a.start);
+      if (!next || (issue && !(start > now))) continue;                         // a visit that has passed needs no message
+      const conv = convById.get(String(a.phone)) || {}, since = ms(issue ? issue.at : a.updatedAt) || start;
       if (dnc(conv)) continue;
-      if (next !== 'cancellation' && now - since < NOTICE_GRACE_MS && start - now > NOTICE_SOON_MS) continue;
-      if (next === 'cancellation' && now - since < NOTICE_GRACE_MS) continue;
-      const soon = start - now < DAY, urgency = soon ? 2 : start - now < 3 * DAY ? 1 : 0;
+      if (!issue && next !== 'cancellation' && now - since < NOTICE_GRACE_MS && start - now > NOTICE_SOON_MS) continue;
+      if (!issue && next === 'cancellation' && now - since < NOTICE_GRACE_MS) continue;
+      const soon = start - now < DAY, urgency = soon ? 2 : start - now < 3 * DAY ? 1 : 0, what = (a.type === 'site_visit' ? 'site visit ' : 'consultation ') + visitWhen(start, now);
       out.push({ key: 'n|' + a.id, kind: 'notice', apptId: a.id, phone: String(a.phone || ''), name: a.customerName || conv.name || '', next, start, appt: a, visit: visitWhen(start, now),
-        reasons: [{ type: 'notice', text: NOTICE_TEXT[next] + ': ' + (a.type === 'site_visit' ? 'site visit ' : 'consultation ') + visitWhen(start, now), since, urgency }], urgency, since, primary: 'notice' });
+        reasons: [{ type: 'notice', text: issue ? 'Message not confirmed (WhatsApp gave no answer): ' + what : NOTICE_TEXT[next] + ': ' + what, since, urgency }], urgency, since, primary: 'notice' });
     }
     return out;
   }

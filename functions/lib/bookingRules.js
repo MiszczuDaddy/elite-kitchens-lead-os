@@ -44,10 +44,13 @@
   // Words for the screen: what the customer knows.
   function describe(a, nowMs) {
     if (!notified(a)) return { state: 'none', text: '' };
-    const n = noticeOf(a), start = ms(a.start), next = nextAction(a, nowMs);
-    if (next === 'confirmation') return { state: 'needs', next, text: 'The customer has not been told yet' };
-    if (next === 'change') return { state: 'needs', next, text: 'The customer was told a different time' };
-    if (next === 'cancellation') return { state: 'needs', next, text: 'The customer has not been told it was cancelled' };
+    const n = noticeOf(a), start = ms(a.start), next = nextAction(a, nowMs), issue = a.noticeIssue && typeof a.noticeIssue === 'object' ? a.noticeIssue : null;
+    // WhatsApp gave no answer: it may have arrived, so it is never sent again by itself. A person looks at the chat and says what happened.
+    if (issue && issue.state === 'unknown') return { state: 'issue', issue: 'unknown', kind: issue.kind, next: null, text: 'WhatsApp did not say whether the last message to the customer arrived. Check the chat' };
+    const tried = issue && issue.state === 'failed' ? ' (the last try failed)' : '';
+    if (next === 'confirmation') return { state: 'needs', next, text: 'The customer has not been told yet' + tried };
+    if (next === 'change') return { state: 'needs', next, text: 'The customer was told a different time' + tried };
+    if (next === 'cancellation') return { state: 'needs', next, text: 'The customer has not been told it was cancelled' + tried };
     if (!n) return { state: 'none', text: '' };
     if (n.kind === 'cancellation') return { state: 'told', text: 'The customer was told it was cancelled' };
     return { state: 'told', text: n.reminderFor === start ? 'The customer was told, and reminded' : 'The customer was told' };

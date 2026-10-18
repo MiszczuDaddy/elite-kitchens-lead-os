@@ -120,6 +120,7 @@ async function sendNotice({ db, wa, cfg }, { id, kind, actor, auto = false, expe
     const definite = !!e && e.definite === true, text = definite ? refusalText(e) : NOT_CONFIRMED;
     log('error', definite ? 'booking message refused' : 'booking message not confirmed', { kind, code: (e && e.code) || null });      // a code only: logs never hold customer details
     try { await claim.nRef.update({ state: definite ? 'failed' : 'unknown', error: text, errorCode: definite && e && e.code != null ? String(e.code) : null }); } catch (e2) { log('error', 'booking record failed', { kind: kindOfError(e2) }); }
+    try { await apptRef.update({ noticeIssue: { kind, state: definite ? 'failed' : 'unknown', text, at: nowMs } }); } catch (e2) { /* the visit is gone: nothing to show */ }       // so the visit and Today can SAY it did not go
     throw new HttpsError('unavailable', text);
   }
 
@@ -139,13 +140,42 @@ async function recordSent(db, claim, apptRef, { wamid, body, kind, nowMs }) {
     const base = { wamid, direction: 'out', type, body, media: null, createdAt: Timestamp.now(), bookingNotice: kind };
     if (msg.exists) tx.set(msgRef, base, { merge: true }); else tx.set(msgRef, { ...base, status: 'sent', error: null });
     tx.update(convRef, { updatedAt: FieldValue.serverTimestamp(), lastMessage: String(body).replace(/^\[template:[^\]]*\]\s*/, '').slice(0, 120), lastMessageType: type, lastMessageDirection: 'out' });
-    if (a.exists) {
-      const prev = R.noticeOf(a.data()) || {};
-      tx.update(apptRef, { customerNotice: kind === 'reminder'
-        ? { kind: prev.kind || 'confirmation', toldStart: prev.toldStart != null ? prev.toldStart : claim.startMs, at: prev.at != null ? prev.at : nowMs, wamid: (a.data().customerNotice || {}).wamid || wamid, reminderFor: claim.startMs, reminderAt: nowMs }
-        : { kind, toldStart: kind === 'cancellation' ? (prev.toldStart != null ? prev.toldStart : claim.startMs) : claim.startMs, at: nowMs, wamid, reminderFor: null } });
-    }
+    if (a.exists) tx.update(apptRef, { customerNotice: noticeAfter(a.data(), kind, claim.startMs, nowMs, wamid), noticeIssue: FieldValue.delete() });
     return true;
+  });
+}
+// What the customer now knows, once a message of this kind has gone: the time they were told, when, and (for the reminder) which time it was for.
+function noticeAfter(a, kind, startMs, nowMs, wamid) {
+  const prev = R.noticeOf(a) || {};
+  if (kind === 'reminder') return { kind: prev.kind || 'confirmation', toldStart: prev.toldStart != null ? prev.toldStart : startMs, at: prev.at != null ? prev.at : nowMs, wamid: (a.customerNotice || {}).wamid || wamid || null, reminderFor: startMs, reminderAt: nowMs };
+  return { kind, toldStart: kind === 'cancellation' ? (prev.toldStart != null ? prev.toldStart : startMs) : startMs, at: nowMs, wamid: wamid || null, reminderFor: null };
+}
+
+// ---- a message we could not confirm: a person looks at the chat and says what happened ----
+// "unknown" (WhatsApp gave no answer) is never sent again by itself, because it may have arrived. After looking at the chat a person says:
+//   arrived      it did arrive: the customer is recorded as told (nothing is sent)
+//   notArrived   it did not: the message may be sent again (the button works again)
+async function resolveNotice({ db }, actor, { id, kind, outcome }, { nowMs = Date.now() } = {}) {
+  if (!R.KINDS.includes(kind)) throw new HttpsError('invalid-argument', 'Unknown message.');
+  if (!['arrived', 'notArrived'].includes(outcome)) throw new HttpsError('invalid-argument', 'Say whether the message arrived.');
+  if (!A.isAppointmentId(id)) throw new HttpsError('invalid-argument', 'Missing appointment.');
+  const apptRef = db.collection('appointments').doc(id);
+  return db.runTransaction(async (tx) => {
+    const aSnap = await tx.get(apptRef);
+    if (!aSnap.exists) throw new HttpsError('not-found', 'Appointment not found.');
+    const a = aSnap.data(), nRef = db.collection('bookingNotices').doc(noticeId(noticeKey(kind, id, a))), nSnap = await tx.get(nRef);
+    if (!nSnap.exists) throw refused('There is no unconfirmed message of this kind for this visit.');
+    const n = nSnap.data(), stuck = n.state === 'sending' && nowMs - (ms(n.claimedAt) || 0) >= outbound.STUCK_MS;
+    if (n.state === 'sent') return { ok: true, existing: true, state: 'sent' };
+    if (n.state !== 'unknown' && !stuck) throw refused(n.state === 'failed' ? 'That message did not go (WhatsApp refused it): just send it again.' : 'That message is still being sent.');
+    if (outcome === 'arrived') {
+      tx.update(nRef, { state: 'sent', sentAt: ts(nowMs), resolved: 'arrived', resolvedBy: actor.id });
+      tx.update(apptRef, { customerNotice: noticeAfter(a, kind, n.startMs != null ? n.startMs : ms(a.start), nowMs, null), noticeIssue: FieldValue.delete() });
+      return { ok: true, state: 'sent' };
+    }
+    tx.update(nRef, { state: 'failed', error: null, resolved: 'notArrived', resolvedBy: actor.id });
+    tx.update(apptRef, { noticeIssue: FieldValue.delete() });
+    return { ok: true, state: 'failed' };
   });
 }
 
@@ -170,4 +200,4 @@ async function reminderSweep({ db, wa, cfg }, { nowMs = Date.now() } = {}) {
   return out;
 }
 
-module.exports = { sendNotice, reminderSweep, reminderWindow, compose, noticeKey, noticeId, whyNot, dateText, timeText, REMIND_FROM_MIN, REMIND_TO_MIN };
+module.exports = { sendNotice, resolveNotice, noticeAfter, reminderSweep, reminderWindow, compose, noticeKey, noticeId, whyNot, dateText, timeText, REMIND_FROM_MIN, REMIND_TO_MIN };

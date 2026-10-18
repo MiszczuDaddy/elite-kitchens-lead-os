@@ -426,6 +426,13 @@ async function sendBookingNotice(auth, data, deps) {
   if (data.expectedVersion != null && !Number.isInteger(data.expectedVersion)) throw new HttpsError('invalid-argument', 'Bad version.');
   return bookingNotices.sendNotice(deps, { id: data.id, kind: data.kind, actor: actorOf(auth), expectedVersion: data.expectedVersion == null ? null : data.expectedVersion });
 }
+// A message WhatsApp gave no answer to: a person looks at the chat and says whether it arrived ("arrived": the customer is recorded as told; "notArrived": it may be sent again). Nothing is sent.
+async function resolveBookingNotice(auth, data, deps) {
+  assertStaff(auth, deps.cfg);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpsError('invalid-argument', 'Missing details.');
+  for (const k of Object.keys(data)) if (!['id', 'kind', 'outcome'].includes(k)) throw new HttpsError('invalid-argument', `Unknown field: ${k}`);
+  return bookingNotices.resolveNotice(deps, actorOf(auth), { id: data.id, kind: data.kind, outcome: data.outcome });
+}
 const todayLib = require('./today');
 const saveReminder = staffAction(todayLib.saveReminder);
 const snoozeQuote = staffAction(todayLib.snoozeQuote);
@@ -454,7 +461,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { sendBookingNotice, saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { sendBookingNotice, resolveBookingNotice, saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

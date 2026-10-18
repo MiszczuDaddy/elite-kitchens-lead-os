@@ -838,6 +838,10 @@ window.APPT = (() => {
     if (!window.BookingRules) return null;
     const d = BookingRules.describe(a, Date.now()); if (d.state === 'none' || !d.text) return null;
     const row = el('div', 'appt-notice appt-notice-' + d.state); row.append(el('span', 'appt-notice-text', d.text + '.'));
+    if (d.state === 'issue') {                                  // WhatsApp gave no answer: look at the chat, then say what happened. Nothing is sent from here.
+      for (const [label, outcome] of [['It arrived', 'arrived'], ['It did not arrive', 'notArrived']]) { const b = button(label, 'linkbtn appt-notice-go', () => resolveNotice(a, outcome)); b.dataset.outcome = outcome; row.append(b); }
+      return row;
+    }
     if (d.next) {
       if (blockedContact(a.phone)) row.append(el('span', 'appt-notice-block', ' This customer asked not to be contacted.'));
       else { const b = button(NOTICE[d.next].line, 'linkbtn appt-notice-go', () => { if (before) before(); openNotice(a, d.next); }); b.dataset.kind = d.next; row.append(b); }
@@ -872,6 +876,14 @@ window.APPT = (() => {
       if (n.done) n.done(said); else report(said, n.a.phone);
     } catch (err) { if (A.notice === n) { $('an-err').textContent = errText(err); $('an-go').disabled = false; n.saving = false; } }
   });
+  async function resolveNotice(a, outcome, done) {
+    const issue = a.noticeIssue || {};
+    try {
+      await call('resolveBookingNotice')({ id: a.id, kind: issue.kind, outcome });
+      const said = outcome === 'arrived' ? 'Recorded: the customer was told.' : 'Recorded: it did not arrive. You can send it again.';
+      if (done) done(said); else report(said, a.phone);
+    } catch (err) { const said = 'Could not record that: ' + errText(err); if (done) done(said); else report(said, a.phone, 'err'); }
+  }
   $('an-later').onclick = () => { closeDialog($('appt-notice-dlg')); A.notice = null; };
   $('appt-notice-dlg').addEventListener('cancel', (e) => { if (A.notice && A.notice.saving) e.preventDefault(); else A.notice = null; });
 
@@ -919,5 +931,5 @@ window.APPT = (() => {
   $('nav-appointments').addEventListener('click', (e) => { if (A.active) e.preventDefault(); });   // already here
   $('d-appt-new').onclick = () => { if (A.customer) openBook(A.customer); };
 
-  return Object.assign(A, { show, hide, stop, watchCustomer, openBook, openNotice, noticeKind });
+  return Object.assign(A, { show, hide, stop, watchCustomer, openBook, openNotice, noticeKind, resolveNotice });
 })();

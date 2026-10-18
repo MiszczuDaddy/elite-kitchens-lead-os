@@ -346,3 +346,65 @@ test('the browser cannot write these records: staff can read them, nobody can wr
     await assertFails(env.unauthenticatedContext().firestore().doc('bookingNotices/n_x').get());
   } finally { await env.cleanup(); }
 });
+
+// ================================================================ a message that could not be confirmed ====================================
+const resolve = (id, kind, outcome, nowMs = NOW + 10 * MIN) => BN.resolveNotice({ db }, actor, { id, kind, outcome }, { nowMs });
+
+test('UNCONFIRMED: the visit says so; "it arrived" records the customer as told and sends nothing; the button is gone and no reminder is blocked', async () => {
+  await customer(P, { inbound: OPEN }); const id = await visit();
+  mode = 'server'; await rejects(send(id, 'confirmation'), 'unavailable', /Not confirmed/); mode = 'ok';
+  let a = await appt(id); assert.deepEqual([a.noticeIssue.kind, a.noticeIssue.state], ['confirmation', 'unknown']); assert.equal(a.customerNotice, undefined);
+  const d = R.describe(a, NOW); assert.deepEqual([d.state, d.issue, d.kind, d.next], ['issue', 'unknown', 'confirmation', null]); assert.match(d.text, /did not say whether the last message/);
+  const r = await resolve(id, 'confirmation', 'arrived'); assert.deepEqual([r.ok, r.state], [true, 'sent']);
+  a = await appt(id); assert.equal(a.noticeIssue, undefined, 'the note is gone'); assert.deepEqual([a.customerNotice.kind, a.customerNotice.toldStart], ['confirmation', irish(2026, 10, 21, 10, 0)]);
+  assert.equal(R.nextAction(a, NOW + 20 * MIN), null); assert.equal(calls.length, 1, 'nothing was sent by resolving');
+  const n = (await notices())[0]; assert.deepEqual([n.state, n.resolved, n.resolvedBy], ['sent', 'arrived', 'thomas@example.com']);
+  assert.equal((await resolve(id, 'confirmation', 'arrived')).existing, true, 'the same answer again changes nothing');
+  assert.equal((await send(id, 'confirmation', NOW + H)).existing, true); assert.equal(calls.length, 1, 'and it is never sent as well');
+  assert.equal((await sweep(EVE)).sent, 1, 'the evening reminder now works for this visit');
+});
+
+test('UNCONFIRMED: "it did not arrive" lets the message be sent again, once', async () => {
+  await customer(P, { inbound: OPEN }); const id = await visit();
+  mode = 'server'; await rejects(send(id, 'confirmation'), 'unavailable'); mode = 'ok';
+  await rejects(send(id, 'confirmation', NOW + 5 * MIN), 'failed-precondition', /Not confirmed/);
+  const r = await resolve(id, 'confirmation', 'notArrived'); assert.equal(r.state, 'failed');
+  assert.equal((await appt(id)).noticeIssue, undefined); assert.equal((await notices())[0].state, 'failed');
+  assert.equal((await send(id, 'confirmation', NOW + 15 * MIN)).ok, true); assert.equal(calls.length, 2);
+  assert.equal((await send(id, 'confirmation', NOW + 20 * MIN)).existing, true); assert.equal(calls.length, 2);
+  assert.equal((await appt(id)).customerNotice.kind, 'confirmation');
+});
+
+test('UNCONFIRMED: only an unconfirmed message can be resolved; strict input; staff only; a stuck "sending" counts after 3 minutes', async () => {
+  await customer(P, { inbound: OPEN }); const id = await visit();
+  await rejects(resolve(id, 'confirmation', 'arrived'), 'failed-precondition', /no unconfirmed message/);
+  mode = 'refuse'; await rejects(send(id, 'confirmation'), 'unavailable'); mode = 'ok';
+  await rejects(resolve(id, 'confirmation', 'arrived'), 'failed-precondition', /did not go/);
+  assert.equal((await appt(id)).customerNotice, undefined, 'a refused message is not "told"');
+  const a = await appt(id), nid = BN.noticeId(BN.noticeKey('cancellation', id, a));
+  await db.collection('bookingNotices').doc(nid).set({ phone: P, appointmentId: id, kind: 'cancellation', state: 'sending', claimedAt: Timestamp.fromMillis(NOW), startMs: a.start.toMillis() });
+  await rejects(resolve(id, 'cancellation', 'arrived', NOW + MIN), 'failed-precondition', /still being sent/);
+  assert.equal((await resolve(id, 'cancellation', 'notArrived', NOW + 4 * MIN)).state, 'failed');
+  for (const bad of [{ id, kind: 'x', outcome: 'arrived' }, { id, kind: 'confirmation', outcome: 'maybe' }, { id: 'a_nope', kind: 'confirmation', outcome: 'arrived' }]) await rejects(BN.resolveNotice({ db }, actor, bad), 'invalid-argument');
+  await rejects(BN.resolveNotice({ db }, actor, { id: 'a_' + 'f'.repeat(24), kind: 'confirmation', outcome: 'arrived' }), 'not-found');
+  await rejects(h.resolveBookingNotice({ uid: 'x', token: { email: 'other@example.com', email_verified: true, staff: true } }, { id, kind: 'confirmation', outcome: 'arrived' }, deps()), 'permission-denied');
+  await rejects(h.resolveBookingNotice(staff, { id, kind: 'confirmation', outcome: 'arrived', extra: 1 }, deps()), 'invalid-argument');
+});
+
+test('A REFUSAL leaves a note on the visit ("the last try failed") that disappears when the message finally goes', async () => {
+  await customer(P, { inbound: NOW - 30 * H }); const id = await visit();
+  mode = 'refuse'; await rejects(send(id, 'confirmation'), 'unavailable');
+  let a = await appt(id); assert.deepEqual([a.noticeIssue.state, a.noticeIssue.kind], ['failed', 'confirmation']); assert.match(a.noticeIssue.text, /doesn't know this template/);
+  const d = R.describe(a, NOW); assert.deepEqual([d.state, d.next], ['needs', 'confirmation']); assert.match(d.text, /not been told yet \(the last try failed\)/);
+  mode = 'ok'; await send(id, 'confirmation', NOW + 5 * MIN); a = await appt(id); assert.equal(a.noticeIssue, undefined);
+});
+
+test('UNCONFIRMED REMINDER: resolving "it arrived" records the reminder for that time, so it is never sent a second time', async () => {
+  await customer(P, { inbound: OPEN }); const id = await visit(); await told(id); calls.length = 0;
+  mode = 'server'; assert.equal((await sweep(EVE)).failed, 1); mode = 'ok';
+  assert.equal((await appt(id)).noticeIssue.kind, 'reminder');
+  assert.equal((await sweep(EVE + 15 * MIN)).sent, 0, 'an unconfirmed reminder is never repeated by the sweep'); assert.equal(calls.length, 1);
+  await resolve(id, 'reminder', 'arrived', EVE + 20 * MIN);
+  const a = await appt(id); assert.equal(a.customerNotice.reminderFor, irish(2026, 10, 21, 10, 0)); assert.equal(a.customerNotice.kind, 'confirmation'); assert.equal(a.noticeIssue, undefined);
+  assert.equal((await sweep(EVE + 30 * MIN)).sent, 0); assert.equal(calls.length, 1);
+});

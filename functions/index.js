@@ -162,7 +162,8 @@ const bookingDeps = () => {
     wa: createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome }) };
 };
 exports.sendBookingNotice = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 60 }, (req) => h.sendBookingNotice(req.auth, req.data, bookingDeps()));
-exports.bookingReminderSweep = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Europe/Dublin', secrets: [ACCESS_TOKEN], timeoutSeconds: 300, retryCount: 0 }, async () => {
+exports.resolveBookingNotice = onCall({}, (req) => h.resolveBookingNotice(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));      // sends nothing: no WhatsApp secret
+exports.bookingReminderSweep =onSchedule({ schedule: 'every 15 minutes', timeZone: 'Europe/Dublin', secrets: [ACCESS_TOKEN], timeoutSeconds: 300, retryCount: 0 }, async () => {
   const r = await require('./lib/bookingNotices').reminderSweep(bookingDeps());
   console.log(JSON.stringify({ level: 'info', msg: 'booking reminder sweep', ...r }));
 });
