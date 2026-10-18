@@ -57,7 +57,7 @@ window.ATTN = (() => {
     [button('Add as customer', 'btn-primary', () => addLead(l)), button('Dismiss', 'btn-ghost', () => { if (window.confirm('Dismiss this lead? Their name, email and number are deleted from Elite OS.')) act({ action: 'lead', leadId: l.leadId, outcome: 'dismissed' }); })])));
     $('attn-checks').textContent = M.checksText(A.heartbeats, now);
     $('attn-backup').textContent = M.backupText(A.backup, now);
-    const hours = $('attn-hours'); if (document.activeElement !== hours) hours.value = String(A.settings && Number.isInteger(A.settings.leadSilenceHours) ? A.settings.leadSilenceHours : 72);
+    const hours = $('attn-hours'); if (document.activeElement !== hours) hours.value = String(A.settings && Number.isInteger(A.settings.leadSilenceHours) ? A.settings.leadSilenceHours : 168);
     $('attn-save').disabled = A.busy;
   }
 

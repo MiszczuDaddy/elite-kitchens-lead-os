@@ -149,11 +149,32 @@ test('"WhatsApp stopped reporting back": only messages FROM Meta count (a custom
 });
 
 // ================================================================ the 10-minute check ====================================
-test('CHECK: leads stopped arriving (the owner\'s setting, 72 hours by default; 0 = off); WhatsApp silent after two sends; no device for alerts; alerts failing', async () => {
-  await db.collection('leads').doc('L1').set({ leadId: 'L1', receivedAt: ts(NOW - 80 * HOUR), state: 'done' });
+test('LEADS SILENT: ads paused for weeks warns ONCE; "Mark as fixed" stays quiet for another full 7 days, then reminds once; a new lead resets it', async () => {
+  const occ = async () => ((await issue('lead_silence')) || {}).occurrence || 0, fix = (at) => H.attention({ db }, actor, { action: 'fixed', kind: 'lead_silence' }, { nowMs: at });
+  await db.collection('leads').doc('L1').set({ leadId: 'L1', receivedAt: ts(NOW - 400 * HOUR), state: 'done' });
+  for (let i = 0; i < 5; i++) await H.sweep(deps(), NOW + i * 10 * MIN);
+  assert.deepEqual([(await openKinds()).includes('lead_silence'), await occ()], [true, 1], 'warned once, however many checks run');
+  await fix(NOW + HOUR);
+  for (const at of [NOW + HOUR + 10 * MIN, NOW + 2 * HOUR, NOW + 3 * DAY, NOW + 6 * DAY]) await H.sweep(deps(), at);
+  assert.deepEqual([(await openKinds()).includes('lead_silence'), await occ()], [false, 1], 'marked as fixed: nothing comes back for the next 7 days');
+  await H.sweep(deps(), NOW + HOUR + 168 * HOUR + 10 * MIN); await H.sweep(deps(), NOW + HOUR + 168 * HOUR + 20 * MIN);
+  assert.deepEqual([(await openKinds()).includes('lead_silence'), await occ()], [true, 2], 'after a full 7 days it reminds once');
+  // a lead arrives: it closes by itself, and the NEXT silence is reported at once (a person\'s old "fixed" does not hide it)
+  const back = NOW + 9 * DAY; await db.collection('leads').doc('L2').set({ leadId: 'L2', receivedAt: ts(back), state: 'done' });
+  await H.sweep(deps(), back + 5 * MIN); assert.ok(!(await openKinds()).includes('lead_silence'));
+  await H.sweep(deps(), back + 168 * HOUR + 30 * MIN);
+  assert.deepEqual([(await openKinds()).includes('lead_silence'), await occ()], [true, 3]);
+  // a silence closed by a lead (not by a person) never hides the next one
+  await db.collection('leads').doc('L3').set({ leadId: 'L3', receivedAt: ts(back + 200 * HOUR), state: 'done' });
+  await H.sweep(deps(), back + 200 * HOUR + 5 * MIN); await H.sweep(deps(), back + 200 * HOUR + 168 * HOUR + 30 * MIN);
+  assert.deepEqual([(await openKinds()).includes('lead_silence'), await occ()], [true, 4]);
+});
+
+test('CHECK: leads stopped arriving (the owner\'s setting, 168 hours = 7 days by default; 0 = off); WhatsApp silent after two sends; no device for alerts; alerts failing', async () => {
+  await db.collection('leads').doc('L1').set({ leadId: 'L1', receivedAt: ts(NOW - 180 * HOUR), state: 'done' });
   await H.sweep(deps(), NOW);
   assert.deepEqual(await openKinds(), ['lead_silence', 'no_alert_devices']);
-  await h.attentionAction(staff, { action: 'settings', leadSilenceHours: 100 }, { db, cfg }); await H.sweep(deps(), NOW + MIN);
+  await h.attentionAction(staff, { action: 'settings', leadSilenceHours: 200 }, { db, cfg }); await H.sweep(deps(), NOW + MIN);
   assert.ok(!(await openKinds()).includes('lead_silence'), 'the owner\'s own setting is used');
   await h.attentionAction(staff, { action: 'settings', leadSilenceHours: 0 }, { db, cfg }); await db.collection('leads').doc('L1').update({ receivedAt: ts(NOW - 900 * HOUR) }); await H.sweep(deps(), NOW + 2 * MIN);
   assert.ok(!(await openKinds()).includes('lead_silence'), '0 switches the warning off');
