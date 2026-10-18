@@ -47,7 +47,7 @@ const TEMPLATE_CODES = new Set([132000, 132001, 132005, 132007, 132012, 132015, 
 const STREAK = 3, STREAK_WINDOW_MS = 30 * MIN;                                     // this many unconfirmed sends in a row (within 30 minutes) = "failing"
 const NO_REPORT_MS = 60 * MIN, NO_REPORT_MAX_MS = 48 * HOUR, NO_REPORT_SENDS = 2;  // sends with nothing at all back from Meta for an hour
 const BEAT_STALE_MS = 20 * MIN, START_GRACE_MS = 30 * MIN;
-const LEAD_SILENCE_DEFAULT = 72, LEAD_SILENCE_MAX = 720;
+const LEAD_SILENCE_DEFAULT = 168,LEAD_SILENCE_MAX = 720;
 const ALERT_TRIES = 6, EMAIL_TRIES = 3, EMAIL_CLAIM_MS = 10 * MIN;
 const RESOLVED_PURGE_MS = 90 * 24 * HOUR;
 const clip = (s) => (s == null ? null : String(s).replace(/\d{6,}/g, '[number]').slice(0, 120));    // a detail is a code or a short phrase; never a number
@@ -271,8 +271,12 @@ async function sweep(deps, nowMs = Date.now()) {
     const { leadSilenceHours } = await settingsOf(db);
     const last = await db.collection('leads').orderBy('receivedAt', 'desc').limit(1).get();
     const at = last.empty ? 0 : ms(last.docs[0].data().receivedAt);
-    if (leadSilenceHours > 0 && at && nowMs - at > leadSilenceHours * HOUR) await open('lead_silence', 'none for ' + Math.floor((nowMs - at) / HOUR) + ' hours');
-    else await close(['lead_silence']);
+    if (leadSilenceHours > 0 && at && nowMs - at > leadSilenceHours * HOUR) {
+      // "Mark as fixed" by a person means "I know, ads are paused": stay quiet for one more full window (7 days by default), then remind once. A lead arriving closes it by itself (resolvedBy 'auto'), so the next silence is reported at once.
+      const p = await db.doc('healthIssues/lead_silence').get().then((s) => (s.exists ? s.data() : null));
+      const seen = p && p.status === 'resolved' && p.resolvedBy && p.resolvedBy !== 'auto' && ms(p.resolvedAt) > at && nowMs - ms(p.resolvedAt) < leadSilenceHours * HOUR;
+      if (!seen) await open('lead_silence', 'none for ' + Math.floor((nowMs - at) / HOUR) + ' hours');
+    } else await close(['lead_silence']);
   });
   await step('whatsapp', async () => {
     const w = await db.doc('health/whatsapp').get().then((s) => (s.exists ? s.data() : {}));
