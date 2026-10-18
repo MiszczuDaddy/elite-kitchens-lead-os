@@ -100,3 +100,10 @@ All of these are plain numbers at the top of `public/today-model.js`.
 
 ## Before release
 - Run the **full** server and browser regression once more after any further change (about 45 minutes). The full run of the whole server suite was **not** repeated for this phase; the 189 tests above are the ones that touch what changed.
+
+## Independent review (18 Oct 2026): APPROVE WITH CONDITIONS, both conditions fixed
+1. **Fixed:** going to Today from a quote, Quote Settings or a project with unsaved edits closed it without asking. Today now asks "Leave without saving?" first (the real-page test fails on the old order).
+2. **Fixed:** the working-hours clock was slow with many old waiting chats (about 3 seconds for 300). It now takes under 10 ms, gives exactly the same answers as the slow version (checked on 300 random spans around both clock changes), and is worked out at most once every 3 seconds while Today is not open.
+
+Still open and small: the visit-to-book check reads the next 400 appointments only; the list redraws fully on each change (a keyboard user's focus can reset); old unanswered chats show on the first day.
+Final tests after the fixes: today-model 22/22, today server 8/8, today browser 12/12; the older browser suites that cover navigation (ui 57, quotes 20, projects 13, appointments 39, safety 11) and 174 related server tests pass.
