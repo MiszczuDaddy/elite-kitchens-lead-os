@@ -416,6 +416,16 @@ const staffAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps
 const setDoNotContact = staffAction(CB.set);
 const attentionAction = staffAction(health.attention);
 // ---- Phase 11: the Today tab's two stored things (docs/PHASE11_TODAY.md): reminders, and quote follow-up snoozes. Staff only; nothing here sends anything. ----
+const bookingNotices = require('./bookingNotices');
+// ---- Phase 12: the message about a visit (confirmation, change, cancellation). A person presses the button; the evening reminder is automatic (index.js). One message per claim, never two. ----
+async function sendBookingNotice(auth, data, deps) {
+  assertStaff(auth, deps.cfg);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpsError('invalid-argument', 'Missing details.');
+  for (const k of Object.keys(data)) if (!['id', 'kind', 'expectedVersion'].includes(k)) throw new HttpsError('invalid-argument', `Unknown field: ${k}`);
+  if (!['confirmation', 'change', 'cancellation'].includes(data.kind)) throw new HttpsError('invalid-argument', 'Choose confirmation, change or cancellation.');
+  if (data.expectedVersion != null && !Number.isInteger(data.expectedVersion)) throw new HttpsError('invalid-argument', 'Bad version.');
+  return bookingNotices.sendNotice(deps, { id: data.id, kind: data.kind, actor: actorOf(auth), expectedVersion: data.expectedVersion == null ? null : data.expectedVersion });
+}
 const todayLib = require('./today');
 const saveReminder = staffAction(todayLib.saveReminder);
 const snoozeQuote = staffAction(todayLib.snoozeQuote);
@@ -444,7 +454,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { sendBookingNotice, saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

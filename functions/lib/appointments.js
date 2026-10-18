@@ -207,4 +207,4 @@ async function cancel(db, actor, data, nowMs = Date.now()) {
   });
 }
 
-module.exports = { TYPES, TZ, DEFAULT_DURATION, HISTORY_MAX, create, update, cancel, dublinToMs, appointmentId, isAppointmentId };
+module.exports = { TYPES, TZ, DEFAULT_DURATION, HISTORY_MAX, create, update, cancel, dublinToMs, dublinParts, appointmentId, isAppointmentId };

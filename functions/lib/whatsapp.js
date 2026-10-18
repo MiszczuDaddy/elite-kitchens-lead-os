@@ -85,7 +85,7 @@ function createClient(cfg, fetchImpl = fetch) {
     },
     sendMedia: (to, kind, mediaId, { caption, filename } = {}, opts) => post({ to, type: kind, [kind]: {
       id: mediaId, ...(caption && kind !== 'audio' ? { caption } : {}), ...(kind === 'document' && filename ? { filename } : {}) } }, opts),
-    sendText: (to, body) => post({ to, type: 'text', text: { body, preview_url: false } }),
+    sendText: (to, body, opts) => post({ to, type: 'text', text: { body, preview_url: false } }, opts),
     sendTemplate: (to, firstName) => post({
       to, type: 'template',
       template: { name: cfg.template, language: { code: cfg.lang },
