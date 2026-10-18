@@ -843,8 +843,8 @@ window.APPT = (() => {
     if (A.active) { const t = $('appts-toast'); if (!t.hidden) { t.append(' ', mk()); clearTimeout(note.h); note.h = setTimeout(() => { t.hidden = true; }, 20000); } }
     if (A.customer === a.phone) $('d-appts-msg').append(' ', mk());
   }
-  function openNotice(a, kind) {
-    A.notice = { a, kind, saving: false };
+  function openNotice(a, kind, done) {
+    A.notice = { a, kind, saving: false, done };
     const c = convOf(a.phone), start = ts(a.start), what = kindOf(a).toLowerCase(), who = nameOf(a), open = !!(c && window.WindowState && WindowState.isOpen(c, Date.now()));
     $('an-title').textContent = NOTICE[kind].title;
     $('an-text').textContent = kind === 'cancellation' ? `Tell ${who} on WhatsApp that their ${what} on ${whenPhrase(start)} was cancelled?`
@@ -860,7 +860,8 @@ window.APPT = (() => {
     try {
       const r = (await call('sendBookingNotice')({ id: n.a.id, kind: n.kind, expectedVersion: n.a.version })).data;
       closeDialog($('appt-notice-dlg')); A.notice = null;
-      report(r.existing ? 'The customer was already sent this message.' : 'Message sent to ' + nameOf(n.a) + (r.mode === 'template' ? ' (as the approved WhatsApp template).' : '.'), n.a.phone);
+      const said = r.existing ? 'The customer was already sent this message.' : 'Message sent to ' + nameOf(n.a) + (r.mode === 'template' ? ' (as the approved WhatsApp template).' : '.');
+      if (n.done) n.done(said); else report(said, n.a.phone);
     } catch (err) { if (A.notice === n) { $('an-err').textContent = errText(err); $('an-go').disabled = false; n.saving = false; } }
   });
   $('an-later').onclick = () => { closeDialog($('appt-notice-dlg')); A.notice = null; };

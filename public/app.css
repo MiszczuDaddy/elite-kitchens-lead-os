@@ -1192,7 +1192,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .td-ok::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--st-won); }
 .td-bad { min-height: 40px; padding: 8px 14px; border: 1px solid #e7c4bf; border-radius: 8px; background: #f9eae6; color: var(--err); font-weight: 600; cursor: pointer; text-align: left; }
 .td-err { width: 100%; color: var(--err); font-size: 13px; }
-.td-counts { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 8px; margin: 0 0 14px; }
+.td-counts { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 8px; margin: 0 0 14px; }
 .td-count { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 68px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; cursor: pointer; }
 .td-count:hover { background: var(--hover); }
 .td-count[aria-pressed=true] { border-color: var(--accent); background: var(--selected); box-shadow: 0 0 0 1px var(--accent) inset; }
@@ -1224,7 +1224,7 @@ div.td-open { cursor: default; }
 .td-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
 .td-tag, .td-status { display: inline-block; padding: 1px 8px; border-radius: 9px; background: var(--hover); color: var(--ink); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
 .td-tag.t-leadfix, .td-status.st-failed { background: #f6e9e6; color: var(--err); }
-.td-tag.t-booking, .td-tag.t-handover, .td-status.st-needs { background: var(--consult-bg); color: #5f3f08; }
+.td-tag.t-booking, .td-tag.t-notice, .td-tag.t-handover, .td-status.st-needs { background: var(--consult-bg); color: #5f3f08; }
 .td-tag.t-quote { background: #f3ecd9; color: #5f4a14; }
 .td-status.st-ai { background: #e4edf6; color: #2c4a68; }
 .td-status.st-contacted { background: #e6f0e4; color: #2f5a2b; }
@@ -1251,7 +1251,7 @@ div.td-open { cursor: default; }
   .today-link { display: flex; }
   .td-scroll { padding: 12px 0 48px; }
   .td-health, .td-counts, .td-visits, .td-h, .td-chips, .td-empty, .td-fold summary { margin-left: 14px; margin-right: 14px; }
-  .td-counts { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+  .td-counts { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 6px; }
   .td-count { min-height: 72px; }
   .td-list { gap: 0; }
   .td-card, .td-lead { border-radius: 0; border-left-width: 6px; border-right: 0; margin-bottom: -1px; }

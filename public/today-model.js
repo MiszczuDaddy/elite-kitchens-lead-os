@@ -6,8 +6,8 @@
 //   * and cannot vanish for any other reason. The only things that hide a card on purpose are a reminder marked Done, and a quote follow-up the person snoozed.
 // The only stored things are reminders (the person's own) and quote snoozes (a note: "do not show this quote until ...", tied to the quote's sent date so a re-sent quote comes back).
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./consult-model.js')); else root.TodayModel = factory(root.ConsultModel);
-})(this, function (CM) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./consult-model.js'), require('./booking-rules.js')); else root.TodayModel = factory(root.ConsultModel, root.BookingRules);
+})(this, function (CM, BR) {
   const TZ = 'Europe/Dublin', MIN = 60000, HOUR = 3600000, DAY = 86400000;
   const AMBER_MIN = 30, RED_MIN = 120;                  // a message waiting: amber after 30, red after 120 WORKING minutes (08:00 to 20:00 Irish time)
   const WORK_FROM = 8, WORK_TO = 20;
@@ -137,6 +137,36 @@
     return out;
   }
 
+  // ---- a visit the customer has not been told about (Phase 12) ----
+  // The message a visit needs is decided by BookingRules (the same file the server uses). Not shown for the first 2 hours after a booking or a move (you are still dealing with it, and the button is right there),
+  // unless the visit is within 48 hours. Red when the visit is within 24 hours. A customer who said stop is not listed.
+  const NOTICE_GRACE_MS = 2 * HOUR, NOTICE_SOON_MS = 48 * HOUR;
+  const FMT_VISIT = new Intl.DateTimeFormat('en-IE', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  function visitWhen(start, now) {
+    const key = dateKey(start), today = dateKey(now), clock = FMT_VISIT.formatToParts(new Date(start)).filter((p) => ['hour', 'minute'].includes(p.type)).map((p) => p.value).join(':');
+    if (key === today) return 'today at ' + clock;
+    if (key === addDaysKey(today, 1)) return 'tomorrow at ' + clock;
+    const p = Object.fromEntries(FMT_VISIT.formatToParts(new Date(start)).map((x) => [x.type, x.value]));
+    return p.weekday + ' ' + p.day + ' ' + p.month + ' at ' + clock;
+  }
+  const NOTICE_TEXT = { confirmation: 'Confirmation not sent', change: 'The customer was told a different time', cancellation: 'The customer was not told it was cancelled' };
+  function noticeCards(appts, convById, now) {
+    const out = [];
+    if (!BR) return out;
+    for (const a of appts || []) {
+      const next = BR.nextAction(a, now), start = ms(a && a.start);
+      if (!next) continue;
+      const conv = convById.get(String(a.phone)) || {}, since = ms(a.updatedAt) || start;
+      if (dnc(conv)) continue;
+      if (next !== 'cancellation' && now - since < NOTICE_GRACE_MS && start - now > NOTICE_SOON_MS) continue;
+      if (next === 'cancellation' && now - since < NOTICE_GRACE_MS) continue;
+      const soon = start - now < DAY, urgency = soon ? 2 : start - now < 3 * DAY ? 1 : 0;
+      out.push({ key: 'n|' + a.id, kind: 'notice', apptId: a.id, phone: String(a.phone || ''), name: a.customerName || conv.name || '', next, start, appt: a, visit: visitWhen(start, now),
+        reasons: [{ type: 'notice', text: NOTICE_TEXT[next] + ': ' + (a.type === 'site_visit' ? 'site visit ' : 'consultation ') + visitWhen(start, now), since, urgency }], urgency, since, primary: 'notice' });
+    }
+    return out;
+  }
+
   // ---- reminders ----
   const dueMs = (r) => (r.dueTime ? dublinMs(...keyParts(r.dueDate), ...r.dueTime.split(':').map(Number)) : null);
   function reminderState(r, now) {                       // 'overdue' | 'today' | 'later'
@@ -172,6 +202,7 @@
         last: { text: preview(c.lastMessage), mine: c.lastMessageDirection === 'out' } });
     }
     cards.push(...quoteCards(input.quotes, input.marks, convById, now));
+    cards.push(...noticeCards(input.appts, convById, now));
     const later = [], doneToday = [];
     for (const r of input.reminders || []) {
       if (!r || !keyParts(r.dueDate)) continue;
@@ -193,7 +224,7 @@
     cards.sort((a, b) => (b.urgency - a.urgency) || ((a.since == null) - (b.since == null)) || ((a.since || 0) - (b.since || 0)));
     later.sort((a, b) => (a.dueDate + (a.dueTime || '')).localeCompare(b.dueDate + (b.dueTime || '')));
     doneToday.sort((a, b) => b.at - a.at);
-    const counts = { reply: 0, handover: 0, booking: 0, quote: 0, reminder: 0, leadfix: 0 }, red = { reply: 0, handover: 0, booking: 0, quote: 0, reminder: 0, leadfix: 0 };
+    const counts = { reply: 0, handover: 0, booking: 0, notice: 0, quote: 0, reminder: 0, leadfix: 0 }, red = { reply: 0, handover: 0, booking: 0, notice: 0, quote: 0, reminder: 0, leadfix: 0 };
     for (const c of cards) for (const t of new Set(c.reasons.map((r) => r.type))) { counts[t]++; if (c.reasons.some((r) => r.type === t && r.urgency === 2)) red[t]++; }
     // visits today and tomorrow
     const tomorrow = addDaysKey(today, 1), visits = (input.appts || []).filter((a) => a && a.status === 'scheduled' && ms(a.start) && [today, tomorrow].includes(dateKey(ms(a.start))))
@@ -230,7 +261,7 @@
     return { items, counts, total: items.length };
   }
 
-  const LABEL = { reply: 'Replies', handover: 'Handovers', booking: 'Book a visit', quote: 'Quotes', reminder: 'Reminders', leadfix: 'Leads to fix' };
+  const LABEL = { reply: 'Replies', handover: 'Handovers', booking: 'Book a visit', notice: 'Tell customer', quote: 'Quotes', reminder: 'Reminders', leadfix: 'Leads to fix' };
   const TYPES = Object.keys(LABEL);
   const STATUS_LABEL = { failed: 'Contact failed', needs: 'Needs you', ai: 'AI handling', contacted: 'Contacted' };
   const filterCards = (cards, type) => (type ? cards.filter((c) => c.reasons.some((r) => r.type === type)) : cards);
