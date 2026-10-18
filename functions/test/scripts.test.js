@@ -609,9 +609,12 @@ test('every stage that deploys functions runs the routing check BEFORE it asks f
   before(stage('projects'), 'projects'); assert.match(stage('projects'), /check_routing \$PROJECT_FUNCS/);
   before(stage('push'), 'push'); assert.match(stage('push'), /check_routing \$PUSH_FUNCS/);
   before(stage('ai'), 'ai'); assert.match(stage('ai'), /check_routing \$AI_FUNCS/);
-  const help = s.split('\n').slice(0, 49).join('\n');                       // the usage text is lines 2 to 49 of the script (it was 2 to 47 before Phase 10's safety stage was added)
-  assert.match(s, /^usage\(\) \{ sed -n '2,49p'/m); assert.match(help, /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+  const help = s.split('\n').slice(0, 48).join('\n');                       // the usage text is lines 2 to 49 of the script (it was 2 to 47 before Phase 10's safety stage was added)
+  assert.match(s, /^usage\(\) \{ sed -n '2,48p'/m); assert.ok(/^set -euo pipefail/.test(s.split('\n')[48]), 'the usage text ends exactly where the script starts (line 49)'); assert.match(help, /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
   assert.match(help, /deploy-quote-sending\.sh safety /, 'the help text must show the Phase 10 safety stage');
+  before(stage('today'), 'today'); assert.match(stage('today'), /check_routing \$TODAY_FUNCS/); assert.match(help, /deploy-quote-sending\.sh today /, 'the help text must show the Phase 11 today stage');
+  assert.ok(!/TODAY_[A-Z]*="[^"]*\bwebhook\b/.test(s), 'the Phase 11 stage never deploys the WhatsApp webhook');
+  assert.match(stage('live'), /serving_revision savereminder[\s\S]*Deploy the Today backend first/, 'the screen is not published before the Today functions it calls');
   before(stage('safety'), 'safety'); assert.match(stage('safety'), /check_routing \$SAFETY_FUNCS/);
   assert.ok(!/SAFETY_[A-Z]*="[^"]*\bwebhook\b/.test(s), 'the Phase 10 stage never deploys the WhatsApp webhook');
   assert.match(stage('live'), /serving_revision attentionaction[\s\S]*Deploy the safety net backend first/, 'the screen is not published before the Phase 10 functions it calls');

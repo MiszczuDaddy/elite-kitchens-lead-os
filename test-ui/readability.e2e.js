@@ -84,7 +84,7 @@ async function noOverflow(p, selectors) {
     page.on('requestfailed', r => console.error('Request failed:', r.url(), r.failure().errorText));
     await page.goto('http://127.0.0.1:5055/');
     await page.evaluate(t => firebase.auth().signInWithCustomToken(t), token);
-    await page.waitForSelector('.conv');
+    await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); await page.waitForSelector('.conv');
     if (!before) {
       for (let i = 0; i < stages.length; i++) {
         await page.click(`#status-filters [data-status="${stages[i]}"]`);

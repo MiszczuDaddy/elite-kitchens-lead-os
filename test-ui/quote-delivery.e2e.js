@@ -133,7 +133,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   console.log('QUOTE DELIVERY E2E: real page + real functions + emulators + mocked Meta and Gmail');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.evaluate(() => { window.open = (u) => { window.__opened(String(u)); return null; }; });
   await page.evaluate(async (s) => { const f = firebase.app().functions('europe-west1'); await f.httpsCallable('saveQuoteSettings')(s); await f.httpsCallable('setQuoteNumbering')({ next: 34 }); }, SETTINGS);
 
@@ -322,7 +322,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   await page.click('#qsend-send');
   await until(() => metaState.messages.length > 0 && docMsgs().length === sentBefore + 1, 'the document reaches Meta');
   await page.reload();                                                                                                   // refresh while Meta is still answering
-  await page.waitForSelector('#app:not([hidden])'); await openQuote(refreshQuote);
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); await openQuote(refreshQuote);
   await page.waitForFunction(() => { const s = document.getElementById('qv-sendstate'); return !!s || /Sent /.test(document.querySelector('.qv-banner').textContent); }, null, { timeout: 30000 });
   await until(async () => (await quote(refreshQuote)).status === 'sent', 'the send finishes on the server after the refresh');
   await page.waitForFunction(() => !document.getElementById('qv-sendstate') && /Sent /.test(document.querySelector('.qv-banner').textContent));
@@ -334,7 +334,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   // ======================================== nothing available (template route switched off), and the fallbacks ======================
   // With no quotation template configured (the setting is left blank) a closed window is refused exactly as in M3: the browser is told so
   // by the "which channels?" answer, which is changed here to say template: false. A reload makes the page ask again.
-  const reapply = async () => { await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { window.open = (u) => { window.__opened(String(u)); return null; }; }); };
+  const reapply = async () => { await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); await page.evaluate(() => { window.open = (u) => { window.__opened(String(u)); return null; }; }); };
   await ctx.route('**/quoteChannels', async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
     const r = await route.fetch(), body = await r.json(); body.result.whatsapp.template = false; await route.fulfill({ response: r, json: body });
@@ -419,7 +419,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push('mobile: ' + e.message));
   await mp.goto('http://127.0.0.1:5055/');
   await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await mp.waitForSelector('#app:not([hidden])');
+  await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   const mq = await (async () => { const id = await page.evaluate(async (p) => { const f = firebase.app().functions('europe-west1'), s = (await firebase.firestore().doc('quoteSettings/current').get()).data();
     const a = QuoteEngine.current().newAnswers(s.priceList); a.doors = 6; a.drawers = 2; a.options.ess.drawerBox = 'cemux'; return (await f.httpsCallable('createQuote')({ phone: p, requestId: crypto.randomUUID(), answers: a })).data.id; }, ph.brian); return id; })();
   await mp.evaluate((i) => { location.hash = '#quotes/' + i; }, mq);

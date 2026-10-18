@@ -94,7 +94,7 @@ const status = (wamid, to, st, errors) => hook({ entry: [{ changes: [{ field: 'm
   console.log('E2E: Reopen conversation: real page + real functions + emulators + mocked Meta');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((tok) => firebase.auth().signInWithCustomToken(tok), staffToken);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await conv(A).waitFor(); await conv(F).waitFor();
 
   // --- open window: nothing changes for staff ---

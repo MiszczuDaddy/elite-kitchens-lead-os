@@ -36,7 +36,7 @@ const web = http.createServer((req, res) => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/pw-browsers/chromium' });
   const errors = [];
   const newPage = async (options = {}, init) => { const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ...options }); if (init) await ctx.addInitScript(init); const page = await ctx.newPage(); global.__page = page; page.on('pageerror', (e) => errors.push(e.message)); return { ctx, page }; };
-  const signIn = async (page) => { await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); };
+  const signIn = async (page) => { await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); };
   // a fake "the browser offers installation" event, with a spy for prompt()
   const offerInstall = (page) => page.evaluate(() => { window.__prompts = 0; const e = new Event('beforeinstallprompt', { cancelable: true }); e.prompt = () => { window.__prompts++; return Promise.resolve(); }; e.userChoice = Promise.resolve({ outcome: 'accepted' }); window.dispatchEvent(e); return e.defaultPrevented; });
   console.log('PWA E2E: real page + real functions + emulators, in Chromium');

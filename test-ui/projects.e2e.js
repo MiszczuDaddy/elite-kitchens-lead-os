@@ -58,7 +58,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   const open = async (options = {}) => {
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ...options }), page = await ctx.newPage(); global.__page = page;
     page.on('pageerror', (e) => errors.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
-    await page.goto('http://127.0.0.1:5055/'); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])');
+    await page.goto('http://127.0.0.1:5055/'); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
     return { ctx, page };
   };
   let { ctx, page } = await open();

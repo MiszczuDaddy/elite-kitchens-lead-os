@@ -40,7 +40,7 @@ const web = http.createServer((req, res) => {
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ...options }), page = await ctx.newPage();
     page.on('pageerror', (e) => errors.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
     page.on('dialog', (d) => d.accept());
-    await page.goto('http://127.0.0.1:5058/'); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])');
+    await page.goto('http://127.0.0.1:5058/'); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
     return { ctx, page };
   };
   let { ctx, page } = await open();

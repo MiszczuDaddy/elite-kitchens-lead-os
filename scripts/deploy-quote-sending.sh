@@ -37,6 +37,7 @@
 #                                                switches it on in the screen. Run it BEFORE "live". No existing function is touched.
 #   ./scripts/deploy-quote-sending.sh receptionist  Phase 9 R3: the automatic receptionist (receptionistOnMessage answers when a message arrives; receptionistSweep is the 5-minute backup) and pushReceipt. Run it after "ai" and BEFORE "live". It does nothing until the owner switches
 #                                                it on in Assistant > Settings AND for a chat. Switch it off there at any time.
+#   ./scripts/deploy-quote-sending.sh today      Phase 11 (docs/PHASE11_TODAY.md): the 2 functions behind the Today tab (saveReminder, snoozeQuote) and deleteCustomer (it now also erases reminders). Run it BEFORE "live". Does NOT deploy the webhook.
 #   ./scripts/deploy-quote-sending.sh safety     Phase 10 (docs/PHASE10_SAFETY_NET.md): "do not contact" in every send, problems and rejected leads in "Needs attention", the 10-minute health check
 #                                                and the delivery-tick watcher. Asks for the alert email address(es). Does NOT deploy the webhook. Run it BEFORE "live". Backups: scripts/setup-backups.sh.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
@@ -76,6 +77,8 @@ AI_FUNCS="$AI_NEW"
 SAFETY_NEW="setDoNotContact attentionAction healthSweep healthOnMessageWrite"                                       # Phase 10: new. The two callables are made public (each checks the signed-in staff account); healthSweep (every 10 minutes) and healthOnMessageWrite (a trigger) cannot be called from outside
 SAFETY_CHANGED="sendReply sendMedia startConversation reopenConversation deliverQuote retryQuoteDelivery sendQuote leadIntake receptionistSweep receptionistOnMessage pushReceipt"   # Phase 10: "do not contact" in every send, the WhatsApp outcome, rejected leads, the receptionist's heartbeat
 SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
+TODAY_NEW="saveReminder snoozeQuote"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
+TODAY_FUNCS="$TODAY_NEW deleteCustomer"                                                                              # deleteCustomer now also erases the customer's reminders and quote notes
 REC_FUNCS="receptionistSweep receptionistOnMessage pushReceipt"                                                      # Phase 9 R3: the receptionist (a message-arrival trigger plus a 5-minute backup; neither callable from outside) and pushReceipt (it now knows the "handover" notification)
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
 SHARED_SETTINGS="ALLOWED_EMAILS WHATSAPP_PHONE_NUMBER_ID WHATSAPP_API_VERSION GCAL_SYNC GCAL_CALENDAR_ID GCAL_SERVICE_ACCOUNT"
@@ -83,7 +86,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,49p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,48p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -396,6 +399,22 @@ case "${1:-}" in
     deploy_functions $REC_FUNCS
     echo "Done. Next: $0 live (the screen). To stop it: switch 'Automatic receptionist' off in Assistant > Settings, or firebase functions:delete receptionistSweep --region $REGION --project $PROJECT"
     ;;
+  today)
+    [ -f functions/lib/today.js ] || { echo "This checkout has no Phase 11 (Today) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
+    [ -n "$(serving_revision attentionaction)" ] || { echo "Deploy the safety net first: $0 safety"; exit 1; }
+    check_settings; check_access; check_routing $TODAY_FUNCS
+    echo "Functions: $TODAY_FUNCS"
+    echo "New: saveReminder (add, done, undo, snooze, delete a reminder) and snoozeQuote (follow-up snooze): staff only, they send nothing to anyone."
+    echo "Changed: deleteCustomer (it now also erases the customer's reminders and quote notes). NOT deployed: the WhatsApp webhook."
+    confirm "Deploy the Phase 11 (Today) backend to the LIVE project?"
+    install; save_revisions deleteCustomer; deploy_functions $TODAY_FUNCS
+    echo "==> making the 2 new staff functions reachable (each checks the signed-in staff account itself)"
+    for f in $TODAY_NEW; do
+      gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+    done
+    check_reachable "$TODAY_FUNCS"
+    echo "Done. Next: $0 live (the Today screen). To go back: git checkout 5244e73 -- functions, then firebase deploy --only functions:deleteCustomer, and firebase functions:delete $TODAY_NEW --region $REGION --project $PROJECT"
+    ;;
   safety)
     [ -f functions/lib/health.js ] || { echo "This checkout has no Phase 10 (safety net) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
     [ -n "$(serving_revision receptionistsweep)" ] || { echo "Deploy the receptionist first: $0 receptionist"; exit 1; }
@@ -460,6 +479,7 @@ case "${1:-}" in
     if [ -f functions/lib/projects.js ] && [ -z "$(serving_revision createproject)" ]; then echo "Deploy the Projects backend first: $0 projects"; exit 1; fi
     if [ -f functions/lib/push.js ] && [ -z "$(serving_revision pushreceipt)" ]; then echo "Deploy the push notifications backend first: $0 push"; exit 1; fi        # Phase 8: the screen and the /pushReceipt rewrite need these functions
     if [ -f functions/lib/ai.js ] && [ -z "$(serving_revision aichat)" ]; then echo "Deploy the AI assistant backend first: $0 ai"; exit 1; fi
+    if [ -f functions/lib/today.js ] && [ -z "$(serving_revision savereminder)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # Phase 11: the screen calls saveReminder and snoozeQuote
     if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact
     if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions
     no_test_folders

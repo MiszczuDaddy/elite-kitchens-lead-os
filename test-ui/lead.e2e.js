@@ -41,7 +41,7 @@ const post = (body, key = KEY) => fetch(FN + '/leadIntake', { method: 'POST', he
   console.log('LEAD E2E: Make-style POST -> leadIntake -> Inbox');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
 
   assert.equal((await post({ leadId: 'LEAD0000001' }, null)).status, 401);
   assert.equal((await post({ leadId: 'LEAD0000001' }, 'wrong-key-wrong-key-wrong-key')).status, 401);

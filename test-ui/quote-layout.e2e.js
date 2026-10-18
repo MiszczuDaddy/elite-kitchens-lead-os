@@ -81,7 +81,7 @@ const CAP = 1680;            // the readable maximum width of the quote page (px
   console.log('QUOTE LAYOUT E2E: real page + real functions + emulators + mocked Meta and Gmail');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.evaluate(() => { window.open = () => null; });
   await page.evaluate(async (s) => { const f = firebase.app().functions('europe-west1'); await f.httpsCallable('saveQuoteSettings')(s); await f.httpsCallable('setQuoteNumbering')({ next: 34 }); }, SETTINGS);
 

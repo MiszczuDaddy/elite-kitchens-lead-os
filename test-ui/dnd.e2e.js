@@ -76,7 +76,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   console.log('PIPELINE DRAG-AND-DROP + STAGE COLOURS E2E');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.click('#nav-pipeline');
   await page.waitForSelector('.lane[data-stage="inbox"] .prow');
   await page.click('#ov-period button[data-period="all"]');
@@ -185,7 +185,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   const tp = await tctx.newPage(); tp.on('pageerror', (e) => errors.push('tablet: ' + e.message));
   await tp.goto('http://127.0.0.1:5055/');
   await tp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await tp.waitForSelector('#app:not([hidden])');
+  await tp.waitForSelector('#app:not([hidden])'); await tp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await tp.click('#nav-pipeline');
   await tp.waitForSelector('.lane .prow');
   assert.equal(await tp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
@@ -199,7 +199,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push('mobile: ' + e.message));
   await mp.goto('http://127.0.0.1:5055/');
   await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await mp.waitForSelector('#app:not([hidden])');
+  await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await mp.tap('#to-pipeline');
   await mp.waitForSelector('.lane.lane-on .prow');
   assert.equal(await mp.locator('.prow[draggable=true]').count(), 0);

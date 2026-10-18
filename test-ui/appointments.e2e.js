@@ -83,7 +83,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   console.log('APPOINTMENTS E2E: real page + real functions + emulators + fake Google Calendar');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
 
   // ---- rail ----
   assert.equal(await page.locator('#nav-appointments').innerText(), 'Appointments');
@@ -254,7 +254,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await page.waitForSelector('.arow');
   assert.equal(await page.isVisible('#cal-grid'), false);
   await page.reload();
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.waitForSelector('.arow');
   assert.equal(await page.getAttribute('#appts-view button[data-view="list"]', 'aria-pressed'), 'true');
   ok('Calendar | List toggle: List shows the upcoming list, and the choice is remembered after a reload');
@@ -369,7 +369,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push('mobile: ' + e.message));
   await mp.goto('http://127.0.0.1:5055/');
   await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await mp.waitForSelector('#app:not([hidden])');
+  await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await mp.tap('#to-appointments');
   await mp.waitForSelector('.time-column');
   assert.equal(await mp.getAttribute('#appts-view button[data-view="day"]', 'aria-pressed'), 'true');

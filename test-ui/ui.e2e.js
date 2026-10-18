@@ -110,7 +110,7 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
 
   // --- staff sign-in ---
   await signIn(staffToken);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.waitForSelector('#list-empty:not([hidden])');
   assert.match(await page.locator('#list-empty').innerText(), /No conversations yet/);
   ok('staff sign in; empty inbox shows a friendly empty state');
@@ -438,7 +438,7 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push('mobile: ' + e.message));
   await mp.goto('http://127.0.0.1:5055/');
   await mp.evaluate((tok) => firebase.auth().signInWithCustomToken(tok), staffToken);
-  await mp.waitForSelector('.conv');
+  await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); await mp.waitForSelector('.conv');
   assert(await mp.locator('.list-pane').isVisible()); assert(!(await mp.locator('.thread-pane').isVisible()));
   await mp.screenshot({ path: path.join(SHOTS, 'mobile-list.png') });
   await mp.locator(`.conv[data-phone="${A}"]`).click();
