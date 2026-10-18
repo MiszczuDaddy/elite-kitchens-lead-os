@@ -17,9 +17,10 @@
   const clip = (s, n) => { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; };
 
   // ---- Irish time (Intl, no library) ----
+  // Review fix (18 Oct 2026): the formatter is made ONCE. Building one on every call made the working-hours clock cost about 0.5 s for 100 old waiting chats and 3 s for 300.
+  const FMT = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   function parts(t) {
-    const f = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-    const p = Object.fromEntries(f.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+    const p = Object.fromEntries(FMT.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
     return { y: +p.year, m: +p.month, d: +p.day, h: +p.hour, mi: +p.minute };
   }
   const offsetAt = (t) => { const p = parts(t); return Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi) - Math.floor(t / MIN) * MIN; };
@@ -34,13 +35,21 @@
   const daysBetween = (a, b) => { const x = keyParts(a), y = keyParts(b); return x && y ? Math.round((Date.UTC(y[0], y[1] - 1, y[2]) - Date.UTC(x[0], x[1] - 1, x[2])) / DAY) : 0; };
   const addDaysKey = (k, n) => { const x = keyParts(k), t = new Date(Date.UTC(x[0], x[1] - 1, x[2] + n)); return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`; };
 
+  // The start and end of working time on one Irish day. The same few dozen days are asked for again and again (every waiting chat), and a day's window never changes: worked out once.
+  const WINDOWS = new Map();
+  function workWindow(y, m, d) {
+    const k = y * 10000 + m * 100 + d;
+    let w = WINDOWS.get(k);
+    if (!w) { w = [dublinMs(y, m, d, WORK_FROM, 0), dublinMs(y, m, d, WORK_TO, 0)]; WINDOWS.set(k, w); }
+    return w;
+  }
   // Minutes between two instants that fall inside working time (every day, 08:00 to 20:00 Irish time). A message at 23:00 is not "late" at 07:00.
   function workMinutes(from, to) {
     if (!(to > from)) return 0;
     if (to - from > 120 * DAY) return (to - from) / MIN;                      // far too old to matter: never tidy-counted
     let [y, m, d] = keyParts(dateKey(from)), total = 0;
     for (let i = 0; i < 130; i++) {
-      const ws = dublinMs(y, m, d, WORK_FROM, 0), we = dublinMs(y, m, d, WORK_TO, 0);
+      const [ws, we] = workWindow(y, m, d);
       if (ws > to) break;
       total += Math.max(0, Math.min(to, we) - Math.max(from, ws));
       const next = new Date(Date.UTC(y, m - 1, d + 1)); y = next.getUTCFullYear(); m = next.getUTCMonth() + 1; d = next.getUTCDate();

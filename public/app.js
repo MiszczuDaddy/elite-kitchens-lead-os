@@ -332,7 +332,11 @@ function renderConversationStatus() {
 
 // ---------- routing ----------
 function routeFromHash() {
-  // Today (Phase 11): the screen Elite OS opens on. Any other address closes it first.
+  // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
+  if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
+  if (window.PROJ && !PROJ.mayLeave(location.hash)) return;           // Phase 7: leaving a project with unsaved notes asks first
+  // Today (Phase 11): the screen Elite OS opens on. Any other address closes it first. This comes AFTER the two "unsaved changes" questions above: going to Today must ask them too
+  // (review of 18 Oct 2026: it used to close a quote or project with unsaved edits without asking).
   if (window.TODAY) {
     if (!/^#c\/\d+$/.test(location.hash)) TODAY.fromToday = false;
     if (TODAY.handles(location.hash)) {
@@ -342,9 +346,6 @@ function routeFromHash() {
     }
     if (TODAY.active) TODAY.hide();
   }
-  // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
-  if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
-  if (window.PROJ && !PROJ.mayLeave(location.hash)) return;           // Phase 7: leaving a project with unsaved notes asks first
   // Assistant (Phase 9): #assistant
   if (window.ASSIST && ASSIST.handles(location.hash)) {
     if (S.selected) closeConversation(true);

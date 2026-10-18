@@ -94,7 +94,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   // ------------------------------------------------------------------ 2. accepting a quote in the real screen makes its project
   const qAnna = await makeSentQuote(ph.anna), qBrian = await makeSentQuote(ph.brian);
   assert.equal((await projectsOf(ph.anna)).length, 0, 'sending a quote makes no project');
-  await go('#quotes/' + qAnna, '#qv-accept'); await page.click('#qv-accept'); await page.waitForSelector('#qa-dlg[open]');
+  await go('#quotes/' + qAnna, '#qv-accept'); for (let i = 0; i < 25 && !(await page.locator('#qa-dlg[open]').count()); i++) { await page.click('#qv-accept'); await sleep(400); } await page.waitForSelector('#qa-dlg[open]');      // the button can show a moment before the quote's sent version has loaded: press it until it works
   await page.locator('#qa-options input[value="prem"]').check(); await page.click('#qa-go');
   const pa = await until(async () => (await projectsOf(ph.anna))[0], 'the project of Anna\'s accepted quote');
   assert.equal(pa.id.slice(2), qAnna.slice(2)); assert.equal(pa.quoteId, qAnna); assert.equal(pa.quoteRef, (await quote(qAnna)).ref); assert.equal(pa.quoteOption.key, 'prem'); assert.equal(pa.createdVia, 'quote');

@@ -170,6 +170,21 @@ const web = http.createServer((req, res) => {
   await page.click('#c-cancel');
   ok('a rejected lead (Phase 10) is a red card with the same Add as customer / Dismiss buttons');
 
+  // ------------------------------------------------------------ 9b. review fix: going to Today still asks about unsaved changes
+  await db.doc('quoteSettings/current').set({ rev: 1, vatRate: 13.5, validityDays: 30, priceList: { options: { ess: { perDoor: 110, perTopBox: 60 }, prem: { perDoor: 140, perTopBox: 65 }, pp: { perDoor: 150, perTopBox: 70 } }, drawerBoxes: { cemux: 12, blum: 21 }, glazing: { small: 45, large: 90 }, extras: [] }, business: { tradingName: 'Elite Kitchens', phone: '01 000 0000', email: 'q@example.com' } });
+  await page.evaluate(() => { location.hash = '#quotes/settings'; });
+  await page.waitForSelector('#q-settings-view form.qs');
+  await page.locator('#q-settings-view form.qs input[data-field^="business."]').first().fill('edited without saving');
+  const asked = []; let answer = 'dismiss'; page.removeAllListeners('dialog'); page.on('dialog', (d) => { asked.push(d.message()); return answer === 'dismiss' ? d.dismiss() : d.accept(); });
+  await page.click('#nav-today'); await sleep(600);
+  assert.equal(asked.length, 1); assert.match(asked[0], /unsaved changes to Quote Settings/);
+  assert.equal(await page.$eval('#app', (e) => e.dataset.view), 'quotes', 'still on the quote settings, with the edit intact'); assert.equal(await page.evaluate(() => location.hash), '#quotes/settings');
+  assert.equal(await page.locator('#q-settings-view form.qs input[data-field^="business."]').first().inputValue(), 'edited without saving');
+  answer = 'accept'; await page.click('#nav-today'); await page.waitForFunction(() => location.hash === '#today'); await page.waitForSelector('#today-list .td-card');
+  assert.equal(asked.length, 2); assert.equal(await page.$eval('#app', (e) => e.dataset.view), 'today');
+  page.removeAllListeners('dialog'); page.on('dialog', (d) => d.accept());
+  ok('going to Today from a screen with unsaved edits asks "Leave without saving?" first: No keeps the edit, Yes goes to Today (it used to discard the edit without asking)');
+
   // ------------------------------------------------------------ 10. phone: full-width cards
   const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push(e.message));

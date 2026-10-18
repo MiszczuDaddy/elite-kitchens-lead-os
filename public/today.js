@@ -36,7 +36,7 @@ window.TODAY = (() => {
     listen(T.unsubs, 'booking', db.collection('conversations').where('consult.needsBooking', '==', true).limit(200), (s) => { T.booking = new Map(s.docs.map((d) => [d.id, { id: d.id, ...d.data() }])); });
     listen(T.unsubs, 'quotes', db.collection('quotes').where('status', '==', 'sent').limit(300), (s) => { T.quotes = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
     listen(T.unsubs, 'reminders', db.collection('reminders').where('status', '==', 'open').limit(300), (s) => { T.reminders = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
-    listen(T.unsubs, 'marks', db.collection('todayMarks').limit(300), (s) => { T.marks = {}; for (const d of s.docs) { const x = d.data(); if (x.kind === 'quote' && x.quoteId) T.marks['quote|' + x.quoteId] = x; } });
+    listen(T.unsubs, 'marks', db.collection('todayMarks').orderBy('at', 'desc').limit(300), (s) => { T.marks = {}; for (const d of s.docs) { const x = d.data(); if (x.kind === 'quote' && x.quoteId) T.marks['quote|' + x.quoteId] = x; } });
     listen(T.unsubs, 'appts', db.collection('appointments').where('start', '>=', TS.fromMillis(now - 8 * 3600e3)).orderBy('start').limit(400), (s) => { T.appts = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
     listen(T.unsubs, 'issues', db.collection('healthIssues').where('status', '==', 'open'), (s) => { T.issues = s.size; });
     listen(T.unsubs, 'leadIssues', db.collection('leadIssues').where('status', '==', 'open').limit(100), (s) => { T.leadIssues = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
@@ -44,7 +44,7 @@ window.TODAY = (() => {
     T.ticker = setInterval(() => { if (M.dateKey(Date.now()) !== T.day) startDay(); schedule(); }, 60000);       // waiting times grow, urgency changes, midnight passes
   }
   function stop() {
-    for (const u of [...T.unsubs, ...T.dayUnsubs]) u(); for (const w of T.docs.values()) w.unsub(); clearInterval(T.ticker); cancelAnimationFrame(T.raf);
+    for (const u of [...T.unsubs, ...T.dayUnsubs]) u(); for (const w of T.docs.values()) w.unsub(); clearInterval(T.ticker); cancelAnimationFrame(T.raf); clearTimeout(T.idleTimer); T.idleTimer = 0; T.raf = 0;
     Object.assign(T, { started: false, unsubs: [], dayUnsubs: [], docs: new Map(), loaded: {}, recent: new Map(), booking: new Map(), created: new Map(), extra: new Map(), contactsToday: [], ledger: {}, quotes: [], reminders: [], doneRem: [], marks: {}, appts: null,
       issues: 0, leadIssues: [], result: null, filter: null, snoozeFor: null, busy: new Set(), error: '' });
     hide(); badges();
@@ -64,7 +64,13 @@ window.TODAY = (() => {
     T.result = M.build({ convs, appts: T.appts, quotes: T.quotes, reminders: [...T.reminders, ...T.doneRem], marks: T.marks, leadIssues: T.leadIssues, contactsToday: T.contactsToday, ledger: T.ledger, now: Date.now() });
     return T.result;
   }
-  function schedule() { if (T.raf) return; T.raf = requestAnimationFrame(() => { T.raf = 0; render(); }); }
+  // Drawn on the next frame while Today is open. While it is NOT open only the menu badge and the Inbox's "Today" button depend on the result, so a burst of changes (a busy inbox) is worked out at most once
+  // every 3 seconds instead of once per change (review of 18 Oct 2026).
+  function schedule() {
+    if (T.active) { if (T.raf) return; T.raf = requestAnimationFrame(() => { T.raf = 0; render(); }); return; }
+    if (T.idleTimer) return;
+    T.idleTimer = setTimeout(() => { T.idleTimer = 0; render(); }, 3000);
+  }
 
   // ---------- navigation ----------
   const handles = (hash) => hash === '#today';

@@ -224,3 +224,28 @@ test('a template message shows its words (or "A template message"), never its co
   assert.equal(M.preview('[template: elite_kitchens_reopen]'), 'A template message');
   assert.equal(M.preview('Hello there'), 'Hello there'); assert.equal(M.preview(null), '');
 });
+
+// ================================================================ review fixes (18 Oct 2026) ==========================
+// A plain, slow reference for the working-hours clock (a new formatter for every question, no shortcuts): the fast version must give exactly the same answers.
+function slowWorkMinutes(from, to) {
+  if (!(to > from)) return 0;
+  const f = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Dublin', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const at = (y, m, d, h) => { let t = Date.UTC(y, m - 1, d, h, 0); for (let i = 0; i < 3; i++) { const p = Object.fromEntries(f().formatToParts(new Date(t)).map((x) => [x.type, x.value])); const shown = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute); t -= shown - Date.UTC(y, m - 1, d, h, 0); } return t; };
+  let total = 0, day = new Date(Date.UTC(...new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin' }).format(new Date(from)).split('-').map((x, i) => (i === 1 ? +x - 1 : +x))));
+  for (let i = 0; i < 130; i++) { const y = day.getUTCFullYear(), m = day.getUTCMonth() + 1, d = day.getUTCDate(), ws = at(y, m, d, 8), we = at(y, m, d, 20); if (ws > to) break; total += Math.max(0, Math.min(to, we) - Math.max(from, ws)); day = new Date(Date.UTC(y, m - 1, d + 1)); }
+  return total / MIN;
+}
+test('REVIEW FIX: the fast working-hours clock gives exactly the same answers as a plain slow one, across nights, weeks and both clock changes', () => {
+  let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const base = [Date.UTC(2026, 2, 20), Date.UTC(2026, 9, 18), Date.UTC(2026, 2, 28), Date.UTC(2026, 9, 24)];                       // around 29 Mar 2026 (clocks forward) and 25 Oct 2026 (back)
+  for (let i = 0; i < 300; i++) {
+    const from = base[i % 4] + Math.floor(rnd() * 12 * DAY), to = from + Math.floor(rnd() * 20 * DAY);
+    assert.ok(Math.abs(M.workMinutes(from, to) - slowWorkMinutes(from, to)) < 1e-9, `from ${new Date(from).toISOString()} to ${new Date(to).toISOString()}: ${M.workMinutes(from, to)} vs ${slowWorkMinutes(from, to)}`);
+  }
+});
+
+test('REVIEW FIX: a big backlog is quick: 500 old waiting chats are worked out in well under a quarter of a second (it took about 3 seconds for 300 before)', () => {
+  const convs = Array.from({ length: 500 }, (_, i) => chat('35387' + String(2000000 + i), { lastInboundAt: ts(NOW - 55 * DAY - i * MIN), lastMessage: 'How much is a kitchen?' }));
+  const t0 = process.hrtime.bigint(), r = build({ convs }), took = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.equal(r.cards.length, 500); assert.ok(took < 250, `took ${took.toFixed(0)} ms`);
+});
