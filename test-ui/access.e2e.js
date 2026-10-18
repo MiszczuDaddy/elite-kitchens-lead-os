@@ -44,7 +44,7 @@ const web = http.createServer((req, res) => {
   await page.clock.install();                                                    // from here the page's clock is ours to move
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   const claims = () => page.evaluate(async () => (await firebase.auth().currentUser.getIdTokenResult()).claims);
   const c1 = await claims();
   assert.equal(c1.staff, true); assert.ok(typeof c1.staffUntil === 'number' && c1.staffUntil > Date.now() + 11 * 3600 * 1000 && c1.staffUntil < Date.now() + 13 * 3600 * 1000, 'the claim must carry an expiry about 12 hours ahead: ' + c1.staffUntil);
@@ -83,7 +83,7 @@ const web = http.createServer((req, res) => {
 
   // and the rules themselves: a claim that has EXPIRED is refused by Firestore, whatever the app does
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await getAuth().setCustomUserClaims(u.uid, { staff: true, staffUntil: Date.now() - 60 * 1000 });          // an expired claim, as a retained session would carry
   await page.evaluate(() => firebase.auth().currentUser.getIdToken(true));
   assert.notEqual(await canRead(), true, 'an expired staff claim must be refused by Firestore');

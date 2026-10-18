@@ -176,6 +176,8 @@ auth.onAuthStateChanged(async (user) => {
   watchList();
   if (window.CONSULT) CONSULT.start();                // Phase 9 R2b: consultation requests waiting for a booking
   if (window.ATTN) ATTN.start();                      // Phase 10: problems, failed alerts and rejected leads ("Needs attention")
+  if (window.TODAY) TODAY.start();                    // Phase 11: the Today tab, and the screen Elite OS opens on
+  if (!location.hash && window.TODAY) history.replaceState(null, '', location.pathname + location.search + '#today');
   routeFromHash();
   if (window.PUSH) PUSH.start();                    // Phase 8: keeps this device's notification address fresh; opens the chat a clicked notification was about
 });
@@ -196,6 +198,7 @@ function stopListening() {
   if (window.REPLY) REPLY.stop();
   if (window.CONSULT) CONSULT.stop();
   if (window.ATTN) ATTN.stop();
+  if (window.TODAY) TODAY.stop();
   if (window.PUSH) PUSH.stop();
   S.contact = null; S.dirty = false;
   S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
@@ -332,6 +335,17 @@ function routeFromHash() {
   // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
   if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
   if (window.PROJ && !PROJ.mayLeave(location.hash)) return;           // Phase 7: leaving a project with unsaved notes asks first
+  // Today (Phase 11): the screen Elite OS opens on. Any other address closes it first. This comes AFTER the two "unsaved changes" questions above: going to Today must ask them too
+  // (review of 18 Oct 2026: it used to close a quote or project with unsaved edits without asking).
+  if (window.TODAY) {
+    if (!/^#c\/\d+$/.test(location.hash)) TODAY.fromToday = false;
+    if (TODAY.handles(location.hash)) {
+      if (S.selected) closeConversation(true);
+      for (const m of [window.PIPE, window.APPT, window.QUOTES, window.PROJ, window.ASSIST]) if (m && m.active) m.hide();
+      TODAY.show(); return;
+    }
+    if (TODAY.active) TODAY.hide();
+  }
   // Assistant (Phase 9): #assistant
   if (window.ASSIST && ASSIST.handles(location.hash)) {
     if (S.selected) closeConversation(true);
@@ -368,7 +382,7 @@ function routeFromHash() {
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = window.ASSIST && ASSIST.active ? 'assistant' : window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.TODAY && TODAY.active ? 'today' : window.ASSIST && ASSIST.active ? 'assistant' : window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
@@ -383,6 +397,7 @@ function closeConversation(fromHash) {
   setView(); renderList();
 }
 $('back').onclick = () => {
+  if (window.TODAY && TODAY.fromToday) { TODAY.fromToday = false; location.hash = '#today'; return; }          // came from Today: go back to it
   if (window.QUOTES && QUOTES.backTo) { const h = QUOTES.backTo; QUOTES.backTo = null; location.hash = h; return; }   // came from a quote: go back to it
   if (window.PROJ && PROJ.backTo) { const h = PROJ.backTo; PROJ.backTo = null; location.hash = h; return; }          // came from a project: go back to it
   if (window.APPT && APPT.origin) { APPT.origin = false; location.hash = '#appointments'; return; }   // came from Appointments: go back to it

@@ -47,7 +47,7 @@ const rgb = (c) => c.match(/\d+(\.\d+)?/g).slice(0, 3).join(',');
     page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
     await page.goto('http://127.0.0.1:5055/');
     await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-    await page.waitForSelector('#app:not([hidden])');
+    await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
     return { ctx, page };
   }
   // what the page looks like: key colours of the main surfaces

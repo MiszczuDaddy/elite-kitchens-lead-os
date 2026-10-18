@@ -53,7 +53,7 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
     const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, ...options }), page = await ctx.newPage();
     page.on('pageerror', (e) => errors.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
     page.on('request', (r) => { if (/\/aiChat$/.test(r.url()) && r.method() === 'POST') chatBodies.push(JSON.parse(r.postData()).data); });
-    await page.goto('http://127.0.0.1:5057/'); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])');
+    await page.goto('http://127.0.0.1:5057/'); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
     return { ctx, page };
   };
   let { ctx, page } = await open();
@@ -199,7 +199,7 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await resetRate(); await ask('project: second change');
   await page.waitForSelector('#as-tray .as-card[data-state=pending]');
   assert.equal((await pendingDocs()).length, 1, 'the proposal exists in Firestore'); const waitingId = (await pendingDocs())[0].id;
-  await page.reload(); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])');
+  await page.reload(); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.waitForSelector('#as-tray .as-card[data-state=pending]'); assert.match(await page.locator('#as-tray').innerText(), /second change/); assert.equal(await page.locator('#as-tray button:has-text("Approve")').isVisible(), true, 'after a refresh');
   await page.click('#as-new'); assert.equal(await page.locator('#as-msgs .as-msg').count(), 0);
   assert.equal(await page.locator('#as-tray button:has-text("Approve")').isVisible(), true, 'after the chat was cleared');
@@ -351,11 +351,11 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
 
   // ------------------------------------------------------------------ 5. the conversation lives in this tab only
   const turns = await page.locator('#as-msgs .as-msg').count();
-  await page.reload(); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])');
+  await page.reload(); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.waitForSelector('#as-msgs .as-msg');
   assert.equal(await page.locator('#as-msgs .as-msg').count(), turns); assert.equal(await page.getAttribute('#app', 'data-view'), 'assistant');
   await page.click('#as-new'); assert.equal(await page.locator('#as-msgs .as-msg').count(), 0); assert.equal(await page.locator('#as-empty').isVisible(), true);
-  await page.reload(); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])');
+  await page.reload(); await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.waitForSelector('#as-empty', { state: 'visible' }); assert.equal(await page.locator('#as-msgs .as-msg').count(), 0);
   ok('the conversation survives a reload of the tab, "New chat" clears it, and the server keeps none of it');
 

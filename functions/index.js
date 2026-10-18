@@ -249,6 +249,9 @@ exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { re
 // ---- Phase 10: the safety net (docs/PHASE10_SAFETY_NET.md). Staff-only callables with no WhatsApp, Google or AI secret (least privilege): "do not contact" and the buttons of
 // "Needs attention". Neither sends anything to a customer. Nothing above is changed except where noted (the WhatsApp outcome, the lead intake's problems, the receptionist's heartbeat).
 exports.setDoNotContact = onCall({}, (req) => h.setDoNotContact(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
+// ---- Phase 11: the Today tab (docs/PHASE11_TODAY.md). Staff-only callables, no secrets: a reminder (add, done, undo, snooze, delete) and a quote follow-up snooze. They send nothing to anyone.
+exports.saveReminder = onCall({}, (req) => h.saveReminder(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
+exports.snoozeQuote = onCall({}, (req) => h.snoozeQuote(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.attentionAction = onCall({}, (req) => h.attentionAction(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 // Who gets the alert emails (comma-separated; empty = no alert emails, the phone alerts and the screen still work). They are sent through the quote mailer (MAIL_* settings), so
 // only while email sending is on. A plain setting, not a secret.

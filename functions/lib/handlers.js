@@ -415,6 +415,10 @@ const aiDismissConsult = aiAction(ai.dismissConsult);            // R2b: "Not ne
 const staffAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps.cfg); return fn({ db: deps.db }, actorOf(auth), data); };
 const setDoNotContact = staffAction(CB.set);
 const attentionAction = staffAction(health.attention);
+// ---- Phase 11: the Today tab's two stored things (docs/PHASE11_TODAY.md): reminders, and quote follow-up snoozes. Staff only; nothing here sends anything. ----
+const todayLib = require('./today');
+const saveReminder = staffAction(todayLib.saveReminder);
+const snoozeQuote = staffAction(todayLib.snoozeQuote);
 // Phase 9.2a: Approve / Reject on a proposal. Staff only; only the person who asked can decide; no model, no secret.
 const aiDecide = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return ai.decideProposal({ db: deps.db }, actorOf(auth), data, { uid: auth.uid }); };
 
@@ -440,7 +444,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

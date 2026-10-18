@@ -87,7 +87,7 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   console.log('QUOTES E2E: real page + real functions + emulators');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
 
   // ---- rail, and the setup banner before Quote Settings exist ----
   assert.equal(await page.locator('#nav-quotes').innerText(), 'Quotes');
@@ -469,7 +469,7 @@ const priceList = () => ({ options: Object.fromEntries(Object.entries(PRICES).ma
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push('mobile: ' + e.message));
   await mp.goto('http://127.0.0.1:5055/');
   await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await mp.waitForSelector('#app:not([hidden])');
+  await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await mp.tap('#to-quotes');
   await mp.waitForSelector('#q-list .qrow');
   assert.equal(await mp.getAttribute('#app', 'data-view'), 'quotes');

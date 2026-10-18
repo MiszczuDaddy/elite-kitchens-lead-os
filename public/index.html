@@ -31,6 +31,10 @@
 <div id="app" class="app" data-view="list" hidden>
   <nav class="rail" aria-label="Main">
     <div class="rail-brand"><div class="rail-logo" role="img" aria-label="Elite Kitchens"></div><div>Elite Kitchens<small>Lead OS</small></div></div>
+    <a class="rail-item" href="#today" id="nav-today" title="Today">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>
+      <span class="nav-label">Today</span><span class="rail-badge" id="today-badge" hidden title="Overdue things on your Today list">0</span>
+    </a>
     <a class="rail-item active" href="#" id="nav-inbox" aria-current="page" title="Inbox">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>
       <span class="nav-label">Inbox</span><span class="rail-badge" id="rail-badge" hidden>0</span><span class="rail-badge consult-badge" id="consult-badge" hidden title="Consultations waiting for you to book">0</span>
@@ -82,6 +86,7 @@
         <button id="signout-m" class="icon-btn only-mobile" aria-label="Sign out" title="Sign out"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v16h5M9 12h12m-5-5 5 5-5 5"/></svg></button>
       </div>
     </header>
+    <a id="to-today" class="today-link" href="#today" aria-label="Open Today"><span class="today-link-t">Today</span><span id="today-link-n" class="today-link-n" hidden>0</span><span class="today-link-s">What needs doing now</span></a>
     <p class="pane-caption">WhatsApp conversations</p>
     <button id="notif-open-m" type="button" class="btn btn-link btn-sm only-mobile install-m" hidden aria-label="Notifications">Notifications</button>
     <a id="to-projects" class="btn btn-link btn-sm only-mobile install-m" href="#projects" aria-label="Open projects">Projects</a>
@@ -103,6 +108,33 @@
     <div id="list" class="list" role="list"></div>
     <div id="list-empty" class="empty" hidden></div>
   </aside>
+
+  <main id="today" class="today-pane" aria-label="Today">
+    <header class="quotes-head">
+      <button id="today-back" class="icon-btn only-mobile" aria-label="Back to inbox" title="Inbox"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+      <div class="quotes-titles"><h1>Today</h1><div id="today-sub" class="q-subtitle"></div></div>
+      <button id="today-add" type="button" class="btn btn-primary btn-sm">Add reminder</button>
+    </header>
+    <div id="today-scroll" class="quotes-scroll td-scroll">
+      <div id="today-toast" class="toast q-toast" role="status" aria-live="polite" hidden></div>
+      <div id="today-health" class="td-health" role="status"></div>
+      <div id="today-counts" class="td-counts" role="group" aria-label="Show only one kind of task"></div>
+      <div id="today-visits" class="td-visits" hidden></div>
+      <section class="td-sec" aria-labelledby="today-todo-h">
+        <h2 id="today-todo-h" class="td-h">To do <span id="today-todo-n" class="td-n"></span></h2>
+        <div id="today-list" class="td-list"></div>
+        <p id="today-empty" class="td-empty" hidden></p>
+      </section>
+      <section class="td-sec" aria-labelledby="today-leads-h">
+        <h2 id="today-leads-h" class="td-h">New leads today <span id="today-leads-n" class="td-n"></span></h2>
+        <div id="today-lead-chips" class="td-chips"></div>
+        <div id="today-leads" class="td-list"></div>
+        <p id="today-leads-empty" class="td-empty" hidden>No new leads yet today.</p>
+      </section>
+      <details id="today-later" class="td-fold" hidden><summary>Coming up <span id="today-later-n" class="td-n"></span></summary><div id="today-later-list" class="td-list"></div></details>
+      <details id="today-done" class="td-fold" hidden><summary>Done today <span id="today-done-n" class="td-n"></span></summary><div id="today-done-list" class="td-list"></div></details>
+    </div>
+  </main>
 
   <main id="pipeline" class="pipeline-pane" aria-label="Pipeline">
     <header class="pipe-head">
@@ -344,6 +376,7 @@
       <div class="d-label">Contact</div>
       <p id="dnc-state" class="hint dnc-state">Messages to this customer are allowed.</p>
       <button id="dnc-btn" type="button" class="btn btn-ghost btn-sm">Do not contact…</button>
+      <button id="remind-btn" type="button" class="btn btn-ghost btn-sm">Remind me…</button>
     </div>
     <div class="danger">
       <div class="d-label">Data controls</div>
@@ -471,6 +504,23 @@
     <div class="dlg-actions">
       <button type="button" id="c-cancel" class="btn btn-ghost">Cancel</button>
       <button type="submit" id="c-go" class="btn btn-primary">Add customer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="rem-dlg" class="dlg" aria-labelledby="rem-title">
+  <form id="rem-form" autocomplete="off">
+    <h2 id="rem-title">Add reminder</h2>
+    <p id="rem-who" class="hint" hidden></p>
+    <label id="rem-title-label">What to remember<input id="rem-text" maxlength="120" placeholder="e.g. Ring Mr Doyle about the quote" required></label>
+    <div class="appt-grid">
+      <label>Day<input id="rem-date" type="date" required></label>
+      <label>Time <span class="label-note">(optional)</span><input id="rem-time" type="time"></label>
+    </div>
+    <div id="rem-err" class="dlg-err" role="alert"></div>
+    <div class="dlg-actions">
+      <button type="button" id="rem-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="rem-go" class="btn btn-primary">Add reminder</button>
     </div>
   </form>
 </dialog>
@@ -751,5 +801,7 @@
 <script src="/consult-model.js"></script>
 <script src="/consult.js"></script>
 <script src="/attention.js"></script>
+<script src="/today-model.js"></script>
+<script src="/today.js"></script>
 </body>
 </html>

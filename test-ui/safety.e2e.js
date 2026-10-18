@@ -61,7 +61,7 @@ meta.keepAliveTimeout = 0;
   console.log('E2E: Needs attention and Do not contact: real page + real functions + emulators + mocked Meta');
   await page.goto('http://127.0.0.1:5058/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
 
   // ------------------------------------------------------------ 1. the bar
   await page.waitForSelector('#attn-bar:not([hidden])');
@@ -147,7 +147,7 @@ meta.keepAliveTimeout = 0;
   await db.doc('conversations/' + A).update({ doNotContact: { on: true, by: 'customer', source: 'customer', at: T(now), note: 'The customer asked us to stop messaging them.' } });
   const mp = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage();
   mp.on('pageerror', (e) => errors.push(e.message));
-  await mp.goto('http://127.0.0.1:5058/'); await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await mp.waitForSelector('#app:not([hidden])');
+  await mp.goto('http://127.0.0.1:5058/'); await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await mp.waitForSelector('#attn-bar:not([hidden])');
   assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   await mp.screenshot({ path: path.join(SHOTS, 'safety-mobile-bar.png') });

@@ -76,7 +76,7 @@ function savePages(buf, prefix) {
   console.log('QUOTE SEND E2E: real page + real functions + emulators');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.evaluate(() => { window.open = (u) => { window.__opened(String(u)); return null; }; });            // email drafts and PDF links are recorded, not opened
   await page.evaluate(async (s) => {
     const f = firebase.app().functions('europe-west1');
@@ -293,7 +293,7 @@ function savePages(buf, prefix) {
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push('mobile: ' + e.message));
   await mp.goto('http://127.0.0.1:5055/');
   await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await mp.waitForSelector('#app:not([hidden])');
+  await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   const qd = await mp.evaluate(async (phone) => (await firebase.app().functions('europe-west1').httpsCallable('createQuote')({ phone, requestId: 'e2e-' + Date.now() + '-phone' })).data.id, ph.anna);
   await mp.evaluate((id) => { location.hash = '#quotes/' + id; }, qd);
   await mp.waitForSelector('#qv-preview');

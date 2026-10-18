@@ -98,7 +98,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   console.log('QUOTE RECOVERY E2E: real page + real functions + emulators + mocked Meta and Gmail');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.evaluate(() => { window.open = () => null; });
   await page.evaluate(async (s) => { const f = firebase.app().functions('europe-west1'); await f.httpsCallable('saveQuoteSettings')(s); await f.httpsCallable('setQuoteNumbering')({ next: 34 }); }, SETTINGS);
 
@@ -207,7 +207,7 @@ const SETTINGS = { vatRate: 13.5, validityDays: 30,
   // Staff A types in a quote (not saved yet); staff B (a second window, the same office) saves a different change. A's screen used to take over B's
   // new revision as its own and then save A's old inputs on top of B's work. Now A is told, keeps what A typed, and must DECIDE.
   const dan = await makeQuote(ph.dan);
-  const page2 = await ctx.newPage(); await page2.goto('http://127.0.0.1:5055/'); await page2.waitForSelector('#app:not([hidden])');
+  const page2 = await ctx.newPage(); await page2.goto('http://127.0.0.1:5055/'); await page2.waitForSelector('#app:not([hidden])'); await page2.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   const doorsOf = async () => (await db.doc(`quotes/${dan}/versions/1`).get()).data().answers.doors;
   const asB = {
     doors: (v) => page2.evaluate(async ([id, doors]) => { const f = firebase.app().functions('europe-west1'), d = firebase.firestore();

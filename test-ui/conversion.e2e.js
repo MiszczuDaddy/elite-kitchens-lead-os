@@ -71,7 +71,7 @@ const ph = { flip: '353850000016', newLead: '353850000011', quoted1: '3538500000
   console.log('CONVERSION METRICS E2E: customers created 60 days ago, moved today');
   await page.goto('http://127.0.0.1:5055/');
   await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
-  await page.waitForSelector('#app:not([hidden])');
+  await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.click('#nav-pipeline');
   await page.waitForSelector('.lane .prow');
   assert.equal(await page.getAttribute('#ov-period button[data-period="month"]', 'aria-pressed'), 'true');     // the default period

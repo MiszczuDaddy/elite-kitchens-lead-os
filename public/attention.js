@@ -80,5 +80,8 @@ window.ATTN = (() => {
     if (h == null) { $('attn-set-msg').textContent = 'Enter a whole number of hours from 0 (off) to 720.'; return; }
     act({ action: 'settings', leadSilenceHours: h }, () => { $('attn-set-msg').textContent = h ? `Saved: you are warned after ${h} hours without a lead.` : 'Saved: the warning is off.'; });
   });
-  return Object.assign(A, { start, stop, open, render });
+  // For the Today tab (Phase 11), which shows the same rejected leads with the same two buttons, and says how many system problems there are.
+  const dismissLead = (l) => { if (window.confirm('Dismiss this lead? Their name, email and number are deleted from Elite OS.')) return call('attentionAction')({ action: 'lead', leadId: l.leadId, outcome: 'dismissed' }); return null; };
+  const problemCount = () => state().problems.length;
+  return Object.assign(A, { start, stop, open, render, addLead, dismissLead, problemCount });
 })();

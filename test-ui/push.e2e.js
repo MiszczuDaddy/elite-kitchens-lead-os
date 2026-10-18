@@ -47,7 +47,7 @@ const A = '353860000031';
   const open = async (ctx, signedIn = true) => {
     const page = await ctx.newPage(); global.__page = page; page.on('pageerror', (e) => errors.push(e.message));
     page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
-    await page.goto(ORIGIN + '/'); if (signedIn) { await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); }
+    await page.goto(ORIGIN + '/'); if (signedIn) { await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); }
     return page;
   };
   // Firebase Cloud Messaging cannot be reached from a test: the page gets a fixed address instead. Everything else (permission, registration, the server) is real.
@@ -111,14 +111,14 @@ const A = '353860000031';
   ok('with Elite OS closed the real service worker wakes on a push, shows the generic alert (no name, number or text), and reports the arrival to the real receipt function (device clock and server clock)');
 
   // ------------------------------------------------------------------ 6. clicking the alert: the right chat opens (closed app: found from the opaque id; open app: told by the worker)
-  await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])');
-  await page.goto(ORIGIN + '/?n=' + id2); await page.waitForSelector('#app:not([hidden])');
+  await page.evaluate((t) => firebase.auth().signInWithCustomToken(t), token); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
+  await page.goto(ORIGIN + '/?n=' + id2); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await page.waitForFunction((p) => location.hash === '#c/' + p, A); assert.doesNotMatch(page.url(), /[?&]n=/); await page.waitForSelector('#thread:not([hidden])');
   assert.match(await page.textContent('#thread'), /Anna Apple/);
   await page.evaluate(() => { location.hash = ''; }); await page.waitForFunction(() => location.hash === '');
   await page.evaluate((n) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'ek-open', n } })), id2); await page.waitForFunction((p) => location.hash === '#c/' + p, A);
   await page.evaluate(() => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'ek-open', n: 'not-an-id' } })));
-  await page.goto(ORIGIN + '/?n=' + 't_' + 'f'.repeat(24)); await page.waitForSelector('#app:not([hidden])'); assert.doesNotMatch(page.url(), /[?&]n=/);
+  await page.goto(ORIGIN + '/?n=' + 't_' + 'f'.repeat(24)); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); assert.doesNotMatch(page.url(), /[?&]n=/);
   ok('a clicked notification opens the right chat (a closed app finds it from the opaque id after sign-in; an open one is told by the worker); an unknown or bad id changes nothing');
 
   // ------------------------------------------------------------------ 6b. the lockout of 2026-10-12: with notifications ALREADY allowed, a fresh page load must still sign in
@@ -129,7 +129,7 @@ const A = '353860000031';
   // the exact step that failed for the owner: with nothing set up in the page, the messaging library looks for its default service worker file. It must be found (what happens after that needs the internet).
   const lookup = await fresh.evaluate(() => Promise.race([firebase.messaging().getToken().then(() => 'ok', (e) => String((e && (e.code || e.message)) || e)), new Promise((r) => setTimeout(() => r('still working'), 12000))]));
   assert.doesNotMatch(lookup, /failed-service-worker-registration|unable to register the default service worker|404/, 'the default look-up file must exist: ' + lookup);
-  await fresh.close(); page = await ctx.newPage(); await page.goto(ORIGIN + '/'); await page.waitForSelector('#app:not([hidden])'); global.__page = page;
+  await fresh.close(); page = await ctx.newPage(); await page.goto(ORIGIN + '/'); await page.waitForSelector('#app:not([hidden])'); await page.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); global.__page = page;
   ok('with notifications already allowed, a fresh page load still signs in (the real messaging library does not break the first function call)');
 
   // ------------------------------------------------------------------ 7. turning it off
