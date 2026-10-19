@@ -144,7 +144,7 @@ async function buildSheet(db, phone, nowMs) {
   const fmt = (t) => new Intl.DateTimeFormat('en-IE', { timeZone: TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(t));
   const byTimeThenArrival = (a, b) => ms(a.createdAt) - ms(b.createdAt) || (a.seq || 0) - (b.seq || 0);                  // two messages in the same second: the one that arrived first comes first
   const messages = msgs.docs.map((d) => d.data()).reverse().sort(byTimeThenArrival).map((m) => ({ direction: m.direction, type: m.type, body: m.body, createdMs: ms(m.createdAt), at: fmt(ms(m.createdAt)) }));
-  const upcoming = appts.docs.map((d) => d.data()).filter((a) => a.status !== 'cancelled' && ms(a.start) >= nowMs).sort((a, b) => ms(a.start) - ms(b.start))[0] || null;
+  const upcoming = appts.docs.map((d) => d.data()).filter((a) => a.status !== 'cancelled' && a.type !== 'installation' && ms(a.start) >= nowMs).sort((a, b) => ms(a.start) - ms(b.start))[0] || null;
   const window = WS.windowStatus(cv, nowMs);
   return { phone, known: knownFacts(ct, cv), lead: leadAnswers(ct), messages, nextAppointment: upcoming ? S.when(ms(upcoming.start)) : null, stage: cv.inboxStatus || 'inbox',
     window: { state: window.state, openUntil: window.openUntil || null }, consult: cv.consult && typeof cv.consult === 'object' ? { stage: String(cv.consult.stage || ''), asks: Number.isInteger(cv.consult.asks) ? cv.consult.asks : 0, offered: cv.consult.offered === true } : null, now: S.when(nowMs), customerName: ct.name || cv.name || null, lastInboundMs: ms(cv.lastInboundAt) };

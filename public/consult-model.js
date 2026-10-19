@@ -10,7 +10,7 @@
   // Phone numbers of customers who have a scheduled appointment that has not ended yet.
   function bookedPhones(appts, nowMs) {
     const out = new Set();
-    for (const a of appts || []) if (a && a.status === 'scheduled' && a.phone && (ms(a.end) == null || ms(a.end) >= nowMs)) out.add(String(a.phone));
+    for (const a of appts || []) if (a && a.status === 'scheduled' && a.type !== 'installation' && a.phone && (ms(a.end) == null || ms(a.end) >= nowMs)) out.add(String(a.phone));      // an installation date is not a consultation or a visit to book
     return out;
   }
   // The date the booking form should open on: the first day they named, but never in the past (then the form uses its own default).
