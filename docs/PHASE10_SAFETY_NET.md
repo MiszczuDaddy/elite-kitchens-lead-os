@@ -1,5 +1,7 @@
 # Phase 10: Safety net
 
+> **Removed on 19 Oct 2026 (the owner's decision):** the "No Meta leads have arrived for a while" warning, its hours setting and its alerts. Ads are often paused on purpose, so it only produced noise. Everything below about that warning is gone; the 10-minute check, the other problems and all other alerts are unchanged. The check erases what the warning left in the database (its open problem and the hours setting) the first time it runs after the release.
+
 **Branch:** `phase-10-safety-net` (from `main` at `ead6662`).
 **Status:** built and tested on the branch. Not merged, not pushed, not deployed. Every Google Cloud setting below waits for the owner's approval.
 
@@ -25,14 +27,13 @@ A bar at the top of the Inbox appears **only when something needs you**, for exa
 
 | Part | What it shows | What you can do |
 |---|---|---|
-| **Problems** | A system fault, in plain words, with what to do about it. Examples: <br>• "WhatsApp is refusing Elite OS's access key" <br>• "No Meta leads have arrived for 7 days" <br>• "The receptionist is switched on but cannot answer" | **Mark as fixed**. If the fault is still there, the next check (within 10 minutes) puts it back. |
+| **Problems** | A system fault, in plain words, with what to do about it. Examples: <br>• "WhatsApp is refusing Elite OS's access key" <br>• "The receptionist is switched on but cannot answer" | **Mark as fixed**. If the fault is still there, the next check (within 10 minutes) puts it back. |
 | **Alerts that did not reach your phone** | Chats the receptionist handed to you whose phone alert failed 3 times. | **Open chat**, or **Seen** (removes it from the list). |
 | **Meta leads that could not be added** | A lead whose phone number was missing or wrong. It shows the name, email, the number exactly as typed, the form name, the date and the reason. | **Add as customer** (opens the usual form, already filled in; fix the number and save), or **Dismiss** (the lead's details are deleted). |
 
 The same list also shows:
 - when the backups were last tested (see section 4);
 - when the system check last ran;
-- the **lead warning setting**: "Warn me if no Meta lead arrives for [168] hours (7 days)". Set it to 0 to switch the warning off, for example while ads are paused.
 
 You can open the list at any time from **Notifications → System health and backups**, even when nothing is wrong.
 
@@ -72,7 +73,6 @@ A new system check runs every **10 minutes** (`healthSweep`). Some faults are sp
 
 | Problem | How it is spotted | Clears by itself when |
 |---|---|---|
-| **No Meta lead** for the number of hours you set (168 = 7 days by default; "Mark as fixed" keeps it quiet for another full window, then it reminds once) | The time of the newest lead received. This catches Make stopping, the form breaking, or ads stopping. | A lead arrives |
 | **Make is sending the wrong key** | Leads arrive with a key that does not match. Visits with no key at all, such as internet scanners, are ignored. | You mark it fixed (and the next lead gets in) |
 | **More than 60 leads in an hour** (the safety brake was triggered) | The lead intake | You mark it fixed |
 | **A lead crashed** while being processed | The lead intake | You mark it fixed |
@@ -220,7 +220,6 @@ Step-by-step recovery for each case is in `docs/BACKUPS.md`.
 4. **Check after the release:**
    - open Needs attention; it should say "All clear";
    - mark a test customer as do-not-contact and try to send; it should be refused;
-   - set the lead warning to 1 hour on a quiet evening to see one alert arrive, then set it back.
 
 **Undo:**
 - **Screen:** Hosting rollback.

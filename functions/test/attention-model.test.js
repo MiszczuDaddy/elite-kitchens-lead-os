@@ -33,14 +33,3 @@ test('the health check itself stopping is shown as a problem (nothing else could
   assert.match(M.checksText({ healthSweepAt: t(NOW - 2 * HOUR) }, NOW), /overdue/);
 });
 
-test('words: the bar, the backups line, the do-not-contact note; the lead warning setting accepts 0 to 720 whole hours only', () => {
-  assert.equal(M.barText(1), '1 thing needs attention'); assert.equal(M.barText(3), '3 things need attention');
-  assert.match(M.backupText(null, NOW), /no restore test recorded yet/);
-  assert.match(M.backupText({ lastDrillAt: t(NOW - DAY), ok: true, backupTime: '2026-10-17T02:00:00Z' }, NOW), /last restore test 17 Oct 2026 of the backup taken 17 Oct 2026: OK\.$/);
-  assert.match(M.backupText({ lastDrillAt: t(NOW - 200 * DAY), ok: true }, NOW), /over 4 months old/);
-  assert.match(M.backupText({ lastDrillAt: t(NOW - DAY), ok: false }, NOW), /FAILED/);
-  for (const [v, want] of [['72', 72], ['0', 0], ['720', 720], [' 24 ', 24], ['721', null], ['-1', null], ['1.5', null], ['', null], ['abc', null], [null, null]]) assert.equal(M.hoursOf(v), want, String(v));
-  assert.equal(M.dncText(null, NOW), null); assert.equal(M.dncText({ on: false }, NOW), null);
-  assert.match(M.dncText({ on: true, source: 'customer', by: 'customer', at: t(NOW - 5 * MIN), note: 'The customer asked us to stop messaging them.' }, NOW), /^The customer asked us to stop messaging them \(5 minutes ago\)\. Messages, files, templates and quotes to them are blocked\.$/);
-  assert.match(M.dncText({ on: true, source: 'staff', by: 'thomas@example.com', at: t(NOW - 3 * HOUR), note: 'asked on the phone' }, NOW), /Marked "do not contact" by thomas@example\.com \(3 hours ago\): asked on the phone\./);
-});

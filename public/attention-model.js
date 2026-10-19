@@ -53,12 +53,6 @@
     return b.ok ? `Backups: last restore test ${when}${from}: OK.${old}` : `Backups: the restore test on ${when}${from} FAILED. Do not rely on the backups; report it.`;
   }
 
-  // The "warn me if no lead for N hours" setting: a whole number from 0 (off) to 720.
-  function hoursOf(text) {
-    const s = String(text == null ? '' : text).trim();
-    if (!/^\d{1,3}$/.test(s)) return null;
-    const n = Number(s); return n >= 0 && n <= 720 ? n : null;
-  }
 
   // "Do not contact" in words, for the chat and the customer's details.
   function dncText(d, now) {
@@ -67,5 +61,5 @@
     return `${who} (${ago(d.at, now)})${d.note && d.source !== 'customer' ? ': ' + d.note : ''}. Messages, files, templates and quotes to them are blocked.`;
   }
 
-  return { build, barText, checksText, backupText, hoursOf, dncText, ago, checkProblem, CHECK_STALE_MS };
+  return { build, barText, checksText, backupText, dncText, ago, checkProblem, CHECK_STALE_MS };
 });

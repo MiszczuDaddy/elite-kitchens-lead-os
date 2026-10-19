@@ -76,7 +76,7 @@ meta.keepAliveTimeout = 0;
   assert.match(txt, /Alerts that did not reach your phone Brendan Burke/); assert.match(txt, /Why: handover: price question/);
   assert.match(txt, /Meta leads that could not be added Ciaran Coyle/); assert.match(txt, /Number as typed: 087 12 · Email: ciaran@example\.com · Area: Lucan/);
   assert.match(txt, /Elite OS checked itself 3 minutes ago/); assert.match(txt, /last restore test .* OK/);
-  assert.equal(await page.inputValue('#attn-hours'), '168');
+  assert.equal(await page.locator('#attn-hours').count(), 0, 'no hours box: the "no Meta leads" warning was removed'); assert.doesNotMatch(txt, /Warn me if no Meta lead|No Meta leads have arrived/);
   await page.screenshot({ path: path.join(SHOTS, 'safety-attention.png') });
   ok('the list shows the problem with what to do, the failed alert with the reason, the rejected lead with its details, the last check and the last restore test');
 
@@ -88,15 +88,6 @@ meta.keepAliveTimeout = 0;
   await until(async () => !(await db.doc('conversations/' + B).get()).data().receptionist.notifyFailed, 'the alert cleared');
   await page.waitForSelector('#attn-alerts', { state: 'hidden' });
   ok('"Mark as fixed" closes the problem and "Seen" clears the failed alert, through the server; the list updates by itself');
-
-  await page.fill('#attn-hours', '24'); await page.click('#attn-save');
-  await until(async () => ((await db.doc('healthSettings/current').get()).data() || {}).leadSilenceHours === 24, 'the setting saved');
-  const setMsg = async () => (await page.innerText('#attn-set-msg')) + ' | err: ' + (await page.innerText('#attn-err'));
-  await until(async () => /after 24 hours/.test(await setMsg()), 'the saved message (now: ' + (await setMsg()) + ')');
-  await page.fill('#attn-hours', '9999'); await page.click('#attn-save'); await sleep(800);
-  assert.equal(await page.evaluate(() => document.getElementById('attn-hours').validity.rangeOverflow), true, 'the browser itself refuses more than 720');
-  assert.equal((await db.doc('healthSettings/current').get()).data().leadSilenceHours, 24, 'nothing was saved');
-  ok('the lead warning can be changed (24 hours saved, with a plain confirmation); a value above 720 is refused and nothing is saved');
 
   // ------------------------------------------------------------ 4. a rejected lead becomes a customer
   await page.locator('#attn-leads-list button', { hasText: 'Add as customer' }).click();
@@ -143,7 +134,7 @@ meta.keepAliveTimeout = 0;
   await page.evaluate(() => document.getElementById('notif-health').click()); await page.waitForSelector('#attn-dlg[open]');
   assert.match(await page.innerText('#attn-summary'), /All clear/); await page.click('#attn-close');
   ok('Notifications > System health and backups opens the same list, which says "All clear"');
-  await db.doc('healthIssues/lead_silence').set({ kind: 'lead_silence', title: 'No Meta leads have arrived for a while', help: 'Check Make.', status: 'open', occurrence: 1, openedAt: T(now), lastAt: T(now), count: 1 });
+  await db.doc('healthIssues/receptionist_stopped').set({ kind: 'receptionist_stopped', title: 'The automatic receptionist has stopped', help: 'Check Assistant > Settings.', status: 'open', occurrence: 1, openedAt: T(now), lastAt: T(now), count: 1 });
   await db.doc('conversations/' + A).update({ doNotContact: { on: true, by: 'customer', source: 'customer', at: T(now), note: 'The customer asked us to stop messaging them.' } });
   const mp = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage();
   mp.on('pageerror', (e) => errors.push(e.message));
