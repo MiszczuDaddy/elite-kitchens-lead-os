@@ -137,10 +137,10 @@
     return out;
   }
 
-  // ---- a visit the customer has not been told about (Phase 12) ----
-  // The message a visit needs is decided by BookingRules (the same file the server uses). Not shown for the first 2 hours after a booking or a move (you are still dealing with it, and the button is right there),
-  // unless the visit is within 48 hours. Red when the visit is within 24 hours. A customer who said stop is not listed.
-  const NOTICE_GRACE_MS = 2 * HOUR, NOTICE_SOON_MS = 48 * HOUR;
+  // ---- a visit reminder that did not go (Phase 12) ----
+  // The evening-before reminder is automatic and is not a task. A card appears ONLY when it did not go: WhatsApp gave no answer (look at the chat and say whether it arrived) or WhatsApp refused it (tell the customer yourself).
+  // It leaves by itself when the reminder is recorded as sent, and for a visit that has passed. Red when the visit is within 24 hours. A customer who said stop is not listed.
+  const DAYMS = DAY;
   const FMT_VISIT = new Intl.DateTimeFormat('en-IE', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   function visitWhen(start, now) {
     const key = dateKey(start), today = dateKey(now), clock = FMT_VISIT.formatToParts(new Date(start)).filter((p) => ['hour', 'minute'].includes(p.type)).map((p) => p.value).join(':');
@@ -149,22 +149,18 @@
     const p = Object.fromEntries(FMT_VISIT.formatToParts(new Date(start)).map((x) => [x.type, x.value]));
     return p.weekday + ' ' + p.day + ' ' + p.month + ' at ' + clock;
   }
-  const NOTICE_TEXT = { confirmation: 'Confirmation not sent', change: 'The customer was told a different time', cancellation: 'The customer was not told it was cancelled' };
   function noticeCards(appts, convById, now) {
     const out = [];
     if (!BR) return out;
     for (const a of appts || []) {
-      // A message WhatsApp gave no answer to ("unknown") is listed until a person looks at the chat and says whether it arrived (it is never sent again by itself).
-      const issue = a && a.noticeIssue && a.noticeIssue.state === 'unknown' && BR.NOTIFIED_TYPES.includes(a.type) && a.status !== 'done' ? a.noticeIssue : null;
-      const next = issue ? 'resolve' : BR.nextAction(a, now), start = ms(a && a.start);
-      if (!next || (issue && !(start > now))) continue;                         // a visit that has passed needs no message
-      const conv = convById.get(String(a.phone)) || {}, since = ms(issue ? issue.at : a.updatedAt) || start;
+      const d = BR.describe(a, now), start = ms(a && a.start);
+      if (d.state !== 'issue' && d.state !== 'failed') continue;
+      const conv = convById.get(String(a.phone)) || {}, issue = a.noticeIssue || {}, since = ms(issue.at) || start;
       if (dnc(conv)) continue;
-      if (!issue && next !== 'cancellation' && now - since < NOTICE_GRACE_MS && start - now > NOTICE_SOON_MS) continue;
-      if (!issue && next === 'cancellation' && now - since < NOTICE_GRACE_MS) continue;
-      const soon = start - now < DAY, urgency = soon ? 2 : start - now < 3 * DAY ? 1 : 0, what = (a.type === 'site_visit' ? 'site visit ' : 'consultation ') + visitWhen(start, now);
-      out.push({ key: 'n|' + a.id, kind: 'notice', apptId: a.id, phone: String(a.phone || ''), name: a.customerName || conv.name || '', next, start, appt: a, visit: visitWhen(start, now),
-        reasons: [{ type: 'notice', text: issue ? 'Message not confirmed (WhatsApp gave no answer): ' + what : NOTICE_TEXT[next] + ': ' + what, since, urgency }], urgency, since, primary: 'notice' });
+      const what = (a.type === 'site_visit' ? 'site visit ' : 'consultation ') + visitWhen(start, now), urgency = start - now < DAYMS ? 2 : 1;
+      const text = d.state === 'issue' ? 'Reminder not confirmed (WhatsApp gave no answer): ' + what : 'Reminder could not be sent: ' + what + (issue.text ? ' (' + issue.text + ')' : '');
+      out.push({ key: 'n|' + a.id, kind: 'notice', apptId: a.id, phone: String(a.phone || ''), name: a.customerName || conv.name || '', next: d.state === 'issue' ? 'resolve' : 'failed', start, appt: a, visit: visitWhen(start, now),
+        reasons: [{ type: 'notice', text, since, urgency }], urgency, since, primary: 'notice' });
     }
     return out;
   }
@@ -263,7 +259,7 @@
     return { items, counts, total: items.length };
   }
 
-  const LABEL = { reply: 'Replies', handover: 'Handovers', booking: 'Book a visit', notice: 'Tell customer', quote: 'Quotes', reminder: 'Reminders', leadfix: 'Leads to fix' };
+  const LABEL = { reply: 'Replies', handover: 'Handovers', booking: 'Book a visit', notice: 'Reminder check', quote: 'Quotes', reminder: 'Reminders', leadfix: 'Leads to fix' };
   const TYPES = Object.keys(LABEL);
   const STATUS_LABEL = { failed: 'Contact failed', needs: 'Needs you', ai: 'AI handling', contacted: 'Contacted' };
   const filterCards = (cards, type) => (type ? cards.filter((c) => c.reasons.some((r) => r.type === type)) : cards);

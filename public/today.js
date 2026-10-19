@@ -90,7 +90,7 @@ window.TODAY = (() => {
     const n = $('today-link-n'); n.hidden = !all; n.textContent = all; n.classList.toggle('red', red > 0);
     $('to-today').classList.toggle('urgent', red > 0);
   }
-  const UTYPE = { reply: 'Reply', handover: 'Handover', booking: 'Book a visit', notice: 'Tell customer', quote: 'Quote', reminder: 'Reminder', leadfix: 'Lead to fix' };
+  const UTYPE = { reply: 'Reply', handover: 'Handover', booking: 'Book a visit', notice: 'Reminder check', quote: 'Quote', reminder: 'Reminder', leadfix: 'Lead to fix' };
   const btn = (text, cls, fn, busyKey) => { const b = el('button', 'btn btn-sm ' + cls, text); b.type = 'button'; b.disabled = !!(busyKey && T.busy.has(busyKey)); b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; };
   function dueText(c) {
     const today = M.dateKey(Date.now()), when = c.dueTime ? ' at ' + c.dueTime : '';
@@ -140,10 +140,7 @@ window.TODAY = (() => {
       if (c.next === 'resolve') {
         const done = (text) => toast(text), say = (outcome) => () => window.APPT && APPT.resolveNotice(c.appt, outcome, done);
         row.append(btn('Open chat', 'btn-primary', open, null), btn('It arrived', 'btn-ghost', say('arrived'), 'n' + c.apptId), btn('It did not arrive', 'btn-ghost', say('notArrived'), 'n' + c.apptId));
-      } else {
-        const label = { confirmation: 'Send confirmation…', change: 'Send the new time…', cancellation: 'Send cancellation message…' }[c.next];
-        const b = btn(label, 'btn-primary', () => window.APPT && APPT.openNotice(c.appt, c.next, (text) => toast(text)), null); b.disabled = !window.APPT; row.append(b, btn('Open chat', 'btn-ghost', open, null));
-      }
+      } else row.append(btn('Open chat', 'btn-primary', open, null));              // WhatsApp refused the reminder: message the customer yourself
     } else if (c.kind === 'quote') {
       row.append(btn('Open quote', 'btn-primary', open, null), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
         btn('Snooze', 'btn-ghost', () => { T.snoozeFor = T.snoozeFor === c.key ? null : c.key; schedule(); }, null));

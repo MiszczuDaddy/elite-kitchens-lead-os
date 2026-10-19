@@ -149,21 +149,18 @@ const reopenDeps = () => ({
 });
 exports.reopenConversation = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 60 }, (req) => h.reopenConversation(req.auth, req.data, reopenDeps()));
 
-// ---- Phase 12: WhatsApp messages about a visit (docs/PHASE12_BOOKINGS_PLAN.md): confirmation, change and cancellation by a button, and the evening-before reminder. Needs only the WhatsApp access token.
-// The three templates are plain settings (a blank name means "no template": only the 24-hour window can be used). BOOKING_REMINDERS is the kill switch of the automatic reminder (off until the owner switches it on).
-const BOOKING_CONFIRM_TEMPLATE = defineString('BOOKING_CONFIRM_TEMPLATE', { default: 'elite_kitchens_consultation_confirmed' });
-const BOOKING_CHANGE_TEMPLATE = defineString('BOOKING_CHANGE_TEMPLATE', { default: 'elite_kitchens_consultation_changed' });
+// ---- Phase 12: the evening-before visit reminder (docs/PHASE12_BOOKINGS.md). The ONLY message Elite OS sends about a visit; it goes by itself and is OFF until the owner switches it on. Needs only the WhatsApp access token.
+// The template is a plain setting (a blank name means "no template": only the 24-hour window can be used). BOOKING_REMINDERS is the kill switch (off by default).
 const BOOKING_REMINDER_TEMPLATE = defineString('BOOKING_REMINDER_TEMPLATE', { default: 'elite_kitchens_consultation_reminder' });
 const BOOKING_TEMPLATE_LANG = defineString('BOOKING_TEMPLATE_LANG', { default: 'en' });
 const BOOKING_REMINDERS = defineString('BOOKING_REMINDERS', { default: 'off' });
 const bookingDeps = () => {
-  const lang = BOOKING_TEMPLATE_LANG.value().trim() || 'en', t = (v) => { const name = v.value().trim(); return name ? { name, lang } : null; };
-  return { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value(), booking: { confirmation: t(BOOKING_CONFIRM_TEMPLATE), change: t(BOOKING_CHANGE_TEMPLATE), reminder: t(BOOKING_REMINDER_TEMPLATE), remindersOn: BOOKING_REMINDERS.value().trim().toLowerCase() === 'on' } },
+  const name = BOOKING_REMINDER_TEMPLATE.value().trim(), lang = BOOKING_TEMPLATE_LANG.value().trim() || 'en';
+  return { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value(), booking: { reminder: name ? { name, lang } : null, remindersOn: BOOKING_REMINDERS.value().trim().toLowerCase() === 'on' } },
     wa: createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome }) };
 };
-exports.sendBookingNotice = onCall({ secrets: [ACCESS_TOKEN], timeoutSeconds: 60 }, (req) => h.sendBookingNotice(req.auth, req.data, bookingDeps()));
 exports.resolveBookingNotice = onCall({}, (req) => h.resolveBookingNotice(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));      // sends nothing: no WhatsApp secret
-exports.bookingReminderSweep =onSchedule({ schedule: 'every 15 minutes', timeZone: 'Europe/Dublin', secrets: [ACCESS_TOKEN], timeoutSeconds: 300, retryCount: 0 }, async () => {
+exports.bookingReminderSweep = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Europe/Dublin', secrets: [ACCESS_TOKEN], timeoutSeconds: 300, retryCount: 0 }, async () => {
   const r = await require('./lib/bookingNotices').reminderSweep(bookingDeps());
   console.log(JSON.stringify({ level: 'info', msg: 'booking reminder sweep', ...r }));
 });

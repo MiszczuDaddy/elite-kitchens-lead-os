@@ -1,5 +1,7 @@
 # Phase 12: Bookings customers can rely on (PLAN, for the owner's approval; nothing is built)
 
+> **CHANGE OF PLAN (19 Oct 2026, the owner's decision): superseded in part.** The confirmation, new-time and cancellation messages and their buttons were **removed**. What remains is the **automatic evening-before reminder** (one template, `elite_kitchens_consultation_reminder`, **off until the owner approves**) and **installation dates in the calendar**. The reminder now goes to **every** customer with a visit tomorrow (not only confirmed ones). Sections 1 to 3 below describe the original plan; the build record is `docs/PHASE12_BOOKINGS.md`.
+
 Written 18 Oct 2026 after reading the real code (`appointments.js`, `reopen.js`, `windowState.js`, `outbound.js`, `calendarSync.js`, `projects.js`, `docs/WHATSAPP_APPOINTMENT_TEMPLATE.md`).
 
 ## 1. What you get

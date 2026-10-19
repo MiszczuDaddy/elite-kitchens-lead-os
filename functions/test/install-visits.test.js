@@ -17,7 +17,7 @@ const db = getFirestore();
 const actor = { kind: 'staff', id: 'thomas@example.com' };
 const irish = (y, m, d, hh, mi) => A.dublinToMs(y, m, d, hh, mi);
 const NOW = irish(2026, 10, 19, 10, 0);
-const PH = '353852220001';
+const PH = '353852220001', DAY_MS = 24 * 3600e3;
 let seq = 0;
 const rid = () => 'req-' + (++seq) + '-abcdefgh';
 const ts = (ms) => Timestamp.fromMillis(ms);
@@ -43,7 +43,7 @@ test('SETTING THE DATE creates ONE installation visit, 08:00 to 16:00 Irish time
   assert.deepEqual([a.type, a.status, a.phone, a.customerName, a.version, a.projectId, a.durationMin], ['installation', 'scheduled', PH, 'Orla Install', 1, id, 480]);
   assert.deepEqual([clock(a.start), clock(a.end)], ['2026-11-20 08:00', '2026-11-20 16:00']);
   assert.equal(a.sync.google.state, 'pending'); assert.equal(a.sync.google.eventId.length > 10, true);
-  assert.equal(R.nextAction(a, NOW), null, 'no message is ever offered for an installation'); assert.equal(R.reminderDue({ ...a, customerNotice: { kind: 'confirmation', toldStart: a.start.toMillis(), at: 0 } }, NOW), false);
+  assert.equal(R.reminderDue({ ...a, createdAt: Timestamp.fromMillis(NOW - 10 * DAY_MS), updatedAt: Timestamp.fromMillis(NOW - 10 * DAY_MS) }, NOW), false, 'an installation is never reminded or messaged');
   assert.equal((await proj(id)).installDate, '2026-11-20');
 });
 

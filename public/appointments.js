@@ -11,8 +11,7 @@ window.APPT = (() => {
     customer: null, custList: [], custLoaded: false, unsubCust: null, showPast: false,
     dlg: null,                 // { mode: 'create' | 'update', phone, appt, requestId }
     cancelling: null,
-    notice: null,              // Phase 12: { a, kind, saving } the "tell the customer" dialog
-    view: null,               // 'calendar' (Month) | 'week' | 'day' | 'list' (remembered for the session)
+    view: null,                // 'calendar' (Month) | 'week' | 'day' | 'list' (remembered for the session)
     month: null,               // { y, m } shown in the calendar (Dublin)
     selDay: null, expanded: null, pickerDate: null, detailId: null,
     calError: '', calLimited: false, drag: null,
@@ -466,7 +465,7 @@ window.APPT = (() => {
     fillLeadFacts(lead); body.append(lead);
     if (a.notes) { const notes = el('div', 'agenda-notes'); notes.append(el('strong', null, 'Internal notes'), el('p', null, a.notes)); body.append(notes); }
     const sync = el('div', 'arow-meta'); sync.append(syncBadge(a), ...syncActions(a)); body.append(sync);
-    const told = noticeLine(a, () => { closeDialog($('appt-detail-dlg')); A.detailId = null; }); if (told) body.append(told);
+    const told = noticeLine(a); if (told) body.append(told);
     const actions = el('div', 'agenda-actions');
     const act = (label, fn, cls = '') => {
       const b = button(label, 'btn btn-ghost btn-sm ' + cls, () => { closeDialog($('appt-detail-dlg')); A.detailId = null; fn(); });
@@ -612,7 +611,6 @@ window.APPT = (() => {
     const node = el('div', 'move-menu appt-menu'); node.setAttribute('role', 'menu'); node.setAttribute('aria-label', 'Appointment');
     const item = (label, fn) => { const b = el('button', null, label); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.onclick = () => { closeMenu(true); fn(); }; node.append(b); };
     if (a.status !== 'cancelled') { item('Edit appointment…', () => openReschedule(a, 'a-type')); item('Reschedule…', () => openReschedule(a)); item('Cancel appointment…', () => openCancel(a)); }
-    const next = noticeKind(a); if (next && !blockedContact(a.phone)) item(NOTICE[next].menu, () => openNotice(a, next));
     if (syncOf(a).state === 'failed') item('Retry Google Calendar', () => retry(a));
     item('Open customer', () => openCustomer(a));
     document.body.append(node);
@@ -787,7 +785,6 @@ window.APPT = (() => {
         closeDialog($('appt-dlg')); A.dlg = null;
         if (A.active && A.view !== 'list') selectDay(dublinDate(r.start), r.id);
         report(bookedMessage(r, d.phone), d.phone);
-        offerNotice({ id: r.id, phone: d.phone, type: fields.type, status: 'scheduled', version: r.version, customerName: (convOf(d.phone) || {}).name || null, start: stamp(r.start), end: stamp(r.end) });
       } else {
         const r = (await call('updateAppointment')({ id: d.appt.id, ...fields, expectedVersion: d.appt.version })).data;
         if (A.dlg !== d) return;
@@ -795,7 +792,6 @@ window.APPT = (() => {
         if (A.active && A.view !== 'list') selectDay(dublinDate(r.start), d.appt.id);
         const changedTime = r.start !== ts(d.appt.start) || r.end !== ts(d.appt.end);
         report(r.unchanged ? 'No changes to save.' : [changedTime ? 'Rescheduled for ' + whenPhrase(r.start) + '.' : 'Appointment updated.', calendarSentence(r.calendar, 'updated')].join(' '), d.phone);
-        if (!r.unchanged && changedTime) offerNotice({ ...d.appt, type: fields.type, status: 'scheduled', version: r.version, start: stamp(r.start), end: stamp(r.end) });
       }
     } catch (err) { if (A.dlg === d) { $('a-err').textContent = errText(err); $('a-go').disabled = false; $('a-cancel').disabled = false; d.saving = false; } }
   });
@@ -817,75 +813,27 @@ window.APPT = (() => {
       const r = (await call('cancelAppointment')({ id: a.id, reason: $('ac-reason').value, expectedVersion: a.version })).data;
       closeDialog($('appt-cancel-dlg')); A.cancelling = null;
       report(['Appointment cancelled.', calendarSentence(r.calendar, 'removed')].join(' '), a.phone);
-      if (!r.alreadyCancelled) offerNotice({ ...a, status: 'cancelled', version: r.version });
     } catch (err) { $('ac-err').textContent = errText(err); $('ac-go').disabled = false; }
   });
   $('ac-keep').onclick = () => { closeDialog($('appt-cancel-dlg')); A.cancelling = null; };
 
-  // ---------- messages about a visit (Phase 12, docs/PHASE12_BOOKINGS_PLAN.md) ----------
-  // Which message a visit needs is decided by BookingRules (the same file the server uses). After you book, move or cancel a visit the customer was told about, a short question offers to tell them.
-  // Nothing is ever sent without pressing the button; "Not now" leaves the button on the visit for later. The server sends each message once.
-  const NOTICE = {
-    confirmation: { title: 'Send confirmation', go: 'Send confirmation', menu: 'Send confirmation…', line: 'Send confirmation' },
-    change: { title: 'Tell the customer the new time', go: 'Send the new time', menu: 'Send the new time…', line: 'Send the new time' },
-    cancellation: { title: 'Tell the customer it was cancelled', go: 'Send cancellation message', menu: 'Send cancellation message…', line: 'Send cancellation message' },
-  };
-  const stamp = (t) => ({ toMillis: () => t });
-  const noticeKind = (a) => (window.BookingRules ? BookingRules.nextAction(a, Date.now()) : null);
-  const blockedContact = (phone) => { const c = convOf(phone); return !!(c && c.doNotContact && c.doNotContact.on === true); };
-  // One line on a visit: what the customer knows, and the button when a message is due. Nothing for visits that never message the customer.
-  function noticeLine(a, before) {
+  // ---------- the evening reminder (Phase 12, docs/PHASE12_BOOKINGS.md) ----------
+  // The reminder goes by itself the evening before a visit: nobody presses anything. BookingRules (the same file the server uses) says what happened. One line on a visit: "Reminder sent", or why it did not go.
+  // When WhatsApp gave no answer, look at the chat, then say whether it arrived. Nothing is sent from here.
+  function noticeLine(a) {
     if (!window.BookingRules) return null;
     const d = BookingRules.describe(a, Date.now()); if (d.state === 'none' || !d.text) return null;
     const row = el('div', 'appt-notice appt-notice-' + d.state); row.append(el('span', 'appt-notice-text', d.text + '.'));
-    if (d.state === 'issue') {                                  // WhatsApp gave no answer: look at the chat, then say what happened. Nothing is sent from here.
-      for (const [label, outcome] of [['It arrived', 'arrived'], ['It did not arrive', 'notArrived']]) { const b = button(label, 'linkbtn appt-notice-go', () => resolveNotice(a, outcome)); b.dataset.outcome = outcome; row.append(b); }
-      return row;
-    }
-    if (d.next) {
-      if (blockedContact(a.phone)) row.append(el('span', 'appt-notice-block', ' This customer asked not to be contacted.'));
-      else { const b = button(NOTICE[d.next].line, 'linkbtn appt-notice-go', () => { if (before) before(); openNotice(a, d.next); }); b.dataset.kind = d.next; row.append(b); }
-    }
+    if (d.state === 'issue') for (const [label, outcome] of [['It arrived', 'arrived'], ['It did not arrive', 'notArrived']]) { const b = button(label, 'linkbtn appt-notice-go', () => resolveNotice(a, outcome)); b.dataset.outcome = outcome; row.append(b); }
     return row;
   }
-  // After a booking, move or cancel: a button next to the "Booked for ..." message (and on the visit itself). It never opens a window by itself, so nothing gets in the way of the next thing you do.
-  function offerNotice(a) {
-    const kind = noticeKind(a); if (!kind || blockedContact(a.phone)) return;
-    const mk = () => { const b = button(NOTICE[kind].line + '…', 'linkbtn appt-notice-go', () => openNotice(a, kind)); b.dataset.kind = kind; return b; };
-    if (A.active) { const t = $('appts-toast'); if (!t.hidden) { t.append(' ', mk()); clearTimeout(note.h); note.h = setTimeout(() => { t.hidden = true; }, 20000); } }
-    if (A.customer === a.phone) $('d-appts-msg').append(' ', mk());
-  }
-  function openNotice(a, kind, done) {
-    A.notice = { a, kind, saving: false, done };
-    const c = convOf(a.phone), start = ts(a.start), what = kindOf(a).toLowerCase(), who = nameOf(a), open = !!(c && window.WindowState && WindowState.isOpen(c, Date.now()));
-    $('an-title').textContent = NOTICE[kind].title;
-    $('an-text').textContent = kind === 'cancellation' ? `Tell ${who} on WhatsApp that their ${what} on ${whenPhrase(start)} was cancelled?`
-      : kind === 'change' ? `Tell ${who} on WhatsApp that their ${what} is now ${whenPhrase(start)}?` : `Send ${who} a WhatsApp confirmation of their ${what} on ${whenPhrase(start)}?`;
-    $('an-how').textContent = open ? 'It will go as a normal WhatsApp message.' : 'They last wrote more than 24 hours ago, so it will go as the approved WhatsApp message template.';
-    $('an-err').textContent = ''; $('an-go').textContent = NOTICE[kind].go; $('an-go').disabled = false;
-    showDialog($('appt-notice-dlg')); $('an-go').focus();
-  }
-  $('appt-notice-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const n = A.notice; if (!n || n.saving) return;
-    n.saving = true; $('an-err').textContent = ''; $('an-go').disabled = true;
-    try {
-      const r = (await call('sendBookingNotice')({ id: n.a.id, kind: n.kind, expectedVersion: n.a.version })).data;
-      closeDialog($('appt-notice-dlg')); A.notice = null;
-      const said = r.existing ? 'The customer was already sent this message.' : 'Message sent to ' + nameOf(n.a) + (r.mode === 'template' ? ' (as the approved WhatsApp template).' : '.');
-      if (n.done) n.done(said); else report(said, n.a.phone);
-    } catch (err) { if (A.notice === n) { $('an-err').textContent = errText(err); $('an-go').disabled = false; n.saving = false; } }
-  });
   async function resolveNotice(a, outcome, done) {
-    const issue = a.noticeIssue || {};
     try {
-      await call('resolveBookingNotice')({ id: a.id, kind: issue.kind, outcome });
-      const said = outcome === 'arrived' ? 'Recorded: the customer was told.' : 'Recorded: it did not arrive. You can send it again.';
+      await call('resolveBookingNotice')({ id: a.id, outcome });
+      const said = outcome === 'arrived' ? 'Recorded: the customer was reminded.' : 'Recorded: it did not arrive. The reminder is tried again by itself.';
       if (done) done(said); else report(said, a.phone);
     } catch (err) { const said = 'Could not record that: ' + errText(err); if (done) done(said); else report(said, a.phone, 'err'); }
   }
-  $('an-later').onclick = () => { closeDialog($('appt-notice-dlg')); A.notice = null; };
-  $('appt-notice-dlg').addEventListener('cancel', (e) => { if (A.notice && A.notice.saving) e.preventDefault(); else A.notice = null; });
 
   // ---------- Retry now ----------
   async function retry(a, btn) {
@@ -931,5 +879,5 @@ window.APPT = (() => {
   $('nav-appointments').addEventListener('click', (e) => { if (A.active) e.preventDefault(); });   // already here
   $('d-appt-new').onclick = () => { if (A.customer) openBook(A.customer); };
 
-  return Object.assign(A, { show, hide, stop, watchCustomer, openBook, openNotice, noticeKind, resolveNotice });
+  return Object.assign(A, { show, hide, stop, watchCustomer, openBook, resolveNotice });
 })();

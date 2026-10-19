@@ -250,43 +250,25 @@ test('REVIEW FIX: a big backlog is quick: 500 old waiting chats are worked out i
   assert.equal(r.cards.length, 500); assert.ok(took < 250, `took ${took.toFixed(0)} ms`);
 });
 
-// ================================================================ Phase 12: a visit the customer was not told about ================================
-test('NOTICE: a visit nobody told shows "Confirmation not sent"; not for the first 2 hours unless the visit is within 48 hours; red within 24 hours', () => {
-  const visit = (id, startIn, over = {}) => ({ id, phone: P1, customerName: 'Aine Visitor', type: 'consultation', status: 'scheduled', start: ts(NOW + startIn), updatedAt: ts(NOW - 3 * HOUR), ...over });
-  const near = build({ convs: [chat(P1)], appts: [visit('a_n', 20 * HOUR)] });
-  assert.equal(near.counts.notice, 1); const c = near.cards.find((x) => x.kind === 'notice');
-  assert.deepEqual([c.next, c.urgency, c.phone, c.apptId], ['confirmation', 2, P1, 'a_n']);
-  assert.match(c.reasons[0].text, /^Confirmation not sent: consultation (today|tomorrow) at \d\d:\d\d$/);
-  assert.equal(build({ convs: [chat(P1)], appts: [visit('a_f', 5 * DAY, { updatedAt: ts(NOW - HOUR) })] }).counts.notice, 0, 'booked an hour ago for next week: you are still on it');
-  assert.equal(build({ convs: [chat(P1)], appts: [visit('a_f', 5 * DAY)] }).counts.notice, 1, 'still not told 3 hours later');
-  assert.equal(build({ convs: [chat(P1)], appts: [visit('a_s', 30 * HOUR, { updatedAt: ts(NOW - 10 * 60e3) })] }).counts.notice, 1, 'within 48 hours: at once');
-  assert.deepEqual([20 * HOUR, 40 * HOUR, 5 * DAY].map((d) => build({ appts: [visit('a_u', d)] }).cards[0].urgency), [2, 1, 0]);
+// ================================================================ Phase 12: a visit reminder that did not go ================================
+test('REMINDER CHECK: nothing is listed for a reminder that went or is still to come; a card appears only when WhatsApp gave no answer or refused it', () => {
+  const base = { id: 'a_u', phone: P1, customerName: 'Aine Visitor', type: 'consultation', status: 'scheduled', start: ts(NOW + 20 * HOUR), updatedAt: ts(NOW - 2 * DAY), createdAt: ts(NOW - 2 * DAY) };
+  assert.equal(build({ convs: [chat(P1)], appts: [base] }).counts.notice, 0, 'a visit with nothing wrong is not a task');
+  assert.equal(build({ convs: [chat(P1)], appts: [{ ...base, visitReminder: { for: NOW + 20 * HOUR, at: NOW - HOUR } }] }).counts.notice, 0, 'reminded: nothing to do');
+  const unknown = build({ convs: [chat(P1)], appts: [{ ...base, noticeIssue: { kind: 'reminder', state: 'unknown', text: 'x', at: NOW - 5 * 60e3 } }] });
+  const c = unknown.cards.find((x) => x.kind === 'notice');
+  assert.deepEqual([unknown.counts.notice, c.next, c.urgency, c.apptId], [1, 'resolve', 2, 'a_u']); assert.match(c.reasons[0].text, /^Reminder not confirmed \(WhatsApp gave no answer\): consultation (today|tomorrow) at \d\d:\d\d$/);
+  const failed = build({ convs: [chat(P1)], appts: [{ ...base, start: ts(NOW + 40 * HOUR), noticeIssue: { kind: 'reminder', state: 'failed', text: 'WhatsApp does not know this template', at: NOW } }] }).cards.find((x) => x.kind === 'notice');
+  assert.deepEqual([failed.next, failed.urgency], ['failed', 1]); assert.match(failed.reasons[0].text, /^Reminder could not be sent: .* \(WhatsApp does not know this template\)$/);
+  assert.equal(M.filterCards(unknown.cards, 'notice').length, 1);
 });
-test('NOTICE: nothing when told, for other kinds of visit, past visits, a customer who said stop; a moved visit and a cancelled one are listed', () => {
-  const base = { id: 'a_x', phone: P1, customerName: 'Aine Visitor', type: 'consultation', status: 'scheduled', start: ts(NOW + 20 * HOUR), updatedAt: ts(NOW - 5 * HOUR) };
-  const told = (extra = {}) => ({ kind: 'confirmation', toldStart: NOW + 20 * HOUR, at: NOW - 5 * HOUR, reminderFor: null, ...extra });
+test('REMINDER CHECK: a visit that has passed, was cancelled, is not customer-facing, or belongs to a customer who said stop is not listed; resolving removes the card', () => {
+  const base = { id: 'a_x', phone: P1, customerName: 'Aine Visitor', type: 'consultation', status: 'scheduled', start: ts(NOW + 20 * HOUR), noticeIssue: { kind: 'reminder', state: 'unknown', text: 'x', at: NOW } };
   const n = (a, convs = [chat(P1)]) => build({ convs, appts: [a] }).counts.notice;
-  assert.equal(n({ ...base, customerNotice: told() }), 0, 'told');
+  assert.equal(n(base), 1);
+  assert.equal(n({ ...base, start: ts(NOW - HOUR) }), 0, 'the visit has passed'); assert.equal(n({ ...base, status: 'cancelled' }), 0);
   assert.equal(n({ ...base, type: 'other' }), 0); assert.equal(n({ ...base, type: 'installation' }), 0);
-  assert.equal(n({ ...base, start: ts(NOW - HOUR) }), 0, 'in the past');
   assert.equal(n(base, [chat(P1, { doNotContact: { on: true } })]), 0, 'do not contact');
-  const moved = build({ convs: [chat(P1)], appts: [{ ...base, customerNotice: told({ toldStart: NOW + 10 * HOUR }) }] }).cards.find((x) => x.kind === 'notice');
-  assert.deepEqual([moved.next, moved.reasons[0].text.startsWith('The customer was told a different time')], ['change', true]);
-  const cancelled = build({ convs: [chat(P1)], appts: [{ ...base, status: 'cancelled', customerNotice: told() }] }).cards.find((x) => x.kind === 'notice');
-  assert.equal(cancelled.next, 'cancellation');
-  assert.equal(n({ ...base, status: 'cancelled', customerNotice: told(), updatedAt: ts(NOW - 30 * 60e3) }), 0, 'cancelled just now: give it 2 hours');
-  assert.equal(n({ ...base, status: 'cancelled' }), 0, 'cancelled and the customer never knew');
-  const r = build({ convs: [chat(P1)], appts: [base] }); assert.equal(M.filterCards(r.cards, 'notice').length, 1);
+  assert.equal(n({ ...base, noticeIssue: undefined }), 0, 'resolved: the note is gone and so is the card');
   assert.equal(build({ appts: [base] }).cards.length, 1, 'a visit is listed even when the chat of the customer is not among the recent ones');
-});
-test('NOTICE: a message WhatsApp gave no answer to is listed (with "It arrived" / "It did not arrive") until a person says what happened; a past visit or a customer who said stop is not', () => {
-  const base = { id: 'a_u', phone: P1, customerName: 'Aine Visitor', type: 'consultation', status: 'scheduled', start: ts(NOW + 30 * HOUR), updatedAt: ts(NOW - 10 * 60e3),
-    customerNotice: { kind: 'confirmation', toldStart: NOW + 30 * HOUR, at: NOW - 6 * HOUR, reminderFor: null }, noticeIssue: { kind: 'reminder', state: 'unknown', text: 'x', at: NOW - 5 * 60e3 } };
-  const r = build({ convs: [chat(P1)], appts: [base] }); const c = r.cards.find((x) => x.kind === 'notice');
-  assert.deepEqual([r.counts.notice, c.next, c.urgency], [1, 'resolve', 1]); assert.match(c.reasons[0].text, /^Message not confirmed \(WhatsApp gave no answer\): consultation /);
-  assert.equal(build({ convs: [chat(P1)], appts: [{ ...base, noticeIssue: { ...base.noticeIssue, state: 'failed' } }] }).counts.notice, 0, 'a refusal is not "unconfirmed": the normal button is on the visit');
-  assert.equal(build({ convs: [chat(P1)], appts: [{ ...base, start: ts(NOW - HOUR) }] }).counts.notice, 0, 'the visit has passed');
-  assert.equal(build({ convs: [chat(P1, { doNotContact: { on: true } })], appts: [base] }).counts.notice, 0);
-  assert.equal(build({ convs: [chat(P1)], appts: [{ ...base, type: 'other' }] }).counts.notice, 0);
-  assert.equal(build({ convs: [chat(P1)], appts: [{ ...base, noticeIssue: undefined }] }).counts.notice, 0, 'resolved: the note is gone and so is the card');
 });

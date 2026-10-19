@@ -57,7 +57,7 @@ const web = http.createServer((req, res) => {
   await db.doc('reminders/r_' + '01'.repeat(12)).set({ title: 'Ring Mr Doyle', phone: null, customerName: null, dueDate: yesterday, dueTime: null, status: 'open', createdAt: T(now - 3 * DAY), createdBy: 'staff@test.dev' });
   await db.doc('reminders/r_' + '02'.repeat(12)).set({ title: 'Order samples', phone: null, customerName: null, dueDate: later, dueTime: null, status: 'open', createdAt: T(now - DAY), createdBy: 'staff@test.dev' });
   await db.doc('leadIssues/LEADBAD001').set({ leadId: 'LEADBAD001', reason: 'invalid_phone', reasonText: 'The phone number in the form is missing or is not a valid number.', name: 'Ciaran Coyle', email: 'ciaran@example.com', phoneTyped: '087 12', location: 'Lucan', formName: 'Kitchen form', receivedAt: T(now - 90e3), attempts: 1, status: 'open', alert: { state: 'sent' } });
-  await db.doc('appointments/a_' + 'aa'.repeat(12)).set({ phone: AOIFE, customerName: 'Aoife Allen', type: 'consultation', status: 'scheduled', start: T(now + DAY), end: T(now + DAY + 3600e3), createdAt: T(now), customerNotice: { kind: 'confirmation', toldStart: now + DAY, at: now - 6 * 3600e3, reminderFor: null } });
+  await db.doc('appointments/a_' + 'aa'.repeat(12)).set({ phone: AOIFE, customerName: 'Aoife Allen', type: 'consultation', status: 'scheduled', start: T(now + DAY), end: T(now + DAY + 3600e3), createdAt: T(now) });
 
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/pw-browsers/chromium' });
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
@@ -136,7 +136,7 @@ const web = http.createServer((req, res) => {
   await db.doc('conversations/' + BRENDAN).update({ 'receptionist.humanAt': T(Date.now()) });
   await until(async () => !(await keys()).includes('c|' + BRENDAN), 'the hand-over goes once a person has written after it');
   const ts2 = Date.now() + 2 * DAY;
-  await db.doc('appointments/a_' + 'bb'.repeat(12)).set({ phone: CIARA, customerName: 'Ciara Walsh', type: 'consultation', status: 'scheduled', start: T(ts2), end: T(Date.now() + 2 * DAY + 3600e3), createdAt: T(Date.now()), customerNotice: { kind: 'confirmation', toldStart: ts2, at: Date.now() - 6 * 3600e3, reminderFor: null } });
+  await db.doc('appointments/a_' + 'bb'.repeat(12)).set({ phone: CIARA, customerName: 'Ciara Walsh', type: 'consultation', status: 'scheduled', start: T(ts2), end: T(Date.now() + 2 * DAY + 3600e3), createdAt: T(Date.now()) });
   await until(async () => !(await keys()).includes('c|' + CIARA), 'the visit card goes once the visit is booked');
   await db.doc('quotes/q_' + 'ab'.repeat(12)).update({ status: 'accepted' });
   await until(async () => !(await keys()).includes('quote|q_' + 'ab'.repeat(12)), 'the quote card goes once it is accepted');
@@ -191,25 +191,29 @@ const web = http.createServer((req, res) => {
   ok('going to Today from a screen with unsaved edits asks "Leave without saving?" first: No keeps the edit, Yes goes to Today (it used to discard the edit without asking)');
 
 
-  // ------------------------------------------------------------ 9c. Phase 12: a visit the customer was not told about
-  const EVA = '353871110109';
+  // ------------------------------------------------------------ 9c. Phase 12: a visit reminder WhatsApp gave no answer to
+  // The evening reminder is automatic and is not a task, so a normal visit adds nothing to Today. A card appears only when a reminder did not go.
+  const EVA = '353871110109', evaStart = Date.now() + 20 * 3600e3, evaId = 'a_' + 'ee'.repeat(12);
+  assert.equal(await page.locator('#today-list .td-card[data-key^="n|"]').count(), 0, 'visits with nothing wrong are not tasks');
   await conv(EVA, 'Eva Egan', { lastMessage: 'See you then', lastMessageDirection: 'out', lastInboundAt: T(Date.now() - 30 * 60e3) }); await contact(EVA, 'Eva Egan', { location: 'Malahide' });
-  const evaVisit = Date.now() + 20 * 3600e3;
-  await db.doc('appointments/a_' + 'ee'.repeat(12)).set({ phone: EVA, customerName: 'Eva Egan', type: 'consultation', status: 'scheduled', version: 1, start: T(evaVisit), end: T(evaVisit + 3600e3), createdAt: T(Date.now()), updatedAt: T(Date.now()) });
-  await until(async () => (await page.$$('#today-list .td-card[data-key^="n|"]')).length === 1, 'the visit with no confirmation is listed');
+  await db.doc('appointments/' + evaId).set({ phone: EVA, customerName: 'Eva Egan', type: 'consultation', status: 'scheduled', version: 1, start: T(evaStart), end: T(evaStart + 3600e3), createdAt: T(Date.now() - 3 * DAY), updatedAt: T(Date.now() - 3 * DAY) });
+  await sleep(800); assert.equal(await page.locator('#today-list .td-card[data-key^="n|"]').count(), 0, 'a visit with no problem is still not listed');
+  const key = require('crypto').createHash('sha256').update(`${evaId}|reminder|${evaStart}`).digest('hex').slice(0, 24);
+  await db.doc('bookingNotices/n_' + key).set({ phone: EVA, appointmentId: evaId, kind: 'reminder', key: evaId + '|reminder|' + evaStart, state: 'unknown', mode: 'text', template: null, startMs: evaStart, by: 'auto', claimedAt: T(Date.now() - 3600e3), sentAt: null, wamid: null, error: 'Not confirmed', errorCode: null, tries: 1 });
+  await db.doc('appointments/' + evaId).update({ noticeIssue: { kind: 'reminder', state: 'unknown', text: 'Not confirmed', at: Date.now() - 3600e3 } });
+  await until(async () => (await page.$$('#today-list .td-card[data-key^="n|"]')).length === 1, 'the unconfirmed reminder is listed');
   const tcard = page.locator('#today-list .td-card[data-key^="n|"]');
-  assert.match(await tcard.innerText(), /Eva Egan[\s\S]*Tell customer[\s\S]*Confirmation not sent: consultation (today|tomorrow) at \d\d:\d\d/);
-  assert.equal(await page.locator('#today-counts .td-count', { hasText: 'Tell customer' }).locator('.td-count-n').innerText(), '1');
+  assert.match(await tcard.innerText(), /Eva Egan[\s\S]*Reminder check[\s\S]*Reminder not confirmed \(WhatsApp gave no answer\): consultation (today|tomorrow) at \d\d:\d\d/);
+  assert.equal(await page.locator('#today-counts .td-count', { hasText: 'Reminder check' }).locator('.td-count-n').innerText(), '1');
   assert.equal(await tcard.getAttribute('class').then((c) => /u2/.test(c)), true, 'red: the visit is within 24 hours');
-  assert.equal(graph.length, 0, 'nothing is sent by itself');
-  await tcard.locator('.td-actions .btn', { hasText: 'Send confirmation' }).click();
-  await page.waitForSelector('#appt-notice-dlg[open]');
-  assert.match(await page.textContent('#an-text'), /Send Eva Egan a WhatsApp confirmation of their consultation/); assert.equal(await page.textContent('#an-how'), 'It will go as a normal WhatsApp message.');
-  await page.click('#an-go');
-  await until(async () => /Message sent to Eva Egan\./.test(await page.textContent('#today-toast')), 'a plain confirmation of what happened');
-  await until(async () => (await page.$$('#today-list .td-card[data-key^="n|"]')).length === 0, 'the card leaves by itself once the customer was told');
-  assert.equal(graph.length, 1); assert.equal(graph[0].to, EVA); assert.match(graph[0].text.body, /^Hi Eva, your consultation with Elite Kitchens is confirmed for .* We will call out to you in Swords./);
-  ok('a visit nobody told is a red "Tell customer" card; the button sends one confirmation; the card leaves by itself (and nothing was sent before the button)');
+  assert.deepEqual(await tcard.locator('.td-actions .btn').allInnerTexts(), ['Open chat', 'It arrived', 'It did not arrive']);
+  assert.equal(graph.length, 0, 'nothing is sent by Today');
+  await tcard.locator('.td-actions .btn', { hasText: 'It arrived' }).click();
+  await until(async () => /Recorded: the customer was reminded\./.test(await page.textContent('#today-toast')), 'a plain confirmation of what happened');
+  await until(async () => (await page.$$('#today-list .td-card[data-key^="n|"]')).length === 0, 'the card leaves by itself once it is recorded');
+  const eva = (await db.doc('appointments/' + evaId).get()).data(); assert.equal(eva.noticeIssue, undefined); assert.equal(eva.visitReminder.for, evaStart);
+  assert.equal(graph.length, 0, 'saying it arrived sends nothing');
+  ok('Today lists a reminder only when it did not go (red "Reminder check", It arrived / It did not arrive); the card leaves by itself; nothing is sent from here');
 
   // ------------------------------------------------------------ 10. phone: full-width cards
   const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
