@@ -55,6 +55,7 @@ const sentBodies = () => calls.map((c) => (c.type === 'text' ? c.text.body : '[t
 
 beforeEach(async () => {
   await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' });
+  for (let i = 0; i < 100; i++) { const left = await Promise.all(['appointments', 'conversations', 'contacts', 'bookingNotices', 'projects'].map((c) => db.collection(c).limit(1).get())); if (left.every((x) => x.empty)) break; await new Promise((r) => setTimeout(r, 30)); }      // waitEmpty: the clear has finished before the next test writes
   calls.length = 0; mode = 'ok'; slow = null;
 });
 
@@ -132,6 +133,9 @@ test('a claim that died while "sending" is treated as not confirmed after 3 minu
   await rejects(send(id, 'confirmation', NOW + MIN), 'failed-precondition', /already being sent/);
   await rejects(send(id, 'confirmation', NOW + 4 * MIN), 'failed-precondition', /Not confirmed/);
   assert.equal(calls.length, 0);
+  const issue = (await appt(id)).noticeIssue; assert.deepEqual([issue.kind, issue.state], ['confirmation', 'unknown'], 'the visit says it is unconfirmed, so a person can resolve it');
+  assert.equal((await resolve(id, 'confirmation', 'notArrived', NOW + 5 * MIN)).state, 'failed');
+  assert.equal((await send(id, 'confirmation', NOW + 6 * MIN)).ok, true); assert.equal(calls.length, 1);
 });
 
 test('no template and the window closed: refused with a clear reason, nothing sent, no claim left behind', async () => {

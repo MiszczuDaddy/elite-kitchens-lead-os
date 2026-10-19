@@ -24,6 +24,7 @@ const ts = (ms) => Timestamp.fromMillis(ms);
 
 beforeEach(async () => {
   await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' });
+  for (let i = 0; i < 100; i++) { const left = await Promise.all(['appointments', 'conversations', 'contacts', 'bookingNotices', 'projects'].map((c) => db.collection(c).limit(1).get())); if (left.every((x) => x.empty)) break; await new Promise((r) => setTimeout(r, 30)); }      // waitEmpty: the clear has finished before the next test writes
   await db.doc('contacts/' + PH).set({ phone: PH, name: 'Orla Install', createdAt: Timestamp.now() });
   await db.doc('conversations/' + PH).set({ phone: PH, name: 'Orla Install', createdAt: Timestamp.now(), updatedAt: Timestamp.now(), lastMessage: 'Hi' });
 });

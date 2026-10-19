@@ -75,7 +75,7 @@ async function sendNotice({ db, wa, cfg }, { id, kind, actor, auto = false, expe
   if (!R.KINDS.includes(kind)) throw new HttpsError('invalid-argument', 'Unknown message.');
   const apptRef = A.isAppointmentId(id) ? db.collection('appointments').doc(id) : null;
   if (!apptRef) throw new HttpsError('invalid-argument', 'Missing appointment.');
-  // 1. Claim, in one transaction.
+  // 1. Claim, in one transaction. A claim that is stuck (the call died after claiming) or unconfirmed refuses with "not confirmed": the visit is then marked so a person can look at the chat and say what happened.
   const claim = await db.runTransaction(async (tx) => {
     const aSnap = await tx.get(apptRef);
     if (!aSnap.exists) throw new HttpsError('not-found', 'Appointment not found.');
@@ -106,6 +106,9 @@ async function sendNotice({ db, wa, cfg }, { id, kind, actor, auto = false, expe
       claimedAt: ts(nowMs), sentAt: null, wamid: null, error: null, errorCode: null, tries: ((nSnap.exists && nSnap.data().tries) || 0) + 1 };
     if (nSnap.exists) tx.update(nRef, base); else tx.create(nRef, base);
     return { existing: false, phone: a.phone, nRef, mode, tpl, msg, startMs: ms(a.start), version: a.version };
+  }).catch(async (e) => {
+    if (e && e.details && e.details.reason === 'not_confirmed') await apptRef.update({ noticeIssue: { kind, state: 'unknown', text: NOT_CONFIRMED, at: nowMs } }).catch(() => {});
+    throw e;
   });
   if (claim.existing) return { ok: true, existing: true, state: 'sent' };
 
