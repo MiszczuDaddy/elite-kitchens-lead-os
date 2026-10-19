@@ -5,7 +5,7 @@
 //   health/whatsapp         how WhatsApp sending is going: { lastSendOkAt, failStreak, lastFailAt, sendsSinceWebhook, firstUnreportedAt, lastWebhookAt, issues }
 //   health/heartbeats       the scheduled checks saying they ran: { receptionistSweepAt, receptionistResult, healthSweepAt, healthSweepSince }
 //   health/backup           the last restore test (written by scripts/backup-check.js)
-//   healthSettings/current  { leadSilenceHours } (owner-editable in the screen)
+//   (The "no Meta leads have arrived" warning and its hours setting were REMOVED on 19 Oct 2026 at the owner's request: ads are often paused on purpose. The 10-minute check erases what they left behind, see "tidy".)
 // Rules (each has a test): nothing here holds or sends a customer's name, number, address or words (alerts say only WHAT kind of problem it is); recording a problem can never throw into
 // the caller, never delays a customer message for long, and never changes what is sent; a problem alerts ONCE per occurrence, however many times it repeats or however many checks run.
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -20,7 +20,6 @@ const HOUR = 3600e3, MIN = 60e3;
 
 // What each problem is called and what to do about it. Plain words, no customer details. email: 'always' = a copy by email whenever email alerts are set up.
 const ISSUES = {
-  lead_silence: { title: 'No Meta leads have arrived for a while', help: 'Check that the Make scenario is switched on and that your ads are running. If the ads are paused on purpose, change or switch off this warning below.' },
   lead_key: { title: 'Leads are arriving with the wrong key', help: 'Something is sending leads to Elite OS with a key that does not match, so they are refused. Check the key in the Make scenario.' },
   lead_breaker: { title: 'Too many leads arrived in one hour', help: 'More than 60 new leads arrived within an hour, so Elite OS paused taking them as a precaution. Make will try them again. Check that nothing is sending the same leads in a loop.' },
   lead_error: { title: 'A Meta lead could not be processed', help: 'Make will try it again by itself. If this keeps happening, report it.' },
@@ -47,7 +46,6 @@ const TEMPLATE_CODES = new Set([132000, 132001, 132005, 132007, 132012, 132015, 
 const STREAK = 3, STREAK_WINDOW_MS = 30 * MIN;                                     // this many unconfirmed sends in a row (within 30 minutes) = "failing"
 const NO_REPORT_MS = 60 * MIN, NO_REPORT_MAX_MS = 48 * HOUR, NO_REPORT_SENDS = 2;  // sends with nothing at all back from Meta for an hour
 const BEAT_STALE_MS = 20 * MIN, START_GRACE_MS = 30 * MIN;
-const LEAD_SILENCE_DEFAULT = 168,LEAD_SILENCE_MAX = 720;
 const ALERT_TRIES = 6, EMAIL_TRIES = 3, EMAIL_CLAIM_MS = 10 * MIN;
 const RESOLVED_PURGE_MS = 90 * 24 * HOUR;
 const clip = (s) => (s == null ? null : String(s).replace(/\d{6,}/g, '[number]').slice(0, 120));    // a detail is a code or a short phrase; never a number
@@ -241,10 +239,6 @@ async function deliverHandoverAlert(deps, doc, nowMs) {
 }
 
 // ---------------------------------------------------------------- the check (every 10 minutes) -------------------------------------------
-async function settingsOf(db) {
-  const s = await db.doc('healthSettings/current').get(), v = s.exists ? Number(s.data().leadSilenceHours) : NaN;
-  return { leadSilenceHours: Number.isFinite(v) && v >= 0 ? v : LEAD_SILENCE_DEFAULT };
-}
 // deps: { db, notify, allowed (comma list of staff e-mails), mail: { enabled, sender, fromName, gmail, to: [] } }. Never throws: every part is tried, the result says what happened.
 async function sweep(deps, nowMs = Date.now()) {
   const { db } = deps, out = { opened: [], resolved: [] };
@@ -266,17 +260,6 @@ async function sweep(deps, nowMs = Date.now()) {
     else if (switchesOk) await close(['receptionist_blocked']);
     if (result === 'no key') { if (auto) await open('ai_no_key'); }
     else if (result && result !== 'off') await close(['ai_no_key']);
-  });
-  await step('leads', async () => {
-    const { leadSilenceHours } = await settingsOf(db);
-    const last = await db.collection('leads').orderBy('receivedAt', 'desc').limit(1).get();
-    const at = last.empty ? 0 : ms(last.docs[0].data().receivedAt);
-    if (leadSilenceHours > 0 && at && nowMs - at > leadSilenceHours * HOUR) {
-      // "Mark as fixed" by a person means "I know, ads are paused": stay quiet for one more full window (7 days by default), then remind once. A lead arriving closes it by itself (resolvedBy 'auto'), so the next silence is reported at once.
-      const p = await db.doc('healthIssues/lead_silence').get().then((s) => (s.exists ? s.data() : null));
-      const seen = p && p.status === 'resolved' && p.resolvedBy && p.resolvedBy !== 'auto' && ms(p.resolvedAt) > at && nowMs - ms(p.resolvedAt) < leadSilenceHours * HOUR;
-      if (!seen) await open('lead_silence', 'none for ' + Math.floor((nowMs - at) / HOUR) + ' hours');
-    } else await close(['lead_silence']);
   });
   await step('whatsapp', async () => {
     const w = await db.doc('health/whatsapp').get().then((s) => (s.exists ? s.data() : {}));
@@ -307,6 +290,8 @@ async function sweep(deps, nowMs = Date.now()) {
     }
   });
   await step('tidy', async () => {
+    // The "no Meta leads" warning was removed (19 Oct 2026): erase what it left behind (an open problem with its alert state, and the hours setting) so nothing of it can show or notify. Two reads every 10 minutes, a delete only the first time.
+    for (const p of ['healthIssues/lead_silence', 'healthSettings/current']) { const s = await db.doc(p).get(); if (s.exists) await s.ref.delete(); }
     out.purgedLeads = await LeadIssues.purge(db, nowMs);
     const old = await db.collection('healthIssues').where('resolvedAt', '<', ts(nowMs - RESOLVED_PURGE_MS)).limit(50).get();
     for (const d of old.docs) await d.ref.delete();
@@ -315,7 +300,7 @@ async function sweep(deps, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------- "Needs attention" (staff) ----------------------------------------------
-// One callable for the screen's buttons: { action: 'fixed', kind } | { action: 'lead', leadId, outcome } | { action: 'seen', phone } | { action: 'settings', leadSilenceHours }.
+// One callable for the screen's buttons: { action: 'fixed', kind } | { action: 'lead', leadId, outcome } | { action: 'seen', phone }.
 async function attention({ db }, actor, data, { nowMs = Date.now() } = {}) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpsError('invalid-argument', 'Missing details.');
   const only = (keys) => { for (const k of Object.keys(data)) if (!keys.includes(k)) throw new HttpsError('invalid-argument', `Unknown field: ${k}`); };
@@ -342,13 +327,6 @@ async function attention({ db }, actor, data, { nowMs = Date.now() } = {}) {
         return { ok: true };
       });
     }
-    case 'settings': {
-      only(['action', 'leadSilenceHours']);
-      const h = data.leadSilenceHours;
-      if (!Number.isInteger(h) || h < 0 || h > LEAD_SILENCE_MAX) throw new HttpsError('invalid-argument', `The warning time must be a whole number of hours from 0 (off) to ${LEAD_SILENCE_MAX}.`);
-      await db.doc('healthSettings/current').set({ leadSilenceHours: h, updatedAt: ts(nowMs), updatedBy: actor.id }, { merge: true });
-      return { ok: true, leadSilenceHours: h };
-    }
     default: throw new HttpsError('invalid-argument', 'Unknown action.');
   }
 }
@@ -362,6 +340,6 @@ function aiProblem(message) {
   return 'ai_failing';
 }
 
-module.exports = { ISSUES, WHATSAPP_KINDS, AI_KINDS, AUTH_CODES, ACCOUNT_CODES, TEMPLATE_CODES, STREAK, NO_REPORT_MS, NO_REPORT_SENDS, BEAT_STALE_MS, START_GRACE_MS, LEAD_SILENCE_DEFAULT, LEAD_SILENCE_MAX,
+module.exports = { ISSUES, WHATSAPP_KINDS, AI_KINDS, AUTH_CODES, ACCOUNT_CODES, TEMPLATE_CODES, STREAK, NO_REPORT_MS, NO_REPORT_SENDS, BEAT_STALE_MS, START_GRACE_MS,
   ALERT_TRIES, EMAIL_TRIES, report, resolveMany, hook, classify, noteWhatsApp, fromMeta, onMessageWrite, beat, deliverOwed, deliverIssueAlert, deliverLeadAlert, deliverHandoverAlert,
-  sendAlertEmail, sweep, attention, aiProblem, settingsOf };
+  sendAlertEmail, sweep, attention, aiProblem };

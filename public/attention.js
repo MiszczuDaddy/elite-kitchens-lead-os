@@ -5,7 +5,7 @@
 // Loaded after app.js (shares its helpers). Reads only; every button goes through a staff-only function (attentionAction). If anything here fails, Elite OS works as before.
 window.ATTN = (() => {
   const M = window.AttentionModel;
-  const A = { started: false, issues: [], leads: [], convs: [], heartbeats: null, backup: null, settings: null, unsubs: [], busy: false, ticker: null };
+  const A = { started: false, issues: [], leads: [], convs: [], heartbeats: null, backup: null, unsubs: [], busy: false, ticker: null };
   const dlg = $('attn-dlg');
   const show = () => { if (typeof dlg.showModal === 'function') { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute('open', ''); };
   const hide = () => { if (typeof dlg.close === 'function') { if (dlg.open) dlg.close(); } else dlg.removeAttribute('open'); };
@@ -20,10 +20,9 @@ window.ATTN = (() => {
     listen(db.collection('conversations').orderBy('receptionist.notifyFailed.at', 'desc').limit(50), (s) => { A.convs = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
     listen(db.doc('health/heartbeats'), (d) => { A.heartbeats = d.exists ? d.data() : null; });
     listen(db.doc('health/backup'), (d) => { A.backup = d.exists ? d.data() : null; });
-    listen(db.doc('healthSettings/current'), (d) => { A.settings = d.exists ? d.data() : null; });
     A.ticker = setInterval(render, 60000);                      // "checked 3 minutes ago", and a health check that stops, without any new data
   }
-  function stop() { for (const u of A.unsubs) u(); A.unsubs = []; clearInterval(A.ticker); Object.assign(A, { started: false, issues: [], leads: [], convs: [], heartbeats: null, backup: null, settings: null }); render(); hide(); }
+  function stop() { for (const u of A.unsubs) u(); A.unsubs = []; clearInterval(A.ticker); Object.assign(A, { started: false, issues: [], leads: [], convs: [], heartbeats: null, backup: null }); render(); hide(); }
 
   const button = (text, cls, fn) => { const b = el('button', 'btn btn-sm ' + cls, text); b.type = 'button'; b.onclick = fn; return b; };
   async function act(data, done) {
@@ -57,8 +56,6 @@ window.ATTN = (() => {
     [button('Add as customer', 'btn-primary', () => addLead(l)), button('Dismiss', 'btn-ghost', () => { if (window.confirm('Dismiss this lead? Their name, email and number are deleted from Elite OS.')) act({ action: 'lead', leadId: l.leadId, outcome: 'dismissed' }); })])));
     $('attn-checks').textContent = M.checksText(A.heartbeats, now);
     $('attn-backup').textContent = M.backupText(A.backup, now);
-    const hours = $('attn-hours'); if (document.activeElement !== hours) hours.value = String(A.settings && Number.isInteger(A.settings.leadSilenceHours) ? A.settings.leadSilenceHours : 168);
-    $('attn-save').disabled = A.busy;
   }
 
   // "Add as customer": the usual Add customer form, already filled in (the number as typed, to be corrected). When it is saved the lead is closed and its details here are deleted.
@@ -70,16 +67,10 @@ window.ATTN = (() => {
     });
   }
 
-  function open() { $('attn-err').textContent = ''; $('attn-set-msg').textContent = ''; render(true); show(); render(); }      // filled in BEFORE it opens (opening focuses the first field)
+  function open() { $('attn-err').textContent = ''; render(true); show(); render(); }      // filled in BEFORE it opens (opening focuses the first field)
   $('attn-open').onclick = open;
   $('attn-close').onclick = hide;
   $('notif-health').onclick = () => { if (window.PUSH) { const d = $('notif-dlg'); if (d.open && typeof d.close === 'function') d.close(); } open(); };
-  $('attn-settings').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const h = M.hoursOf($('attn-hours').value);
-    if (h == null) { $('attn-set-msg').textContent = 'Enter a whole number of hours from 0 (off) to 720.'; return; }
-    act({ action: 'settings', leadSilenceHours: h }, () => { $('attn-set-msg').textContent = h ? `Saved: you are warned after ${h} hours without a lead.` : 'Saved: the warning is off.'; });
-  });
   // For the Today tab (Phase 11), which shows the same rejected leads with the same two buttons, and says how many system problems there are.
   const dismissLead = (l) => { if (window.confirm('Dismiss this lead? Their name, email and number are deleted from Elite OS.')) return call('attentionAction')({ action: 'lead', leadId: l.leadId, outcome: 'dismissed' }); return null; };
   const problemCount = () => state().problems.length;
