@@ -31,16 +31,17 @@ const calendar = http.createServer((req, res) => { const c = []; req.on('data', 
   res.end(req.method === 'DELETE' ? '' : JSON.stringify({ ...body, id: body.id || 'x', htmlLink: 'https://calendar.test/e' })); }); }).listen(9912);
 calendar.keepAliveTimeout = 0;
 // The fake Meta: records every request; answers "refused" while refuseFor matches the customer.
-const graph = []; let refuseFor = null;
+const graph = []; let refuseFor = null, silentFor = null;
 const meta = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => {
   const body = JSON.parse(Buffer.concat(c).toString() || '{}'); graph.push(body); res.setHeader('content-type', 'application/json');
+  if (silentFor && body.to === silentFor) { res.statusCode = 500; return res.end(JSON.stringify({ error: { code: 1, message: 'Unknown error' } })); }
   if (refuseFor && body.to === refuseFor) { res.statusCode = 400; return res.end(JSON.stringify({ error: { code: 132001, message: 'Template name does not exist in the translation' } })); }
   res.end(JSON.stringify({ messages: [{ id: 'wamid.BKG' + graph.length }] })); }); }).listen(9911);
 meta.keepAliveTimeout = 0;
 
 const DAY = 86400000, H = 3600000, ago = (ms) => Timestamp.fromMillis(Date.now() - ms);
 const dublin = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin' }).format(new Date(ms));
-const ph = { anna: '353860001001', brian: '353860001002', cara: '353860001003', dan: '353860001004' };
+const ph = { anna: '353860001001', brian: '353860001002', cara: '353860001003', dan: '353860001004', fiona: '353860001006' };
 
 (async () => {
   initializeApp({ projectId: 'demo-leados' });
@@ -53,6 +54,7 @@ const ph = { anna: '353860001001', brian: '353860001002', cara: '353860001003', 
   await seed(ph.brian, 'Brian Kelly', { lastInboundAt: ago(3 * DAY) });                                            // wrote 3 days ago: only a template can go
   await seed(ph.cara, 'Cara Doyle', { lastInboundAt: ago(H), doNotContact: { on: true, at: Timestamp.now(), by: 'staff', source: 'staff', note: null } });
   await seed(ph.dan, 'Dan Walsh', { lastInboundAt: ago(H) });
+  await seed(ph.fiona, 'Fiona Flynn', { lastInboundAt: ago(H) });
   const apptsOf = async (p) => (await db.collection('appointments').where('phone', '==', p).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
   const u = await getAuth().createUser({ email: 'staff@test.dev', emailVerified: true });
   const token = await getAuth().createCustomToken(u.uid);
@@ -155,6 +157,27 @@ const ph = { anna: '353860001001', brian: '353860001002', cara: '353860001003', 
   assert.equal(await entry.locator('.appt-notice-go').innerText(), 'Send confirmation');
   ok('the Appointments list shows what the customer knows and the button on a visit that was never confirmed');
   await entry.locator('.arow-menu').click(); assert.ok((await page.locator('.appt-menu button').allInnerTexts()).includes('Send confirmation…'), 'the visit menu offers it too'); await page.keyboard.press('Escape');
+
+  // ---- WhatsApp gives no answer: never sent again by itself; a person says what happened ----
+  await page.click('#nav-inbox').catch(() => {}); await page.evaluate(() => { location.hash = ''; });
+  await page.waitForSelector('.conv[data-phone="' + ph.fiona + '"]');
+  await openCustomer(ph.fiona);
+  await book('16:30'); silentFor = ph.fiona;
+  await page.click('#d-appts-msg .appt-notice-go'); await page.waitForSelector('#appt-notice-dlg[open]'); await page.click('#an-go');
+  await page.waitForFunction(() => /Not confirmed/.test(document.getElementById('an-err').textContent));
+  const silentSent = graph.length; silentFor = null;
+  await page.click('#an-later');
+  await page.waitForFunction(() => /did not say whether the last message to the customer arrived/.test(document.getElementById('d-appts-list').textContent));
+  assert.equal(await page.locator('#d-appts-list .appt-notice-go[data-outcome="arrived"]').innerText(), 'It arrived');
+  assert.equal(await page.locator('#d-appts-list .appt-notice-go[data-kind]').count(), 0, 'no send button while it is unconfirmed');
+  await page.click('#d-appts-list .appt-notice-go[data-outcome="notArrived"]');
+  await page.waitForFunction(() => /Recorded: it did not arrive\. You can send it again\./.test(document.getElementById('d-appts-msg').textContent));
+  await page.waitForFunction(() => !!document.querySelector('#d-appts-list .appt-notice-go[data-kind="confirmation"]'));
+  assert.equal(graph.length, silentSent, 'pressing "it did not arrive" sends nothing');
+  await page.click('#d-appts-list .appt-notice-go[data-kind="confirmation"]'); await page.waitForSelector('#appt-notice-dlg[open]'); await page.click('#an-go');
+  await waitMsg(/Message sent to Fiona Flynn\./);
+  assert.equal(graph.length, silentSent + 1); assert.equal((await apptsOf(ph.fiona))[0].customerNotice.kind, 'confirmation'); assert.equal((await apptsOf(ph.fiona))[0].noticeIssue, undefined);
+  ok('a message WhatsApp gave no answer to is never repeated by itself; the visit says so with "It arrived" / "It did not arrive"; saying it did not arrive lets it be sent once more');
 
   // ---- an installation date on a project is one entry in the calendar ----
   const PID = 'm_' + 'cd'.repeat(12), blank = () => Object.fromEntries(['designApproved', 'carcassesOrdered', 'doorsOrdered', 'readyForInstall', 'installed'].map((k) => [k, { done: false, at: null, by: null }]));
