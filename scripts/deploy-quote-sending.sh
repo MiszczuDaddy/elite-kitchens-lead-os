@@ -38,13 +38,15 @@
 #   ./scripts/deploy-quote-sending.sh receptionist  Phase 9 R3: the automatic receptionist (receptionistOnMessage answers when a message arrives; receptionistSweep is the 5-minute backup) and pushReceipt. Run it after "ai" and BEFORE "live". It does nothing until the owner switches
 #                                                it on in Assistant > Settings AND for a chat. Switch it off there at any time.
 #   ./scripts/deploy-quote-sending.sh today      Phase 11 (docs/PHASE11_TODAY.md): the 2 functions behind the Today tab (saveReminder, snoozeQuote) and deleteCustomer (it now also erases reminders). Run it BEFORE "live". Does NOT deploy the webhook.
+#   ./scripts/deploy-quote-sending.sh bookings   Phase 12 (docs/PHASE12_BOOKINGS.md): the evening-before visit reminder (bookingReminderSweep, resolveBookingNotice), the Installation visit (appointment, project and calendar functions) and deleteCustomer. Run it BEFORE "live". The evening reminder stays OFF.
+#   ./scripts/deploy-quote-sending.sh reminders on|off   switch the automatic evening-before reminder ON or OFF (writes BOOKING_REMINDERS to the settings file and redeploys bookingReminderSweep). Needs the reminder template (elite_kitchens_consultation_reminder) approved by Meta first.
 #   ./scripts/deploy-quote-sending.sh safety     Phase 10 (docs/PHASE10_SAFETY_NET.md): "do not contact" in every send, problems and rejected leads in "Needs attention", the 10-minute health check
 #                                                and the delivery-tick watcher. Asks for the alert email address(es). Does NOT deploy the webhook. Run it BEFORE "live". Backups: scripts/setup-backups.sh.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
 # deletes old versions' files): the dependable undo is redeploying the previous code, see docs/PHASE6_1_PLAN.md "Rollback". The very
 # first "backend" run also keeps the ORIGINAL revisions (before Phase 6.1) in ~/.previous-revisions-phase61.original and never overwrites
 # them. A deploy that Google throttles is retried by itself (up to 3 times).
-# Never deploys the webhook (except in the explicit "push" stage), calendarSweep or any function not named above; changes security rules ONLY in the explicit "rules" stage; never
+# Never deploys the webhook (except in the explicit "push" stage), calendarSweep (except in the explicit "bookings" stage) or any function not named above; changes security rules ONLY in the explicit "rules" stage; never
 # changes indexes, secrets, DNS, the Google Calendar settings, Make or Meta. Do NOT use scripts/deploy-preview.sh: it deploys every function and makes them public.
 set -euo pipefail
 PROJECT=elite-kitchens-lead-os
@@ -78,6 +80,10 @@ SAFETY_NEW="setDoNotContact attentionAction healthSweep healthOnMessageWrite"   
 SAFETY_CHANGED="sendReply sendMedia startConversation reopenConversation deliverQuote retryQuoteDelivery sendQuote leadIntake receptionistSweep receptionistOnMessage pushReceipt"   # Phase 10: "do not contact" in every send, the WhatsApp outcome, rejected leads, the receptionist's heartbeat
 SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
 TODAY_NEW="saveReminder snoozeQuote"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
+BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
+BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
+BOOKING_CALLABLES="resolveBookingNotice updateAppointment cancelAppointment saveProject removeProject deleteCustomer"
+BOOKING_FUNCS="$BOOKING_NEW $BOOKING_CHANGED"
 TODAY_FUNCS="$TODAY_NEW deleteCustomer"                                                                              # deleteCustomer now also erases the customer's reminders and quote notes
 REC_FUNCS="receptionistSweep receptionistOnMessage pushReceipt"                                                      # Phase 9 R3: the receptionist (a message-arrival trigger plus a 5-minute backup; neither callable from outside) and pushReceipt (it now knows the "handover" notification)
 # Settings shared with the functions that are already live: they must match what those run with, or a deploy would change them.
@@ -86,7 +92,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,48p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,50p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -415,6 +421,37 @@ case "${1:-}" in
     check_reachable "$TODAY_FUNCS"
     echo "Done. Next: $0 live (the Today screen). To go back: git checkout 5244e73 -- functions, then firebase deploy --only functions:deleteCustomer, and firebase functions:delete $TODAY_NEW --region $REGION --project $PROJECT"
     ;;
+  bookings)
+    [ -f functions/lib/bookingNotices.js ] || { echo "This checkout has no Phase 12 (bookings) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
+    [ -n "$(serving_revision attentionaction)" ] || { echo "Deploy the safety net first: $0 safety"; exit 1; }
+    check_settings; check_access; check_routing $BOOKING_FUNCS
+    echo "Functions: $BOOKING_FUNCS"
+    echo "New: bookingReminderSweep (the evening-before reminder, every 15 minutes; it does nothing until you switch reminders on: $0 reminders on) and resolveBookingNotice (\"it arrived\" / \"it did not arrive\" for a reminder WhatsApp gave no answer to; sends nothing)."
+    echo "Changed: updateAppointment, cancelAppointment, saveProject, removeProject (an installation date is one calendar entry), deleteCustomer (also erases the message records) and calendarSweep (labels the entry Installation). NOT deployed: the WhatsApp webhook."
+    echo "Nothing is sent to any customer by this stage."
+    confirm "Deploy the Phase 12 (bookings) backend to the LIVE project?"
+    install; save_revisions $BOOKING_CHANGED; deploy_functions $BOOKING_FUNCS
+    echo "==> making the new staff function reachable (it checks the signed-in staff account itself)"
+    gcloud run services add-iam-policy-binding "$(svc resolveBookingNotice)" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: resolveBookingNotice"
+    check_reachable "$BOOKING_CALLABLES"
+    echo "Done. Next: $0 live (the screen). The evening reminder is OFF; switch it on only after the reminder template is approved and you have tested: $0 reminders on"
+    echo "To go back: git checkout f074b8c -- functions, then firebase deploy --only functions:updateAppointment,functions:cancelAppointment,functions:saveProject,functions:removeProject,functions:deleteCustomer,functions:calendarSweep --project $PROJECT, and firebase functions:delete resolveBookingNotice bookingReminderSweep --region $REGION --project $PROJECT"
+    ;;
+  reminders)
+    case "${2:-}" in
+      on|off)
+        [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
+        check_routing bookingReminderSweep
+        [ -n "$(serving_revision bookingremindersweep)" ] || { echo "Deploy the bookings backend first: $0 bookings"; exit 1; }
+        if [ "$2" = on ]; then echo "Every customer with a consultation or site visit tomorrow gets one reminder, by itself, the evening before (17:00 to 19:30 Irish time). Outside the 24-hour window it needs the approved reminder template."; fi
+        confirm "Switch the evening reminders $2 for the live project?"
+        setting "$ENVF" BOOKING_REMINDERS "$2"
+        install; save_revisions bookingReminderSweep; deploy_functions bookingReminderSweep
+        echo "Evening reminders are $2. Kill switch: $0 reminders off"
+        ;;
+      *) usage ;;
+    esac
+    ;;
   safety)
     [ -f functions/lib/health.js ] || { echo "This checkout has no Phase 10 (safety net) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
     [ -n "$(serving_revision receptionistsweep)" ] || { echo "Deploy the receptionist first: $0 receptionist"; exit 1; }
@@ -479,6 +516,7 @@ case "${1:-}" in
     if [ -f functions/lib/projects.js ] && [ -z "$(serving_revision createproject)" ]; then echo "Deploy the Projects backend first: $0 projects"; exit 1; fi
     if [ -f functions/lib/push.js ] && [ -z "$(serving_revision pushreceipt)" ]; then echo "Deploy the push notifications backend first: $0 push"; exit 1; fi        # Phase 8: the screen and the /pushReceipt rewrite need these functions
     if [ -f functions/lib/ai.js ] && [ -z "$(serving_revision aichat)" ]; then echo "Deploy the AI assistant backend first: $0 ai"; exit 1; fi
+    if [ -f functions/lib/bookingNotices.js ] && [ -z "$(serving_revision resolvebookingnotice)" ]; then echo "Deploy the bookings backend first: $0 bookings"; exit 1; fi        # Phase 12: the screen calls resolveBookingNotice
     if [ -f functions/lib/today.js ] && [ -z "$(serving_revision savereminder)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # Phase 11: the screen calls saveReminder and snoozeQuote
     if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact
     if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions

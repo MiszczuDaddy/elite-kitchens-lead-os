@@ -202,7 +202,7 @@ test('ORDER: red first, then amber, then the rest; the oldest first inside each;
   const reds = r.cards.filter((c) => c.urgency === 2);
   assert.ok(reds.every((c, i) => i === 0 || reds[i - 1].since <= c.since), 'oldest first among the red ones');
   assert.equal(r.redTotal, reds.length);
-  assert.deepEqual(r.counts, { reply: 3, handover: 1, booking: 0, quote: 1, reminder: 1, leadfix: 0 });
+  assert.deepEqual(r.counts, { reply: 3, handover: 1, booking: 0, notice: 0, quote: 1, reminder: 1, leadfix: 0 });
   assert.equal(r.red.reply, 2);
   assert.equal(M.filterCards(r.cards, 'quote').length, 1); assert.equal(M.filterCards(r.cards, 'reply').length, 3); assert.equal(M.filterCards(r.cards, null).length, r.cards.length);
   assert.equal(M.filterCards(r.cards, 'booking').length, 0);
@@ -248,4 +248,27 @@ test('REVIEW FIX: a big backlog is quick: 500 old waiting chats are worked out i
   const convs = Array.from({ length: 500 }, (_, i) => chat('35387' + String(2000000 + i), { lastInboundAt: ts(NOW - 55 * DAY - i * MIN), lastMessage: 'How much is a kitchen?' }));
   const t0 = process.hrtime.bigint(), r = build({ convs }), took = Number(process.hrtime.bigint() - t0) / 1e6;
   assert.equal(r.cards.length, 500); assert.ok(took < 250, `took ${took.toFixed(0)} ms`);
+});
+
+// ================================================================ Phase 12: a visit reminder that did not go ================================
+test('REMINDER CHECK: nothing is listed for a reminder that went or is still to come; a card appears only when WhatsApp gave no answer or refused it', () => {
+  const base = { id: 'a_u', phone: P1, customerName: 'Aine Visitor', type: 'consultation', status: 'scheduled', start: ts(NOW + 20 * HOUR), updatedAt: ts(NOW - 2 * DAY), createdAt: ts(NOW - 2 * DAY) };
+  assert.equal(build({ convs: [chat(P1)], appts: [base] }).counts.notice, 0, 'a visit with nothing wrong is not a task');
+  assert.equal(build({ convs: [chat(P1)], appts: [{ ...base, visitReminder: { for: NOW + 20 * HOUR, at: NOW - HOUR } }] }).counts.notice, 0, 'reminded: nothing to do');
+  const unknown = build({ convs: [chat(P1)], appts: [{ ...base, noticeIssue: { kind: 'reminder', state: 'unknown', text: 'x', at: NOW - 5 * 60e3 } }] });
+  const c = unknown.cards.find((x) => x.kind === 'notice');
+  assert.deepEqual([unknown.counts.notice, c.next, c.urgency, c.apptId], [1, 'resolve', 2, 'a_u']); assert.match(c.reasons[0].text, /^Reminder not confirmed \(WhatsApp gave no answer\): consultation (today|tomorrow) at \d\d:\d\d$/);
+  const failed = build({ convs: [chat(P1)], appts: [{ ...base, start: ts(NOW + 40 * HOUR), noticeIssue: { kind: 'reminder', state: 'failed', text: 'WhatsApp does not know this template', at: NOW } }] }).cards.find((x) => x.kind === 'notice');
+  assert.deepEqual([failed.next, failed.urgency], ['failed', 1]); assert.match(failed.reasons[0].text, /^Reminder could not be sent: .* \(WhatsApp does not know this template\)$/);
+  assert.equal(M.filterCards(unknown.cards, 'notice').length, 1);
+});
+test('REMINDER CHECK: a visit that has passed, was cancelled, is not customer-facing, or belongs to a customer who said stop is not listed; resolving removes the card', () => {
+  const base = { id: 'a_x', phone: P1, customerName: 'Aine Visitor', type: 'consultation', status: 'scheduled', start: ts(NOW + 20 * HOUR), noticeIssue: { kind: 'reminder', state: 'unknown', text: 'x', at: NOW } };
+  const n = (a, convs = [chat(P1)]) => build({ convs, appts: [a] }).counts.notice;
+  assert.equal(n(base), 1);
+  assert.equal(n({ ...base, start: ts(NOW - HOUR) }), 0, 'the visit has passed'); assert.equal(n({ ...base, status: 'cancelled' }), 0);
+  assert.equal(n({ ...base, type: 'other' }), 0); assert.equal(n({ ...base, type: 'installation' }), 0);
+  assert.equal(n(base, [chat(P1, { doNotContact: { on: true } })]), 0, 'do not contact');
+  assert.equal(n({ ...base, noticeIssue: undefined }), 0, 'resolved: the note is gone and so is the card');
+  assert.equal(build({ appts: [base] }).cards.length, 1, 'a visit is listed even when the chat of the customer is not among the recent ones');
 });

@@ -137,4 +137,4 @@ async function reopen({ db, wa, cfg }, actor, data, { nowMs = Date.now() } = {})
   return { ok: true, existing: false, state: 'sent' };
 }
 
-module.exports = { reopen, FRIENDLY, NOT_CONFIRMED };
+module.exports = { reopen, FRIENDLY, NOT_CONFIRMED, refusalText };

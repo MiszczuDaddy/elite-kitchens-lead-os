@@ -4,7 +4,7 @@
 // callables, which also bring the shared Google Calendar in line. Loaded after app.js (shares its helpers).
 window.APPT = (() => {
   const LIMIT = 300;
-  const TYPES = { consultation: 'Consultation', site_visit: 'Site visit', other: 'Other' };
+  const TYPES = { consultation: 'Consultation', site_visit: 'Site visit', installation: 'Installation', other: 'Other' };
   const A = {
     active: false, origin: false,
     list: [], loaded: false, hitLimit: false, failed: [], unsub: null, unsubFailed: null, showCancelled: false, menu: null, stale: false,
@@ -266,6 +266,7 @@ window.APPT = (() => {
     main.append(top, el('div', 'arow-sub', [kindOf(a), a.location].filter(Boolean).join(' · ')));
     const meta = el('div', 'arow-meta'); meta.append(syncBadge(a), ...syncActions(a));
     main.append(meta);
+    const told = noticeLine(a); if (told) main.append(told);
     const btn = el('button', 'arow-menu');
     btn.type = 'button'; btn.setAttribute('aria-label', 'Actions for the appointment with ' + name); btn.setAttribute('aria-haspopup', 'menu'); btn.setAttribute('aria-expanded', 'false');
     btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
@@ -464,6 +465,7 @@ window.APPT = (() => {
     fillLeadFacts(lead); body.append(lead);
     if (a.notes) { const notes = el('div', 'agenda-notes'); notes.append(el('strong', null, 'Internal notes'), el('p', null, a.notes)); body.append(notes); }
     const sync = el('div', 'arow-meta'); sync.append(syncBadge(a), ...syncActions(a)); body.append(sync);
+    const told = noticeLine(a); if (told) body.append(told);
     const actions = el('div', 'agenda-actions');
     const act = (label, fn, cls = '') => {
       const b = button(label, 'btn btn-ghost btn-sm ' + cls, () => { closeDialog($('appt-detail-dlg')); A.detailId = null; fn(); });
@@ -656,6 +658,7 @@ window.APPT = (() => {
     const status = el('div', 'd-appt-actions');                 // Google Calendar status on one line, the actions on the next
     status.append(syncBadge(a), ...syncActions(a));
     d.append(status);
+    const told = noticeLine(a); if (told) d.append(told);
     if (!cancelled && !past) {
       const act = el('div', 'd-appt-actions');
       const r = el('button', 'linkbtn d-appt-reschedule', 'Reschedule'); r.type = 'button'; r.onclick = () => openReschedule(a);
@@ -731,10 +734,17 @@ window.APPT = (() => {
     } catch (e) { if (seq === noteSeq) p.hidden = true; }                      // no warning is better than a wrong one
   }
   for (const id of ['a-date', 'a-time', 'a-duration']) $(id).addEventListener('change', dayNote);
+  // Installation visits are made by a project's installation date, not here: the choice is offered only when you edit one (so its type is not lost).
+  function typeChoices(current) {
+    const sel = $('a-type'), has = !!sel.querySelector('option[value=installation]');
+    if (current === 'installation' && !has) { const o = el('option', null, 'Installation'); o.value = 'installation'; sel.insertBefore(o, sel.querySelector('option[value=other]')); }
+    else if (current !== 'installation' && has) sel.querySelector('option[value=installation]').remove();
+  }
   function openBook(phone, date, time) {
     const c = convOf(phone) || {}, contact = (S.selected === phone && S.contact) || {};
     A.dlg = { mode: 'create', phone, requestId: newRequestId() };          // one id per booking: a double click or retry books it once
     $('a-date').value = date || dublinDate(Date.now() + DAY);
+    typeChoices(null);
     fillTimes(time || '10:00'); fillDuration(60); $('a-type').value = 'consultation';
     $('a-location').value = contact.location || c.location || ''; $('a-notes').value = '';
     openForm('Book appointment', (contact.name || c.name || formatPhone(phone)) + ' · ' + formatPhone(phone), 'Book appointment');
@@ -749,6 +759,7 @@ window.APPT = (() => {
   function openReschedule(a, focus = 'a-date') {
     A.dlg = { mode: 'update', phone: a.phone, appt: a };
     $('a-date').value = dublinDate(ts(a.start));
+    typeChoices(a.type);
     fillTimes(clock(ts(a.start))); fillDuration(a.durationMin || 60); $('a-type').value = Object.hasOwn(TYPES, a.type) ? a.type : 'consultation';
     $('a-location').value = a.location || ''; $('a-notes').value = a.notes || '';
     openForm('Edit appointment', nameOf(a) + ' · ' + formatPhone(a.phone), 'Save changes');
@@ -806,6 +817,24 @@ window.APPT = (() => {
   });
   $('ac-keep').onclick = () => { closeDialog($('appt-cancel-dlg')); A.cancelling = null; };
 
+  // ---------- the evening reminder (Phase 12, docs/PHASE12_BOOKINGS.md) ----------
+  // The reminder goes by itself the evening before a visit: nobody presses anything. BookingRules (the same file the server uses) says what happened. One line on a visit: "Reminder sent", or why it did not go.
+  // When WhatsApp gave no answer, look at the chat, then say whether it arrived. Nothing is sent from here.
+  function noticeLine(a) {
+    if (!window.BookingRules) return null;
+    const d = BookingRules.describe(a, Date.now()); if (d.state === 'none' || !d.text) return null;
+    const row = el('div', 'appt-notice appt-notice-' + d.state); row.append(el('span', 'appt-notice-text', d.text + '.'));
+    if (d.state === 'issue') for (const [label, outcome] of [['It arrived', 'arrived'], ['It did not arrive', 'notArrived']]) { const b = button(label, 'linkbtn appt-notice-go', () => resolveNotice(a, outcome)); b.dataset.outcome = outcome; row.append(b); }
+    return row;
+  }
+  async function resolveNotice(a, outcome, done) {
+    try {
+      await call('resolveBookingNotice')({ id: a.id, outcome });
+      const said = outcome === 'arrived' ? 'Recorded: the customer was reminded.' : 'Recorded: it did not arrive. The reminder is tried again by itself.';
+      if (done) done(said); else report(said, a.phone);
+    } catch (err) { const said = 'Could not record that: ' + errText(err); if (done) done(said); else report(said, a.phone, 'err'); }
+  }
+
   // ---------- Retry now ----------
   async function retry(a, btn) {
     if (btn) btn.disabled = true;
@@ -850,5 +879,5 @@ window.APPT = (() => {
   $('nav-appointments').addEventListener('click', (e) => { if (A.active) e.preventDefault(); });   // already here
   $('d-appt-new').onclick = () => { if (A.customer) openBook(A.customer); };
 
-  return Object.assign(A, { show, hide, stop, watchCustomer, openBook });
+  return Object.assign(A, { show, hide, stop, watchCustomer, openBook, resolveNotice });
 })();

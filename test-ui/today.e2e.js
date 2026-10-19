@@ -9,6 +9,10 @@ const { getFirestore, Timestamp } = fnRequire('firebase-admin/firestore');
 const { getAuth } = fnRequire('firebase-admin/auth');
 
 const ROOT = path.join(__dirname, '..');
+// A fake Meta (WhatsApp) for the one message this test sends; nothing real is ever contacted.
+const graph = [];
+const meta = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => { graph.push(JSON.parse(Buffer.concat(c).toString() || '{}')); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ messages: [{ id: 'wamid.TDY' + graph.length }] })); }); }).listen(9911);
+meta.keepAliveTimeout = 0;
 const SHOTS = process.env.SHOTS_DIR || path.join(__dirname, 'shots'); fs.mkdirSync(SHOTS, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, msg, t = 20000) { const s = Date.now(); while (Date.now() - s < t) { try { if (await fn()) return; } catch (e) { /* not yet */ } await sleep(120); } throw new Error('timed out waiting for: ' + msg); }
@@ -131,7 +135,8 @@ const web = http.createServer((req, res) => {
   await until(async () => (await keys()).includes('c|' + AOIFE), 'a NEW customer message brings the card back');
   await db.doc('conversations/' + BRENDAN).update({ 'receptionist.humanAt': T(Date.now()) });
   await until(async () => !(await keys()).includes('c|' + BRENDAN), 'the hand-over goes once a person has written after it');
-  await db.doc('appointments/a_' + 'bb'.repeat(12)).set({ phone: CIARA, customerName: 'Ciara Walsh', type: 'consultation', status: 'scheduled', start: T(Date.now() + 2 * DAY), end: T(Date.now() + 2 * DAY + 3600e3), createdAt: T(Date.now()) });
+  const ts2 = Date.now() + 2 * DAY;
+  await db.doc('appointments/a_' + 'bb'.repeat(12)).set({ phone: CIARA, customerName: 'Ciara Walsh', type: 'consultation', status: 'scheduled', start: T(ts2), end: T(Date.now() + 2 * DAY + 3600e3), createdAt: T(Date.now()) });
   await until(async () => !(await keys()).includes('c|' + CIARA), 'the visit card goes once the visit is booked');
   await db.doc('quotes/q_' + 'ab'.repeat(12)).update({ status: 'accepted' });
   await until(async () => !(await keys()).includes('quote|q_' + 'ab'.repeat(12)), 'the quote card goes once it is accepted');
@@ -185,6 +190,31 @@ const web = http.createServer((req, res) => {
   page.removeAllListeners('dialog'); page.on('dialog', (d) => d.accept());
   ok('going to Today from a screen with unsaved edits asks "Leave without saving?" first: No keeps the edit, Yes goes to Today (it used to discard the edit without asking)');
 
+
+  // ------------------------------------------------------------ 9c. Phase 12: a visit reminder WhatsApp gave no answer to
+  // The evening reminder is automatic and is not a task, so a normal visit adds nothing to Today. A card appears only when a reminder did not go.
+  const EVA = '353871110109', evaStart = Date.now() + 20 * 3600e3, evaId = 'a_' + 'ee'.repeat(12);
+  assert.equal(await page.locator('#today-list .td-card[data-key^="n|"]').count(), 0, 'visits with nothing wrong are not tasks');
+  await conv(EVA, 'Eva Egan', { lastMessage: 'See you then', lastMessageDirection: 'out', lastInboundAt: T(Date.now() - 30 * 60e3) }); await contact(EVA, 'Eva Egan', { location: 'Malahide' });
+  await db.doc('appointments/' + evaId).set({ phone: EVA, customerName: 'Eva Egan', type: 'consultation', status: 'scheduled', version: 1, start: T(evaStart), end: T(evaStart + 3600e3), createdAt: T(Date.now() - 3 * DAY), updatedAt: T(Date.now() - 3 * DAY) });
+  await sleep(800); assert.equal(await page.locator('#today-list .td-card[data-key^="n|"]').count(), 0, 'a visit with no problem is still not listed');
+  const key = require('crypto').createHash('sha256').update(`${evaId}|reminder|${evaStart}`).digest('hex').slice(0, 24);
+  await db.doc('bookingNotices/n_' + key).set({ phone: EVA, appointmentId: evaId, kind: 'reminder', key: evaId + '|reminder|' + evaStart, state: 'unknown', mode: 'text', template: null, startMs: evaStart, by: 'auto', claimedAt: T(Date.now() - 3600e3), sentAt: null, wamid: null, error: 'Not confirmed', errorCode: null, tries: 1 });
+  await db.doc('appointments/' + evaId).update({ noticeIssue: { kind: 'reminder', state: 'unknown', text: 'Not confirmed', at: Date.now() - 3600e3 } });
+  await until(async () => (await page.$$('#today-list .td-card[data-key^="n|"]')).length === 1, 'the unconfirmed reminder is listed');
+  const tcard = page.locator('#today-list .td-card[data-key^="n|"]');
+  assert.match(await tcard.innerText(), /Eva Egan[\s\S]*Reminder check[\s\S]*Reminder not confirmed \(WhatsApp gave no answer\): consultation (today|tomorrow) at \d\d:\d\d/);
+  assert.equal(await page.locator('#today-counts .td-count', { hasText: 'Reminder check' }).locator('.td-count-n').innerText(), '1');
+  assert.equal(await tcard.getAttribute('class').then((c) => /u2/.test(c)), true, 'red: the visit is within 24 hours');
+  assert.deepEqual(await tcard.locator('.td-actions .btn').allInnerTexts(), ['Open chat', 'It arrived', 'It did not arrive']);
+  assert.equal(graph.length, 0, 'nothing is sent by Today');
+  await tcard.locator('.td-actions .btn', { hasText: 'It arrived' }).click();
+  await until(async () => /Recorded: the customer was reminded\./.test(await page.textContent('#today-toast')), 'a plain confirmation of what happened');
+  await until(async () => (await page.$$('#today-list .td-card[data-key^="n|"]')).length === 0, 'the card leaves by itself once it is recorded');
+  const eva = (await db.doc('appointments/' + evaId).get()).data(); assert.equal(eva.noticeIssue, undefined); assert.equal(eva.visitReminder.for, evaStart);
+  assert.equal(graph.length, 0, 'saying it arrived sends nothing');
+  ok('Today lists a reminder only when it did not go (red "Reminder check", It arrived / It did not arrive); the card leaves by itself; nothing is sent from here');
+
   // ------------------------------------------------------------ 10. phone: full-width cards
   const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push(e.message));
@@ -197,16 +227,16 @@ const web = http.createServer((req, res) => {
       countW: [...document.querySelectorAll('.td-count')].every((c) => rect(c).right <= vw && rect(c).width > 60), over: [...document.querySelectorAll('#today-scroll *')].filter((e) => rect(e).right > vw + 1).length };
   });
   assert.equal(m.scrollOk, true, 'no sideways scrolling'); assert.ok(m.widths.length >= 4 && m.widths.every((w) => w >= m.vw - 1), 'full-width cards: ' + m.widths.join(',') + ' of ' + m.vw);
-  assert.ok(m.btnH >= 44, 'tap targets at least 44 px: ' + m.btnH); assert.equal(m.cols, 3); assert.equal(m.countW, true); assert.equal(m.over, 0, 'nothing runs off the screen');
+  assert.ok(m.btnH >= 44, 'tap targets at least 44 px: ' + m.btnH); assert.equal(m.cols, 4); assert.equal(m.countW, true); assert.equal(m.over, 0, 'nothing runs off the screen');
   await mp.screenshot({ path: path.join(SHOTS, 'today-mobile.png') });
   await mp.evaluate(() => document.getElementById('today-scroll').scrollTo(0, 99999)); await mp.screenshot({ path: path.join(SHOTS, 'today-mobile-leads.png') });
   await mp.click('#today-back'); await mp.waitForSelector('#to-today'); assert.equal(await mp.$eval('#app', (e) => e.dataset.view), 'list');
   assert.match(await mp.innerText('#to-today'), /Today/); assert.equal(await mp.$eval('#today-link-n', (e) => !e.hidden && Number(e.textContent) >= 3), true);
   await mp.screenshot({ path: path.join(SHOTS, 'today-mobile-inbox.png') });
   await mp.click('#to-today'); await mp.waitForSelector('#today-list .td-card'); assert.equal(await mp.$eval('#app', (e) => e.dataset.view), 'today');
-  ok('phone: Elite OS opens on Today; cards are full width with no sideways scrolling; buttons are at least 44 px; the counters wrap in three columns; a big "Today" button sits at the top of the Inbox');
+  ok('phone: Elite OS opens on Today; cards are full width with no sideways scrolling; buttons are at least 44 px; the counters wrap in four columns; a big "Today" button sits at the top of the Inbox');
 
   assert.deepEqual(errors, []); ok('no JavaScript errors in the browser');
   console.log(`ALL ${n} CHECKS PASSED`);
-  await browser.close(); web.close(); process.exit(0);
+  await browser.close(); web.close(); meta.close(); process.exit(0);
 })().catch((e) => { console.error('FAILED:', e); process.exit(1); });

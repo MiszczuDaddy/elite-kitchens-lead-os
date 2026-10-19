@@ -76,7 +76,7 @@ meta.keepAliveTimeout = 0;
   assert.match(txt, /Alerts that did not reach your phone Brendan Burke/); assert.match(txt, /Why: handover: price question/);
   assert.match(txt, /Meta leads that could not be added Ciaran Coyle/); assert.match(txt, /Number as typed: 087 12 · Email: ciaran@example\.com · Area: Lucan/);
   assert.match(txt, /Elite OS checked itself 3 minutes ago/); assert.match(txt, /last restore test .* OK/);
-  assert.equal(await page.inputValue('#attn-hours'), '72');
+  assert.equal(await page.inputValue('#attn-hours'), '168');
   await page.screenshot({ path: path.join(SHOTS, 'safety-attention.png') });
   ok('the list shows the problem with what to do, the failed alert with the reason, the rejected lead with its details, the last check and the last restore test');
 

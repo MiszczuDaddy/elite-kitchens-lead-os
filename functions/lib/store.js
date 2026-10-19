@@ -195,7 +195,7 @@ async function deleteCustomerData(db, bucket, phone) {
   let aiProposals = 0;
   for (const d of await proposalDocs()) { await d.ref.delete(); aiProposals++; }
   for (const d of (await db.collection('aiDrafts').where('phone', '==', phone).get()).docs) await d.ref.delete();       // R1: records of suggested replies (no words, but they hold the number)
-  for (const c of ['reminders', 'todayMarks']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();       // Phase 11: their reminders and quote follow-up notes
+  for (const c of ['reminders', 'todayMarks', 'bookingNotices']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();       // Phase 11: their reminders and quote follow-up notes
   const appts = await db.collection('appointments').where('phone', '==', phone).get();
   for (let i = 0; i < appts.size; i += 400) { const b = db.batch(); appts.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref)); await b.commit(); }
   const quoteDocs = async () => (await db.collection('quotes').where('phone', '==', phone).get()).docs;
@@ -208,7 +208,7 @@ async function deleteCustomerData(db, bucket, phone) {
   for (const d of await pushDocs()) { await d.ref.delete(); pushEvents++; }               // a message that arrived while this ran
   for (const d of await proposalDocs()) { await d.ref.delete(); aiProposals++; }          // a proposal made while this ran
   for (const d of (await db.collection('aiDrafts').where('phone', '==', phone).get()).docs) await d.ref.delete();
-  for (const c of ['reminders', 'todayMarks']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();         // one added while this ran
+  for (const c of ['reminders', 'todayMarks', 'bookingNotices']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();         // one added while this ran
   const late =(await bucket.getFiles({ prefix }))[0].length;
   if (late) { files += late; await bucket.deleteFiles({ prefix, force: true }); }
   const lateQuoteFiles = (await bucket.getFiles({ prefix: quotePrefix }))[0].length;
