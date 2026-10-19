@@ -147,3 +147,11 @@ test('a date that is not a date, or a stale revision, is refused and changes not
   await assert.rejects(P.save({ db }, actor, { id, expectedRev: 99, installDate: '2026-11-25' }, { nowMs: NOW }), (e) => e.code === 'failed-precondition');
   const [a] = await installs(id); assert.equal(clock(a.start), '2026-11-20 08:00');
 });
+
+test('AN INSTALLATION IS NOT THE CUSTOMER\'S CONSULTATION: the reply assistant does not say "consultation already booked" because of it', async () => {
+  const AIR = require('../lib/aiReply');
+  const id = await project(); await setDate(id, '2026-11-20');
+  assert.equal((await AIR.buildSheet(db, PH, NOW)).nextAppointment, null, 'only an installation is booked');
+  await A.create(db, actor, { phone: PH, date: '2026-11-22', time: '10:00', requestId: rid() }, NOW);
+  assert.notEqual((await AIR.buildSheet(db, PH, NOW)).nextAppointment, null, 'a real consultation still counts');
+});

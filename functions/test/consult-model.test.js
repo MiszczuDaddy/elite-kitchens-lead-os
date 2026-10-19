@@ -55,3 +55,8 @@ test('the clash line: what is booked that day, and a warning only when the chose
   assert.equal(M.dayNote(list, at(10), at(11)).clash, false, 'back to back is not a clash');
   assert.equal(M.dayNote(list, at(9), at(10), 'a').clash, false, 'the appointment being edited does not clash with itself');
 });
+
+test('an installation date is NOT a booked consultation: the customer still needs a visit booked (Phase 12)', () => {
+  const booked = M.bookedPhones([{ phone: '353871234567', status: 'scheduled', type: 'installation', end: ts(NOW + 3600000) }, { phone: '353870000009', status: 'scheduled', type: 'site_visit', end: ts(NOW + 3600000) }], NOW);
+  assert.deepEqual([...booked], ['353870000009'], 'a site visit counts, an installation does not');
+});

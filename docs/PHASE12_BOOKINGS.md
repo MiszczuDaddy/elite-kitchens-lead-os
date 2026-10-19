@@ -65,5 +65,14 @@ The *Send confirmation*, *Send the new time* and *Send cancellation message* but
 - The words of the reminder exist in two places: the code and the approved template at Meta. If you edit the template at Meta, tell me so the copy stays identical.
 - Today's "Reminder check" does not know about a do-not-contact customer whose chat is older than 60 days; the server still refuses to send, so nothing is sent.
 
-## Tests
-(See the table at the end; filled in when the last run finished.)
+## Tests (final code, 19 Oct 2026)
+| What | Result |
+|---|---|
+| Whole server suite (emulator) | **968 of 969**. The one failure is receptionist-load check E, a known intermittent check that also fails on unchanged `main` |
+| New server suites: reminder rules (5), the reminder (28), installations (12, including "an installation is not the customer's consultation"), Today model (29), deploy scripts (50) | all pass |
+| Browser: booking 6, Today 13, ui 57, appointments 39, projects 13, quotes 20, safety 11, lead 11, crm 14, pwa 8, readability 11, conversion 10, dnd 13, knowledge 11, access 7, quote-send 10, quote-delivery 18, quote-layout 4, quote-recovery 19, assistant 21 | all pass |
+| Planted errors (the tests must fail when the code is wrong): do-not-contact check removed, duplicate-claim check removed, reminders allowed at night, no 4-hour wait, a nonexistent clock hour not handled, "resolve" allowed on any state, a calendar move that no longer changes the project's date | all caught |
+
+**A real bug the full run found, now fixed:** an installation entry was counted as "the customer's next consultation", so the reply assistant said "Consultation already booked" and a customer waiting for a visit would have looked booked. Installation entries are now ignored in both places (`functions/lib/aiReply.js`, `public/consult-model.js`), with tests that fail without the fix.
+
+Two older browser checks are timing-sensitive on a busy PC (Today's "unsaved changes" step and the assistant); they pass on a quiet machine and the assistant failure turned out to be the bug above.
