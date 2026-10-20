@@ -88,8 +88,8 @@ async function noOverflow(p, selectors) {
     if (!before) {
       for (let i = 0; i < stages.length; i++) {
         await page.click(`#status-filters [data-status="${stages[i]}"]`);
-        assert.equal(await page.getAttribute('#search', 'placeholder'), 'Search all stages…');
-        assert.equal(await page.getAttribute('#search', 'aria-label'), 'Search conversations across all stages');
+        assert.equal(await page.getAttribute('#search', 'placeholder'), 'Search name, phone, email, town…');
+        assert.equal(await page.getAttribute('#search', 'aria-label'), 'Search every customer by name, phone number, email or town');
         for (let j = 0; j < stages.length; j++) {
           await page.fill('#search', names[j]);
           assert.equal(await page.locator('.conv').count(), 1);
@@ -101,7 +101,7 @@ async function noOverflow(p, selectors) {
         assert.equal(await page.locator('.conv').getAttribute('data-phone'), phones[i]);
       }
       await page.click('#status-filters [data-status=inbox]');
-      await page.fill('#search', 'missing customer');
+      await page.fill('#search', 'missing customer'); await page.waitForFunction(() => /across the stages/.test(document.getElementById('list-empty').textContent));      // the first search also loads every customer: "Searching…" until then
       assert.equal(await page.locator('.conv').count(), 0);
       assert.match(await page.textContent('#list-empty'), /across the stages/);
       await page.fill('#search', phones[4]);
