@@ -609,8 +609,12 @@ test('every stage that deploys functions runs the routing check BEFORE it asks f
   before(stage('projects'), 'projects'); assert.match(stage('projects'), /check_routing \$PROJECT_FUNCS/);
   before(stage('push'), 'push'); assert.match(stage('push'), /check_routing \$PUSH_FUNCS/);
   before(stage('ai'), 'ai'); assert.match(stage('ai'), /check_routing \$AI_FUNCS/);
-  const help = s.split('\n').slice(0, 50).join('\n');                       // the usage text is lines 2 to 51 of the script (it was 2 to 47 before Phase 10's safety stage, and 2 to 49 before Phase 12's bookings stages)
-  assert.match(s, /^usage\(\) \{ sed -n '2,50p'/m); assert.ok(/^set -euo pipefail/.test(s.split('\n')[50]), 'the usage text ends exactly where the script starts (line 51)'); assert.match(help, /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
+  const help = s.split('\n').slice(0, 51).join('\n');                       // the usage text is lines 2 to 52 of the script (it was 2 to 47 before Phase 10's safety stage, 2 to 49 before Phase 12's bookings stages, and 2 to 51 before the Inbox search stage)
+  assert.match(s, /^usage\(\) \{ sed -n '2,51p'/m); assert.ok(/^set -euo pipefail/.test(s.split('\n')[51]), 'the usage text ends exactly where the script starts (line 52)');
+  before(stage('search'), 'search'); assert.match(stage('search'), /check_routing \$SEARCH_FUNCS/); assert.match(help, /deploy-quote-sending\.sh search /, 'the help text must show the Inbox search stage');
+  assert.ok(!/SEARCH_[A-Z]*="[^"]*\bwebhook\b/.test(s), 'the Inbox search stage never deploys the WhatsApp webhook'); assert.doesNotMatch(stage('search'), /save_revisions/, 'no existing function is replaced, so there is nothing to save');
+  assert.match(stage('search'), /add-iam-policy-binding "\$\(svc customerDirectory\)"[\s\S]*check_reachable "\$SEARCH_FUNCS"/, 'the new function is made reachable, then checked');
+  assert.match(stage('live'), /serving_revision customerdirectory[\s\S]*Deploy the Inbox search backend first/, 'the screen is not published before the function it calls'); assert.match(help, /routing fix/, 'the help text must show the new stages (the usage range must cover them)');
   assert.match(help, /deploy-quote-sending\.sh safety /, 'the help text must show the Phase 10 safety stage');
   before(stage('today'), 'today'); assert.match(stage('today'), /check_routing \$TODAY_FUNCS/); assert.match(help, /deploy-quote-sending\.sh today /, 'the help text must show the Phase 11 today stage');
   assert.ok(!/TODAY_[A-Z]*="[^"]*\bwebhook\b/.test(s), 'the Phase 11 stage never deploys the WhatsApp webhook');

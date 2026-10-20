@@ -266,6 +266,8 @@ exports.pushReceipt = onRequest({ timeoutSeconds: 15 }, async (req, res) => { re
 // "Needs attention". Neither sends anything to a customer. Nothing above is changed except where noted (the WhatsApp outcome, the lead intake's problems, the receptionist's heartbeat).
 exports.setDoNotContact = onCall({}, (req) => h.setDoNotContact(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 // ---- Phase 11: the Today tab (docs/PHASE11_TODAY.md). Staff-only callables, no secrets: a reminder (add, done, undo, snooze, delete) and a quote follow-up snooze. They send nothing to anyone.
+// The Inbox "All" tab and search across every customer: one compact, staff-only list (docs/INBOX_ALL_AND_SEARCH.md). Reads only.
+exports.customerDirectory = onCall({ memory: '512MiB', timeoutSeconds: 60 }, (req) => h.customerDirectory(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.saveReminder = onCall({}, (req) => h.saveReminder(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.snoozeQuote = onCall({}, (req) => h.snoozeQuote(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.attentionAction = onCall({}, (req) => h.attentionAction(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));

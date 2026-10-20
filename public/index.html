@@ -95,6 +95,7 @@
     <div id="attn-bar" class="attn-bar" hidden><button id="attn-open" type="button" class="attn-btn" title="Problems, alerts that did not reach your phone, and leads that could not be added"><span id="attn-count" class="attn-count">0</span> <span id="attn-text">things need attention</span></button></div>
     <div id="consult-bar" class="consult-bar" hidden><button id="consult-filter" type="button" aria-pressed="false" title="Customers who have said when they are free and are waiting for you to book a consultation">Needs booking <span id="consult-count" class="consult-count">0</span></button></div>
     <div id="status-filters" class="status-filters" role="group" aria-label="Filter conversations by status">
+      <button type="button" data-status="all" aria-pressed="false">All<span class="status-unread" hidden></span></button>
       <button type="button" data-status="inbox" aria-pressed="true">New lead<span class="status-unread" hidden></span></button>
       <button type="button" data-status="booked" aria-pressed="false">Booked<span class="status-unread" hidden></span></button>
       <button type="button" data-status="quoted" aria-pressed="false">Quoted<span class="status-unread" hidden></span></button>
@@ -102,8 +103,9 @@
       <button type="button" data-status="closed" aria-pressed="false">Closed<span class="status-unread" hidden></span></button>
     </div>
     <div class="search"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
-      <input id="search" type="search" placeholder="Search all stages…" autocomplete="off" aria-label="Search conversations across all stages">
+      <input id="search" type="search" placeholder="Search every customer: name, phone, email, town…" autocomplete="off" aria-label="Search every customer by name, phone number, email or town">
     </div>
+    <p id="list-note" class="list-note" role="status" hidden></p>
     <div id="toast" class="toast" role="status" hidden></div>
     <div id="list" class="list" role="list"></div>
     <div id="list-empty" class="empty" hidden></div>
@@ -775,6 +777,7 @@
 <script src="/window-state.js"></script>
 <script src="/quote-send-model.js"></script>
 <script src="/attention-model.js"></script>
+<script src="/inbox-search-model.js"></script>
 <script src="/app.js"></script>
 <script src="/pipeline.js"></script>
 <script src="/booking-rules.js"></script>

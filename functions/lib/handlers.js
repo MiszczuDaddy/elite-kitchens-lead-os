@@ -415,6 +415,9 @@ const aiDismissConsult = aiAction(ai.dismissConsult);            // R2b: "Not ne
 const staffAction = (fn) => async (auth, data, deps) => { assertStaff(auth, deps.cfg); return fn({ db: deps.db }, actorOf(auth), data); };
 const setDoNotContact = staffAction(CB.set);
 const attentionAction = staffAction(health.attention);
+// ---- The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): one compact list of every customer. Staff only; it reads, and sends nothing. ----
+const directory = require('./directory');
+const customerDirectory = staffAction((deps, actor, data) => directory.build(deps, data));
 // ---- Phase 11: the Today tab's two stored things (docs/PHASE11_TODAY.md): reminders, and quote follow-up snoozes. Staff only; nothing here sends anything. ----
 const bookingNotices = require('./bookingNotices');
 // ---- Phase 12: the evening-before visit reminder is automatic (index.js, lib/bookingNotices.js). The only thing a person does: when WhatsApp gave no answer to a reminder, look at the chat and say whether it arrived
@@ -453,7 +456,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { resolveBookingNotice, saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

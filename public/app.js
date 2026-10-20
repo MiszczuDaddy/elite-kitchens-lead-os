@@ -29,6 +29,10 @@ const S = {
   contact: null,        // contacts/{phone} of the selected conversation
   dirty: false,         // unsaved edits in the details form
   listLoaded: false,
+  live: [],             // the live list: the 300 newest conversations (S.convs is this, plus the one open customer if they are older)
+  extra: null, unsubExtra: null,   // an older customer opened from the search, watched on their own while open
+  dirState: 'idle', dirItems: [], dirMap: null, dirAt: 0, dirTotal: 0, dirTruncated: false, dirError: '',   // every customer, fetched once when first needed (the All tab, or the first word typed)
+  shownCount: 100,      // how many rows of the All tab / a search are drawn (Show more adds 100)
   attach: null,         // file chosen to send: { file, kind, mime, url }
 };
 
@@ -201,14 +205,17 @@ function stopListening() {
   if (window.TODAY) TODAY.stop();
   if (window.PUSH) PUSH.stop();
   S.contact = null; S.dirty = false;
-  S.convs = []; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
+  if (S.unsubExtra) { S.unsubExtra(); S.unsubExtra = null; }
+  S.convs = []; S.live = []; S.extra = null; S.dirState = 'idle'; S.dirItems = []; S.dirMap = null; S.query = ''; S.shownCount = 100; S.selected = null; S.msgs = []; S.pending = []; S.listLoaded = false;
 }
 
 // ---------- conversation list ----------
 function watchList() {
   S.unsubList = db.collection('conversations').orderBy('updatedAt', 'desc').limit(300).onSnapshot((snap) => {
-    S.convs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    S.live = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    S.convs = withExtra(S.live);
     S.listLoaded = true;
+    syncExtra();
     renderList();
     renderThreadHeader();
     renderDetails(false);          // keeps the stage dates line current when the stage changes
@@ -228,20 +235,65 @@ function matchesQuery(c, q) {
   return c.id.includes(d) || (d.startsWith('0') && c.id.includes(d.slice(1)));
 }
 
+// ---- Phase 13 (replaced): the "All" tab and the search across EVERY customer (docs/INBOX_ALL_AND_SEARCH.md) ----
+// The live list above holds the 300 newest chats. The directory is one compact row per customer, fetched once when it is first needed (the All tab, or the first word typed), so everyone can be found.
+// withExtra / syncExtra: a customer opened from the search who is not among the 300 is watched on their own and joins S.convs while open, so every part of the screen works for them.
+const withExtra = (list) => (S.extra && S.selected === S.extra.id && !list.some((c) => c.id === S.extra.id) ? [...list, S.extra] : list);
+function syncExtra() {
+  const id = S.selected, need = !!id && S.listLoaded && !S.live.some((c) => c.id === id);
+  if (!need) {
+    if (S.unsubExtra) { S.unsubExtra(); S.unsubExtra = null; }
+    if (S.extra) { S.extra = null; S.convs = S.live; }
+    return;
+  }
+  if (S.extra && S.extra.id === id) return;
+  if (S.unsubExtra) S.unsubExtra();
+  const seed = S.dirMap && S.dirMap.get(id);                                      // what the directory already knows (name, town, stage) shows at once; the real record replaces it a moment later
+  S.extra = seed ? { ...seed } : null; S.convs = withExtra(S.live);
+  S.unsubExtra = db.collection('conversations').doc(id).onSnapshot((d) => {
+    if (S.selected !== id) return;
+    S.extra = d.exists ? { id, ...d.data() } : null; S.convs = withExtra(S.live);
+    renderList(); renderThreadHeader(); renderDetails(false); updateComposer();
+    if (window.QUOTES && QUOTES.convChanged) QUOTES.convChanged();
+    maybeMarkRead();
+  }, () => { /* the chat itself shows its own error */ });
+}
+async function ensureDirectory(force) {
+  if (S.dirState === 'loading') return;
+  if (!force && S.dirState === 'ready' && Date.now() - S.dirAt < 10 * 60000) return;
+  S.dirState = 'loading'; renderList();
+  try {
+    const r = (await call('customerDirectory')({})).data;
+    S.dirItems = InboxSearch.fromRows(r.rows); S.dirMap = InboxSearch.index(S.dirItems); S.dirTruncated = !!r.truncated; S.dirTotal = r.total || S.dirItems.length; S.dirAt = Date.now(); S.dirState = 'ready';
+  } catch (e) { S.dirState = 'error'; S.dirError = errText(e); }
+  renderList();
+}
+const PAGE = 100;
 function renderList() {
   const q = S.query.trim().toLowerCase();
-  const stage = INBOX_STATUSES[S.statusFilter];
+  const allTab = S.statusFilter === 'all';
+  const stage = allTab ? 'All' : INBOX_STATUSES[S.statusFilter];
   const list = $('list');
   const keep = list.scrollTop;
   const consultOnly = !!(window.CONSULT && CONSULT.filter && CONSULT.count());       // Phase 9 R2b: only the customers waiting for you to book a consultation
-  const shown = S.convs.filter((c) => consultOnly ? CONSULT.has(c) && (!q || matchesQuery(c, q)) : q ? matchesQuery(c, q) : inboxStatus(c) === S.statusFilter);
-  list.replaceChildren(...shown.map(convItem));
+  let shown, more = 0, note = '';
+  if (!consultOnly && (allTab || q)) {
+    const dir = S.dirState === 'ready', all = q ? InboxSearch.search(S.convs, dir ? S.dirItems : [], S.dirMap, S.query) : InboxSearch.union(S.convs, dir ? S.dirItems : [], S.dirMap);
+    shown = all.slice(0, S.shownCount); more = all.length - shown.length;
+    if (S.dirState === 'loading') note = q ? 'Searching the latest chats while every customer loads…' : 'Loading every customer…';
+    else if (S.dirState === 'error') note = 'Could not load the older customers (' + S.dirError + '). Showing the latest 300 chats. Press the All tab again to retry.';
+    else if (dir) note = (S.dirTruncated ? 'Showing the ' + S.dirTotal.toLocaleString('en-IE') + ' most recent customers. ' : '') + (q ? all.length.toLocaleString('en-IE') + ' found' : all.length.toLocaleString('en-IE') + ' customers');
+  } else shown = S.convs.filter((c) => consultOnly ? CONSULT.has(c) && (!q || matchesQuery(c, q)) : q ? matchesQuery(c, q) : inboxStatus(c) === S.statusFilter);
+  const kids = shown.map(convItem);
+  if (more > 0) { const b = el('button', 'list-more', `Show ${Math.min(PAGE, more)} more (${more.toLocaleString('en-IE')} left)`); b.type = 'button'; b.onclick = () => { S.shownCount += PAGE; renderList(); }; kids.push(b); }
+  list.replaceChildren(...kids);
   list.scrollTop = keep;
+  const ln = $('list-note'); ln.hidden = !note; ln.textContent = note;
 
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
-  else if (!S.convs.length) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = q ? 'No conversations match your search across the stages. Try another name, phone number or location.' : 'No conversations marked ' + stage + '. Choose another stage to find a customer.'; }
+  else if (!S.convs.length && !(S.dirItems && S.dirItems.length)) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = S.dirState === 'loading' ? 'Searching…' : q ? 'No customer matches your search. Try another name, phone number, email or town.' : allTab ? 'No customers yet.' : 'No conversations marked ' + stage + '. Choose another stage to see more.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;
@@ -252,12 +304,13 @@ function renderList() {
   document.title = (n ? `(${n}) ` : '') + 'Inbox · Elite Kitchens';
   for (const button of $('status-filters').querySelectorAll('button')) {
     const status = button.dataset.status;
-    const unread = S.convs.filter(c => inboxStatus(c) === status && isUnread(c)).length;
+    const unread = S.convs.filter(c => (status === 'all' || inboxStatus(c) === status) && isUnread(c)).length;
     button.setAttribute('aria-pressed', String(status === S.statusFilter));
-    button.setAttribute('aria-label', INBOX_STATUSES[status] + (unread ? ', ' + unread + ' unread conversation' + (unread === 1 ? '' : 's') : ''));
+    button.setAttribute('aria-label', (status === 'all' ? 'All conversations' : INBOX_STATUSES[status]) + (unread ? ', ' + unread + ' unread conversation' + (unread === 1 ? '' : 's') : ''));
     button.querySelector('.status-unread').hidden = !unread;
   }
 }
+
 
 function convItem(c) {
   const unread = isUnread(c);
@@ -270,13 +323,13 @@ function convItem(c) {
   const top = el('div', 'conv-top');
   top.append(el('div', 'conv-name', displayName(c)), el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
-  const tag = [S.query.trim() ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
+  const tag = [(S.query.trim() || S.statusFilter === 'all') ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
   if (tag) body.append(el('div', 'conv-sub', tag));
   if (window.CONSULT && CONSULT.has(c)) body.append(el('div', 'conv-consult', 'Needs booking'));
   if (dncOf(c)) body.append(el('div', 'conv-dnc', 'Do not contact'));                                                  // Phase 10
   if (c.receptionist && c.receptionist.notifyFailed) body.append(el('div', 'conv-alert', 'Alert did not reach your phone'));   // Phase 10: see Needs attention
   const prev = el('div', 'conv-prev');
-  prev.append(el('span', 't', previewOf(c) || ' '));
+  prev.append(el('span', 't', previewOf(c) || (c.fromDirectory && c.email) || ' '));
   if (unread) {
     if (typeof c.unreadCount === 'number' && c.unreadCount > 0) { const b = el('span', 'badge', c.unreadCount > 99 ? '99+' : String(c.unreadCount)); b.title = c.unreadCount + ' unread'; prev.append(b); }
     else { const d = el('span', 'dot'); d.title = 'Unread'; prev.append(d); }
@@ -289,11 +342,12 @@ function convItem(c) {
   return item;
 }
 
-$('search').addEventListener('input', (e) => { S.query = e.target.value; renderList(); });
+$('search').addEventListener('input', (e) => { S.query = e.target.value; S.shownCount = 100; if (S.query.trim()) ensureDirectory(); renderList(); });
 $('status-filters').addEventListener('click', e => {
   const button = e.target.closest('button[data-status]');
   if (!button) return;
   S.statusFilter = button.dataset.status;
+  S.shownCount = 100; if (S.statusFilter === 'all') ensureDirectory();
   $('list').scrollTop = 0;
   renderList();
 });
@@ -390,6 +444,7 @@ function closeConversation(fromHash) {
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
   S.selected = null; S.msgs = []; S.pending = [];
+  syncExtra();
   if (window.REPLY) REPLY.onSelect(null);
   watchContact(null);
   $('thread').hidden = true; $('thread-empty').hidden = false;
@@ -416,6 +471,7 @@ function openConversation(id, fromHash) {
   if (S.unsubMsgs) { S.unsubMsgs(); S.unsubMsgs = null; }
   clearAttachment();
   S.selected = id; S.msgs = []; S.pending = []; banner('');
+  syncExtra();                                                      // an older customer (not among the 300 newest) is watched on their own while open
   if (window.REPLY) REPLY.onSelect(id);                // Phase 9 R1: the Suggest reply button follows the open chat
   $('text').value = messageDrafts.get(id) || ''; $('text').style.height = 'auto';
   if (!fromHash) history.replaceState(null, '', '#c/' + id);
