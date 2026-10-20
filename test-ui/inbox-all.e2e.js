@@ -138,7 +138,7 @@ const OLD = {
   await mp.goto('http://127.0.0.1:5055/'); await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
   await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; }); await mp.waitForSelector('#list .conv');
   const m = await mp.evaluate(() => { const r = (e) => e.getBoundingClientRect(), tabs = [...document.querySelectorAll('#status-filters button')]; return { tabs: tabs.length, fits: tabs.every((b) => r(b).right <= innerWidth + 1 && r(b).left >= -1), widths: tabs.map((b) => b.textContent.trim() + ':' + Math.round(r(b).width)).join(' '), clipped: tabs.filter((b) => b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent.trim()), scrollOk: document.documentElement.scrollWidth <= innerWidth + 1 }; });
-  assert.equal(m.tabs, 6); assert.equal(m.fits, true, 'six tabs fit on a phone'); assert.equal(m.scrollOk, true); assert.deepEqual(m.clipped, [], 'no tab label is cut off: ' + m.widths);
+  assert.equal(m.tabs, 6); assert.equal(m.fits, true, 'six tabs fit on a phone, in two rows of three'); assert.equal(m.scrollOk, true); assert.deepEqual(m.clipped, [], 'no tab label is cut off: ' + m.widths);
   await mp.click('#status-filters button[data-status="all"]'); await until(async () => /344 customers/.test(await mp.textContent('#list-note')), 'phone: all customers');
   await mp.fill('#search', 'zoe'); await until(async () => (await mp.locator('#list .conv .conv-name').allInnerTexts()).includes('Zoe Oldham'), 'phone: search finds the old customer');
   assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);

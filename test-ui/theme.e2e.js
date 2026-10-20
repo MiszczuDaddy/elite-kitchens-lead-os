@@ -118,7 +118,7 @@ const rgb = (c) => c.match(/\d+(\.\d+)?/g).slice(0, 3).join(',');
   for (const s of STAGES) assert.equal(await stageColour(light.page, `.lane[data-stage="${s}"] .lane-title`), inboxLight[s], 'Inbox and Pipeline dot colour for ' + s);
   ok('each stage has the identical dot colour in the Inbox chips and the Pipeline headings (and on a phone)');
   await light.page.click('#nav-inbox');
-  assert.deepEqual((await light.page.locator('#status-filters button').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim()), ['New lead', 'Booked', 'Quoted', 'Won', 'Closed']);
+  assert.deepEqual((await light.page.locator('#status-filters button').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim()), ['All', 'New lead', 'Booked', 'Quoted', 'Won', 'Closed']);
   assert.equal((await light.page.textContent('h1')).replace(/\s+/g, ' ').trim().replace(/\d+$/, '').trim(), 'Inbox');
   assert.equal(await light.page.locator('#status-filters button[data-status="inbox"]').getAttribute('data-status'), 'inbox');            // stored value unchanged
   assert.equal(await light.page.locator('#conversation-status option[value="inbox"]').innerText(), 'New lead');
@@ -151,13 +151,13 @@ const rgb = (c) => c.match(/\d+(\.\d+)?/g).slice(0, 3).join(',');
   await light.page.screenshot({ path: path.join(SHOTS, 'inbox-stage-colours-desktop.png') });
   ok('the status selector in the conversation header shows the stage dot and updates with the status');
 
-  // ---- desktop and tablet widths: the five chips sit side by side without overlapping or clipping ----
+  // ---- desktop and tablet widths: the six chips sit in two rows of three without overlapping or clipping ----
   async function chipsFit(page, label) {
-    const boxes = await page.locator('#status-filters button').evaluateAll((bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { l: r.left, r: r.right, clip: b.scrollWidth > b.clientWidth + 1, t: b.textContent }; }));
-    assert.equal(boxes.length, 5);
-    for (let i = 1; i < boxes.length; i++) assert.ok(boxes[i].l >= boxes[i - 1].r - 0.5, label + ': chips overlap: ' + JSON.stringify(boxes));
+    const boxes = await page.locator('#status-filters button').evaluateAll((bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { l: r.left, r: r.right, tp: r.top, bt: r.bottom, clip: b.scrollWidth > b.clientWidth + 1, t: b.textContent }; }));
+    assert.equal(boxes.length, 6);
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(boxes[j].l >= boxes[i].r - 0.5 || boxes[i].l >= boxes[j].r - 0.5 || boxes[j].tp >= boxes[i].bt - 0.5 || boxes[i].tp >= boxes[j].bt - 0.5, label + ': chips overlap: ' + JSON.stringify(boxes));
     assert.deepEqual(boxes.filter((b) => b.clip).map((b) => b.t), [], label + ': a chip is clipped');
-    const pane = await page.locator('.list-pane').boundingBox(); assert.ok(boxes[4].r <= pane.x + pane.width + 0.5, label + ': chips overflow the pane');
+    const pane = await page.locator('.list-pane').boundingBox(); assert.ok(Math.max(...boxes.map((b) => b.r)) <= pane.x + pane.width + 0.5, label + ': chips overflow the pane');
   }
   await chipsFit(light.page, 'desktop 1360');
   const tab = await open({ viewport: { width: 1024, height: 768 } });
