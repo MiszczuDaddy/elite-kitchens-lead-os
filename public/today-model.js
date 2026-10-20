@@ -165,6 +165,13 @@
     return out;
   }
 
+  // ---- the next visits, for the Upcoming visits panel: any scheduled visit that is not over, soonest first, the next 10 ----
+  const UP_LIMIT = 10;
+  function upcoming(appts, convById, now, limit) {
+    return (appts || []).filter((a) => a && a.status === 'scheduled' && ms(a.start) && (ms(a.end) || ms(a.start)) >= now).sort((a, b) => ms(a.start) - ms(b.start)).slice(0, limit || UP_LIMIT)
+      .map((a) => { const c = convById.get(String(a.phone)) || {}; return { id: a.id, phone: String(a.phone || ''), name: a.customerName || c.name || '', start: ms(a.start), end: ms(a.end), type: a.type || 'consultation', location: String(a.location || '').trim() || String(c.location || '').trim(), appt: a }; });
+  }
+
   // ---- reminders ----
   const dueMs = (r) => (r.dueTime ? dublinMs(...keyParts(r.dueDate), ...r.dueTime.split(':').map(Number)) : null);
   function reminderState(r, now) {                       // 'overdue' | 'today' | 'later'
@@ -224,10 +231,7 @@
     doneToday.sort((a, b) => b.at - a.at);
     const counts = { reply: 0, handover: 0, booking: 0, notice: 0, quote: 0, reminder: 0, leadfix: 0 }, red = { reply: 0, handover: 0, booking: 0, notice: 0, quote: 0, reminder: 0, leadfix: 0 };
     for (const c of cards) for (const t of new Set(c.reasons.map((r) => r.type))) { counts[t]++; if (c.reasons.some((r) => r.type === t && r.urgency === 2)) red[t]++; }
-    // visits today and tomorrow
-    const tomorrow = addDaysKey(today, 1), visits = (input.appts || []).filter((a) => a && a.status === 'scheduled' && ms(a.start) && [today, tomorrow].includes(dateKey(ms(a.start))))
-      .sort((a, b) => ms(a.start) - ms(b.start)).map((a) => ({ id: a.id, phone: String(a.phone || ''), name: a.customerName || '', start: ms(a.start), today: dateKey(ms(a.start)) === today, type: a.type || 'consultation' }));
-    return { cards, counts, red, redTotal: cards.filter((c) => c.urgency === 2).length, later, doneToday, visits, newLeads: newLeads({ convs, convById, contacts, ledger, leadIssues: input.leadIssues, now, today, t0, booked }) };
+    return { cards, counts, red, redTotal: cards.filter((c) => c.urgency === 2).length, later, doneToday, upcoming: upcoming(input.appts, convById, now), newLeads: newLeads({ convs, convById, contacts, ledger, leadIssues: input.leadIssues, now, today, t0, booked }) };
   }
 
   // ---- New Leads Today: every lead that arrived today, with ONE status ----
@@ -272,5 +276,5 @@
     if (m < 24 * 60) return Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' m' : '');
     const days = Math.floor(d / DAY); return days + (days === 1 ? ' day' : ' days');
   }
-  return { build, newLeads, preview, reasonsOf, handoverWhy, isPleasantry, workMinutes, urgencyOf, reminderState, filterCards, since, dateKey, addDaysKey, daysBetween, dayStart, dublinMs, quoteKey, LABEL, TYPES, STATUS_LABEL, PRIORITY, AMBER_MIN, RED_MIN, QUOTE_AMBER_DAYS, QUOTE_RED_DAYS };
+  return { build, upcoming, UP_LIMIT, newLeads, preview, reasonsOf, handoverWhy, isPleasantry, workMinutes, urgencyOf, reminderState, filterCards, since, dateKey, addDaysKey, daysBetween, dayStart, dublinMs, quoteKey, LABEL, TYPES, STATUS_LABEL, PRIORITY, AMBER_MIN, RED_MIN, QUOTE_AMBER_DAYS, QUOTE_RED_DAYS };
 });

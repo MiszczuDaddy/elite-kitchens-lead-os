@@ -289,6 +289,8 @@ window.APPT = (() => {
     A.detailId = a.id; renderDetail(a); showDialog($('appt-detail-dlg'));
     $('appt-detail-close').focus(); syncAgendaLead();
   }
+  // From the Today screen ("Upcoming visits"): the same details window as the calendar, for one visit.
+  function openDetail(a) { A.detailId = a.id; watchAgendaLead(a.phone); renderDetail(a); showDialog($('appt-detail-dlg')); $('appt-detail-close').focus(); }
   function renderTimeline() {
     const host = $('cal-timeline'), keys = CalendarLayout.days(A.selDay, A.view);
     const rangeKey = A.view + ':' + keys[0];
@@ -879,5 +881,5 @@ window.APPT = (() => {
   $('nav-appointments').addEventListener('click', (e) => { if (A.active) e.preventDefault(); });   // already here
   $('d-appt-new').onclick = () => { if (A.customer) openBook(A.customer); };
 
-  return Object.assign(A, { show, hide, stop, watchCustomer, openBook, resolveNotice });
+  return Object.assign(A, { show, hide, stop, watchCustomer, openBook, openDetail, resolveNotice });
 })();

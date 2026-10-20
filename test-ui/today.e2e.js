@@ -215,6 +215,30 @@ const web = http.createServer((req, res) => {
   assert.equal(graph.length, 0, 'saying it arrived sends nothing');
   ok('Today lists a reminder only when it did not go (red "Reminder check", It arrived / It did not arrive); the card leaves by itself; nothing is sent from here');
 
+  // ------------------------------------------------------------ 9d. two columns: the lists on the left (70%), Upcoming visits on the right (30%)
+  const FIRST = ['Zara Zane', 'Yvonne Yates', 'Xavier Xu', 'Wendy West', 'Viktor Vale', 'Uma Underwood', 'Tom Tate', 'Sara Shaw', 'Ruth Ross', 'Quinn Quirke', 'Pia Price', 'Oscar Orr'];
+  for (let k = 0; k < FIRST.length; k++) { const st = Date.now() + (3 + k * 5) * 3600e3; await db.doc('appointments/a_' + String(k).padStart(2, '0').repeat(12)).set({ phone: '3538711200' + String(10 + k), customerName: FIRST[k], type: 'consultation', status: 'scheduled', version: 1, location: 'Place ' + FIRST[k].split(' ')[1], start: T(st), end: T(st + 3600e3), createdAt: T(Date.now()) }); }
+  await db.doc('appointments/a_' + 'cc'.repeat(12)).set({ phone: '353871120099', customerName: 'Cancelled Cara', type: 'consultation', status: 'cancelled', version: 1, start: T(Date.now() + 2 * 3600e3), end: T(Date.now() + 3 * 3600e3), createdAt: T(Date.now()) });
+  await until(async () => (await page.locator('#today-upcoming .td-up').count()) === 10, 'the panel lists the next 10 visits');
+  await page.evaluate(() => { location.hash = '#today'; }); await page.waitForSelector('#today-upcoming .td-up', { state: 'visible' });
+  const zi = 0;                                                                                  // Zara Zane is the soonest visit
+  const rows = await page.locator('#today-upcoming .td-up').evaluateAll((els) => els.map((e) => ({ id: e.dataset.id, t: e.innerText.replace(/\s+/g, ' ').trim(), top: e.getBoundingClientRect().top })));
+  assert.ok(rows.every((r, k) => !k || rows[k - 1].top < r.top), 'one under the other: ' + rows.map((r) => Math.round(r.top)).join(','));
+  assert.ok(!rows.some((r) => /Cancelled Cara/.test(r.t)), 'a cancelled visit is not listed');
+  assert.deepEqual(rows.map((r) => r.t.match(/\b(Zara|Yvonne|Xavier|Wendy|Eva|Viktor|Aoife|Uma|Tom|Sara|Ruth|Quinn)\b/)[1]), ['Zara', 'Yvonne', 'Xavier', 'Wendy', 'Eva', 'Viktor', 'Aoife', 'Uma', 'Tom', 'Sara'], 'the next 10, soonest first: ' + rows.map((r) => r.t).join(' | '));
+  assert.match(rows[zi].t, /\d\d:\d\d/); assert.match(rows[zi].t, /Zara Zane/); assert.match(rows[zi].t, /Place Zane/);
+  assert.match(rows[zi].t, /^(Today|Tomorrow|(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,? )/, 'a date word first: ' + rows[zi].t);
+  assert.equal(await page.locator('.td-visit, #today-visits').count(), 0, 'the small Visits chips are gone');
+  const lay = await page.evaluate(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const m = r('.td-main'), a = r('.td-side'); return { main: m.width, side: a.width, sameTop: Math.abs(m.top - a.top) < 4, sideRight: a.left >= m.right, counts: r('#today-counts').bottom <= m.top + 1, inMain: ['#today-list', '#today-leads', '#today-done'].every((q) => document.querySelector('.td-main').contains(document.querySelector(q))) }; });
+  const ratio = lay.main / (lay.main + lay.side); assert.ok(ratio > 0.64 && ratio < 0.76, 'left about 70%: ' + ratio.toFixed(2)); assert.ok(lay.sameTop && lay.sideRight && lay.counts && lay.inMain, 'columns side by side under the counters: ' + JSON.stringify(lay));
+  await page.screenshot({ path: path.join(SHOTS, 'today-two-columns.png') });
+  await page.locator(`#today-upcoming .td-up[data-id="${rows[zi].id}"]`).click();
+  await until(async () => await page.evaluate(() => document.getElementById('appt-detail-dlg').open), 'clicking a visit opens its details');
+  assert.match(await page.innerText('#appt-detail-dlg'), /Zara Zane/); assert.equal(await page.evaluate(() => location.hash), '#today', 'we stay on Today');
+  await page.screenshot({ path: path.join(SHOTS, 'today-visit-details.png') });
+  await page.click('#appt-detail-close'); await until(async () => !(await page.evaluate(() => document.getElementById('appt-detail-dlg').open)), 'the details close'); assert.equal(await page.evaluate(() => document.getElementById('app').dataset.view), 'today');
+  ok('Today: counters on top, then the lists on the left (about 70%) and "Upcoming visits" on the right (about 30%): the next 10 in order with day, time, name and place; a visit opens its details; the old Visits chips are gone');
+
   // ------------------------------------------------------------ 10. phone: full-width cards
   const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const mp = await mctx.newPage(); mp.on('pageerror', (e) => errors.push(e.message));
@@ -228,6 +252,8 @@ const web = http.createServer((req, res) => {
   });
   assert.equal(m.scrollOk, true, 'no sideways scrolling'); assert.ok(m.widths.length >= 4 && m.widths.every((w) => w >= m.vw - 1), 'full-width cards: ' + m.widths.join(',') + ' of ' + m.vw);
   assert.ok(m.btnH >= 44, 'tap targets at least 44 px: ' + m.btnH); assert.equal(m.cols, 4); assert.equal(m.countW, true); assert.equal(m.over, 0, 'nothing runs off the screen');
+  const stack = await mp.evaluate(() => { const r = (q) => document.querySelector(q).getBoundingClientRect(), vw = innerWidth, side = r('.td-side'), done = r('#today-done'), rows = [...document.querySelectorAll('#today-upcoming .td-up')].map((e) => e.getBoundingClientRect()); return { below: side.top >= done.bottom - 1, full: side.width >= vw - 30, tall: Math.min(...rows.map((x) => x.height)), n: rows.length, fits: rows.every((x) => x.right <= vw + 1) }; });
+  assert.ok(stack.below && stack.full && stack.n === 10 && stack.tall >= 44 && stack.fits, 'phone: Upcoming visits stacks under the lists, full width, 10 rows, easy to tap: ' + JSON.stringify(stack));
   await mp.screenshot({ path: path.join(SHOTS, 'today-mobile.png') });
   await mp.evaluate(() => document.getElementById('today-scroll').scrollTo(0, 99999)); await mp.screenshot({ path: path.join(SHOTS, 'today-mobile-leads.png') });
   await mp.click('#today-back'); await mp.waitForSelector('#to-today'); assert.equal(await mp.$eval('#app', (e) => e.dataset.view), 'list');

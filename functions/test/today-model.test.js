@@ -208,10 +208,18 @@ test('ORDER: red first, then amber, then the rest; the oldest first inside each;
   assert.equal(M.filterCards(r.cards, 'booking').length, 0);
 });
 
-test('VISITS TODAY AND TOMORROW: a small line, soonest first; cancelled visits and later days are left out', () => {
+test('UPCOMING VISITS: the next 10 scheduled visits that are not over, soonest first, with the place; cancelled and finished visits are left out', () => {
   const a = (id, start, over = {}) => ({ id, phone: P1, customerName: 'N' + id, status: 'scheduled', start: ts(start), end: ts(start + HOUR), ...over });
-  const r = build({ appts: [a('3', NOW + DAY + 2 * HOUR), a('1', NOW + 2 * HOUR), a('4', NOW + 2 * DAY + HOUR), a('5', NOW + HOUR, { status: 'cancelled' })] });
-  assert.deepEqual(r.visits.map((v) => [v.id, v.today]), [['1', true], ['3', false]]);
+  const many = Array.from({ length: 13 }, (_, k) => a('m' + String(k).padStart(2, '0'), NOW + (30 - k) * HOUR));                    // listed latest first, to prove they are sorted
+  const r = build({ appts: [...many, a('over', NOW - 3 * HOUR), a('now', NOW - 30 * MIN), a('gone', NOW + HOUR, { status: 'cancelled' }), a('far', NOW + 40 * DAY, { location: ' Cork ' })], convs: [chat(P1, { name: 'Pat Byrne', location: 'Naas' })] });
+  assert.equal(r.upcoming.length, 10, 'never more than 10');
+  assert.deepEqual(r.upcoming.map((v) => v.id).slice(0, 3), ['now', 'm12', 'm11'], 'a visit that is still going on stays; the one that finished is gone; soonest first');
+  assert.ok(r.upcoming.every((v, k, all) => !k || all[k - 1].start <= v.start), 'in order');
+  assert.ok(!r.upcoming.some((v) => ['over', 'gone'].includes(v.id)));
+  assert.deepEqual([r.upcoming[0].name, r.upcoming[0].location, r.upcoming[0].phone], ['N' + 'now', 'Naas', P1], 'the place comes from the customer when the visit has none');
+  const own = build({ appts: [a('x', NOW + HOUR, { location: ' 4 Mill Lane, Swords ' })], convs: [chat(P1, { location: 'Naas' })] }).upcoming[0];
+  assert.equal(own.location, '4 Mill Lane, Swords', 'the visit own place wins');
+  assert.deepEqual(build({}).upcoming, [], 'no visits, no rows');
 });
 
 test('words: how long ago', () => {
