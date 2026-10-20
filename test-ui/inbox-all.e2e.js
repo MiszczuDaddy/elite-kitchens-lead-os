@@ -105,7 +105,7 @@ const OLD = {
   await search('353871110002'); assert.deepEqual(await names(), ['Seán Ó Briain']);
   await search('cork'); assert.deepEqual(await names(), ['Una Dunne'], 'by town');
   await search('pat naas'); assert.deepEqual(await names(), ['Pat Quinn'], 'every word must match');
-  await search('pat cork'); assert.deepEqual(await names(), []); assert.match(await page.textContent('#list-empty'), /No customer matches your search/);
+  await search('pat cork'); assert.deepEqual(await names(), []); assert.match(await page.textContent('#list-empty'), /No conversations match your search/);
   await search('recent 7'); assert.ok((await names()).includes('Recent 7') && (await names()).includes('Recent 70'), 'the recent chats are searched too');
   await search(''); assert.equal(await rows().count(), liveInbox, 'clearing the search brings back the stage tab');
   ok('one search bar finds old, closed and won customers by name, phone (any way of typing it), email and town, from any tab; every word must match');

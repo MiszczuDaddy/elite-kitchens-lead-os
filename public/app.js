@@ -293,7 +293,7 @@ function renderList() {
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
   else if (!S.convs.length && !(S.dirItems && S.dirItems.length)) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = S.dirState === 'loading' ? 'Searching…' : q ? 'No customer matches your search. Try another name, phone number, email or town.' : allTab ? 'No customers yet.' : 'No conversations marked ' + stage + '. Choose another stage to see more.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = S.dirState === 'loading' ? 'Searching…' : q ? 'No conversations match your search across the stages. Try another name, phone number, email or town.' : allTab ? 'No customers yet.' : 'No conversations marked ' + stage + '. Choose another stage to see more.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;

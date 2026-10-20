@@ -322,7 +322,7 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert.equal(await page.locator('.conv').getAttribute('data-phone'), A);
   await page.fill('#search', 'swords');
   assert.equal(await page.locator('.conv').count(), 1); assert.equal(await page.locator('.conv').getAttribute('data-phone'), A);
-  await page.fill('#search', 'nobody');
+  await page.fill('#search', 'nobody'); await page.waitForFunction(() => /No conversations match/.test(document.getElementById('list-empty').textContent));      // the first search also loads every customer: it says "Searching…" until that has finished
   assert.equal(await page.locator('.conv').count(), 0); assert.match(await page.locator('#list-empty').innerText(), /No conversations match/);
   await page.fill('#search', ''); assert.equal(await page.locator('.conv').count(), 2);
   ok('TEST H: search finds the right customer by name, phone (08x or +353) and location');
