@@ -40,6 +40,7 @@
 #   ./scripts/deploy-quote-sending.sh today      Phase 11 (docs/PHASE11_TODAY.md): the 2 functions behind the Today tab (saveReminder, snoozeQuote) and deleteCustomer (it now also erases reminders). Run it BEFORE "live". Does NOT deploy the webhook.
 #   ./scripts/deploy-quote-sending.sh bookings   Phase 12 (docs/PHASE12_BOOKINGS.md): the evening-before visit reminder (bookingReminderSweep, resolveBookingNotice), the Installation visit (appointment, project and calendar functions) and deleteCustomer. Run it BEFORE "live". The evening reminder stays OFF.
 #   ./scripts/deploy-quote-sending.sh reminders on|off   switch the automatic evening-before reminder ON or OFF (writes BOOKING_REMINDERS to the settings file and redeploys bookingReminderSweep). Needs the reminder template (elite_kitchens_consultation_reminder) approved by Meta first.
+#   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
 #   ./scripts/deploy-quote-sending.sh safety     Phase 10 (docs/PHASE10_SAFETY_NET.md): "do not contact" in every send, problems and rejected leads in "Needs attention", the 10-minute health check
 #                                                and the delivery-tick watcher. Asks for the alert email address(es). Does NOT deploy the webhook. Run it BEFORE "live". Backups: scripts/setup-backups.sh.
 # Every functions deploy first saves the revisions it replaces. ./scripts/rollback-quote-sending.sh can put them back only for about a day (Google then
@@ -80,6 +81,7 @@ SAFETY_NEW="setDoNotContact attentionAction healthSweep healthOnMessageWrite"   
 SAFETY_CHANGED="sendReply sendMedia startConversation reopenConversation deliverQuote retryQuoteDelivery sendQuote leadIntake receptionistSweep receptionistOnMessage pushReceipt"   # Phase 10: "do not contact" in every send, the WhatsApp outcome, rejected leads, the receptionist's heartbeat
 SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
 TODAY_NEW="saveReminder snoozeQuote"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
+SEARCH_FUNCS="customerDirectory"                                                                                  # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
 BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
 BOOKING_CALLABLES="resolveBookingNotice updateAppointment cancelAppointment saveProject removeProject deleteCustomer"
@@ -92,7 +94,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,50p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,51p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -421,6 +423,18 @@ case "${1:-}" in
     check_reachable "$TODAY_FUNCS"
     echo "Done. Next: $0 live (the Today screen). To go back: git checkout 5244e73 -- functions, then firebase deploy --only functions:deleteCustomer, and firebase functions:delete $TODAY_NEW --region $REGION --project $PROJECT"
     ;;
+  search)
+    [ -f functions/lib/directory.js ] || { echo "This checkout has no Inbox search code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
+    check_settings; check_access; check_routing $SEARCH_FUNCS
+    echo "Functions: $SEARCH_FUNCS"
+    echo "New: customerDirectory (the compact list of every customer behind the Inbox All tab and search; staff only; it only READS). Nothing is sent to anyone and no existing function changes. NOT deployed: the WhatsApp webhook."
+    confirm "Deploy the Inbox search backend to the LIVE project?"
+    install; deploy_functions $SEARCH_FUNCS
+    echo "==> making the new staff function reachable (it checks the signed-in staff account itself)"
+    gcloud run services add-iam-policy-binding "$(svc customerDirectory)" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: customerDirectory"
+    check_reachable "$SEARCH_FUNCS"
+    echo "Done. Next: $0 live (the screen). To go back: firebase functions:delete customerDirectory --region $REGION --project $PROJECT (the old screen does not use it) and roll the screen back in Firebase console > Hosting."
+    ;;
   bookings)
     [ -f functions/lib/bookingNotices.js ] || { echo "This checkout has no Phase 12 (bookings) code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
     [ -n "$(serving_revision attentionaction)" ] || { echo "Deploy the safety net first: $0 safety"; exit 1; }
@@ -516,6 +530,7 @@ case "${1:-}" in
     if [ -f functions/lib/projects.js ] && [ -z "$(serving_revision createproject)" ]; then echo "Deploy the Projects backend first: $0 projects"; exit 1; fi
     if [ -f functions/lib/push.js ] && [ -z "$(serving_revision pushreceipt)" ]; then echo "Deploy the push notifications backend first: $0 push"; exit 1; fi        # Phase 8: the screen and the /pushReceipt rewrite need these functions
     if [ -f functions/lib/ai.js ] && [ -z "$(serving_revision aichat)" ]; then echo "Deploy the AI assistant backend first: $0 ai"; exit 1; fi
+    if [ -f functions/lib/directory.js ] && [ -z "$(serving_revision customerdirectory)" ]; then echo "Deploy the Inbox search backend first: $0 search"; exit 1; fi        # the Inbox All tab and search call customerDirectory
     if [ -f functions/lib/bookingNotices.js ] && [ -z "$(serving_revision resolvebookingnotice)" ]; then echo "Deploy the bookings backend first: $0 bookings"; exit 1; fi        # Phase 12: the screen calls resolveBookingNotice
     if [ -f functions/lib/today.js ] && [ -z "$(serving_revision savereminder)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # Phase 11: the screen calls saveReminder and snoozeQuote
     if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact

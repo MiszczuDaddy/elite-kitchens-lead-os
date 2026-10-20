@@ -423,6 +423,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 [data-stage=quoted], [data-status=quoted] { --st: var(--st-quoted); --st-rgb: var(--st-quoted-rgb); --tint: .05; --tint-drag: .11; }
 [data-stage=won], [data-status=won] { --st: var(--st-won); --st-rgb: var(--st-won-rgb); --tint: .055; --tint-drag: .12; }
 [data-stage=closed], [data-status=closed] { --st: var(--st-closed); --st-rgb: var(--st-closed-rgb); --tint: .055; --tint-drag: .12; }
+[data-status=all] { --st: var(--muted); --st-rgb: 98 105 112; --tint: .05; --tint-drag: .11; }
 .lane { position: relative; isolation: isolate; min-width: 0; min-height: 280px; padding-top: 16px; }
 .lane::before { content: ''; position: absolute; inset: 6px -6px 0; border-radius: 8px; background: rgb(var(--st-rgb) / var(--tint)); z-index: -1; transition: background-color 120ms ease-out; }
 .lane.drop-target::before { background: rgb(var(--st-rgb) / var(--tint-drag)); }
@@ -1269,3 +1270,8 @@ div.td-open { cursor: default; }
 .appt-notice-needs .appt-notice-text { color: var(--ink); font-weight: 600; }
 .appt-notice-block { color: var(--err); }
 @media (max-width: 899px) { .appt-notice .linkbtn { display: inline-flex; align-items: center; min-height: 36px; } }
+
+/* the Inbox "All" tab and search across every customer */
+.list-note { margin: -8px 18px 10px; font-size: 12.5px; color: var(--muted); }
+.list-more { display: block; width: calc(100% - 24px); min-height: 44px; margin: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+.list-more:hover { background: var(--hover); }
