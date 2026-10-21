@@ -177,6 +177,15 @@ window.TODAY = (() => {
     b.append(top, el('div', 'td-reason', l.text), el('div', 'td-meta', [l.at ? hhmm(l.at) : '', l.source, l.facts].filter(Boolean).join(' · ')));
     return b;
   }
+  const VTYPE = { consultation: "", site_visit: "Site visit", installation: "Installation", other: "Other" };
+  function upRow(v, now) {
+    const key = M.dateKey(v.start), today = M.dateKey(now), word = key === today ? 'Today' : key === M.addDaysKey(today, 1) ? 'Tomorrow' : new Intl.DateTimeFormat('en-IE', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(v.start));
+    const b = el('button', 'td-up'); b.type = 'button'; b.dataset.id = v.id; b.setAttribute('aria-label', `${word} at ${hhmm(v.start)}: ${v.name || 'visit'}. Open the details`);
+    const when = el('span', 'td-up-when'); when.append(el('strong', null, word), el('span', null, hhmm(v.start)));
+    const who = el('span', 'td-up-who'); who.append(el('strong', 'td-up-name', v.name || formatPhone(v.phone)), el('span', 'td-up-loc', [v.location, VTYPE[v.type]].filter(Boolean).join(' · ') || ' '));
+    b.append(when, who); b.onclick = () => { if (window.APPT && APPT.openDetail) APPT.openDetail(v.appt); };
+    return b;
+  }
   function render() {
     const r = compute(); badges(r);
     if (!T.active) return;
@@ -194,9 +203,9 @@ window.TODAY = (() => {
       b.setAttribute('aria-label', `${M.LABEL[t]}: ${r.counts[t]}${r.red[t] ? ', ' + r.red[t] + ' overdue' : ''}. ${T.filter === t ? 'Showing only these. Press to show everything.' : 'Press to show only these.'}`);
       b.append(el('span', 'td-count-n', String(r.counts[t])), el('span', 'td-count-l', M.LABEL[t])); b.onclick = () => { T.filter = T.filter === t ? null : t; schedule(); }; counts.append(b);
     }
-    // visits today and tomorrow
-    const vs = $('today-visits'); vs.hidden = !r.visits.length; vs.replaceChildren();
-    if (r.visits.length) { vs.append(el('span', 'td-visits-l', 'Visits')); for (const v of r.visits.slice(0, 8)) { const b = el('button', 'td-visit', `${v.today ? 'Today' : 'Tomorrow'} ${hhmm(v.start)} ${v.name || ''}`.trim()); b.type = 'button'; b.onclick = () => go('#c/' + v.phone); vs.append(b); } }
+    // the Upcoming visits panel (right-hand column): the next 10 visits, soonest first; each one opens its details
+    const up = $('today-upcoming'); up.replaceChildren();
+    if (!ready) up.append(el('p', 'td-empty', 'Loading…')); else if (!r.upcoming.length) up.append(el('p', 'td-empty', 'No visits booked.')); else up.append(...r.upcoming.map((v) => upRow(v, now)));
     // the list
     const shown = M.filterCards(r.cards, T.filter), list = $('today-list'), keep = $('today-scroll').scrollTop;
     list.replaceChildren(...shown.map((c) => cardNode(c, now))); $('today-scroll').scrollTop = keep;

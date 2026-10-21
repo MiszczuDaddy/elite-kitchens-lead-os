@@ -121,7 +121,8 @@
       <div id="today-toast" class="toast q-toast" role="status" aria-live="polite" hidden></div>
       <div id="today-health" class="td-health" role="status"></div>
       <div id="today-counts" class="td-counts" role="group" aria-label="Show only one kind of task"></div>
-      <div id="today-visits" class="td-visits" hidden></div>
+      <div class="td-cols">
+      <div class="td-main">
       <section class="td-sec" aria-labelledby="today-todo-h">
         <h2 id="today-todo-h" class="td-h">To do <span id="today-todo-n" class="td-n"></span></h2>
         <div id="today-list" class="td-list"></div>
@@ -135,6 +136,9 @@
       </section>
       <details id="today-later" class="td-fold" hidden><summary>Coming up <span id="today-later-n" class="td-n"></span></summary><div id="today-later-list" class="td-list"></div></details>
       <details id="today-done" class="td-fold" hidden><summary>Done today <span id="today-done-n" class="td-n"></span></summary><div id="today-done-list" class="td-list"></div></details>
+      </div>
+      <aside class="td-side" aria-labelledby="today-up-h"><section class="td-panel"><h2 id="today-up-h" class="td-h">Upcoming visits</h2><div id="today-upcoming" class="td-up-list"></div></section></aside>
+      </div>
     </div>
   </main>
 
