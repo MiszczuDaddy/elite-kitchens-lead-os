@@ -609,8 +609,11 @@ test('every stage that deploys functions runs the routing check BEFORE it asks f
   before(stage('projects'), 'projects'); assert.match(stage('projects'), /check_routing \$PROJECT_FUNCS/);
   before(stage('push'), 'push'); assert.match(stage('push'), /check_routing \$PUSH_FUNCS/);
   before(stage('ai'), 'ai'); assert.match(stage('ai'), /check_routing \$AI_FUNCS/);
-  const help = s.split('\n').slice(0, 51).join('\n');                       // the usage text is lines 2 to 52 of the script (it was 2 to 47 before Phase 10's safety stage, 2 to 49 before Phase 12's bookings stages, and 2 to 51 before the Inbox search stage)
-  assert.match(s, /^usage\(\) \{ sed -n '2,51p'/m); assert.ok(/^set -euo pipefail/.test(s.split('\n')[51]), 'the usage text ends exactly where the script starts (line 52)');
+  const help = s.split('\n').slice(0, 52).join('\n');                       // the usage text is lines 2 to 52 of the script (it was 2 to 47 before Phase 10's safety stage, 2 to 49 before Phase 12's bookings stages, 2 to 50 before the Inbox search stage, and 2 to 51 before the welcome stage)
+  assert.match(s, /^usage\(\) \{ sed -n '2,52p'/m); assert.ok(/^set -euo pipefail/.test(s.split('\n')[52]), 'the usage text ends exactly where the script starts (line 53)');
+  before(stage('welcome'), 'welcome'); assert.match(stage('welcome'), /check_routing \$WELCOME_FUNCS/); assert.match(help, /deploy-quote-sending\.sh welcome /, 'the help text must show the welcome stage');
+  assert.ok(!/WELCOME_FUNCS="[^"]*\bwebhook\b/.test(s), 'the welcome stage never deploys the WhatsApp webhook'); assert.match(stage('welcome'), /save_revisions \$WELCOME_FUNCS; deploy_functions \$WELCOME_FUNCS/, 'it replaces existing functions, so it saves them first');
+  assert.match(s, /^WELCOME_FUNCS="leadIntake receptionistOnMessage receptionistSweep setAiSettings aiStatus aiSuggestReply"/m, 'the intake and the receptionist always go together (the receptionist must know the new welcome before the intake can send it)');
   before(stage('search'), 'search'); assert.match(stage('search'), /check_routing \$SEARCH_FUNCS/); assert.match(help, /deploy-quote-sending\.sh search /, 'the help text must show the Inbox search stage');
   assert.ok(!/SEARCH_[A-Z]*="[^"]*\bwebhook\b/.test(s), 'the Inbox search stage never deploys the WhatsApp webhook'); assert.doesNotMatch(stage('search'), /save_revisions/, 'no existing function is replaced, so there is nothing to save');
   assert.match(stage('search'), /add-iam-policy-binding "\$\(svc customerDirectory\)"[\s\S]*check_reachable "\$SEARCH_FUNCS"/, 'the new function is made reachable, then checked');

@@ -103,6 +103,13 @@ test('BOTH refused: the customer is saved, the welcome is marked failed and the 
   assert.ok((await db.doc('contacts/' + PHONE).get()).exists, 'the lead itself is never lost');
 });
 
+test('THE SETTING CANNOT BE READ (database hiccup): the standard welcome, never no welcome', async () => {
+  const broken = { doc: () => ({ get: async () => { throw new Error('unavailable'); } }) };
+  assert.equal(await W.chosen(broken), 'standard');
+  assert.equal(await W.chosen({ doc: () => ({ get: async () => ({ exists: false }) }) }), 'standard');
+  assert.equal(await W.chosen({ doc: () => ({ get: async () => ({ exists: true, data: () => ({ welcome: 'personal' }) }) }) }), 'personal');
+});
+
 test('STANDARD refused when it was the choice: no fallback to the new one (the new one is used only when chosen)', async () => {
   answer[STANDARD] = 'refuse';
   const r = await call(); assert.equal(r.body.welcome, 'failed'); assert.deepEqual(names(), [STANDARD]);
