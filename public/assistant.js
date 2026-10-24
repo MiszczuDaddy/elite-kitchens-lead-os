@@ -209,6 +209,10 @@ window.ASSIST = (() => {
     $('as-set-reply').checked = !!s.replyAssistant; $('as-set-reply').disabled = ag.disabled;
     $('as-set-auto').checked = !!s.autoReply; $('as-set-auto').disabled = ag.disabled;
     $('as-set-delay').value = s.replyDelaySeconds != null ? s.replyDelaySeconds : 30; $('as-set-delay').disabled = !s.canApproveData;
+    const wel = s.welcome || {}, first = (t) => String(t || '').replace('{{1}}', '[first name]');          // the welcome a new Meta lead gets: the owner's choice of two approved messages
+    $('as-welcome-standard-text').textContent = first(wel.texts && wel.texts.standard); $('as-welcome-personal-text').textContent = first(wel.texts && wel.texts.personal);
+    $('as-welcome-name').textContent = wel.personalTemplate || '';
+    for (const k of ['standard', 'personal']) { const r = $('as-set-welcome-' + k); r.checked = (wel.chosen || 'standard') === k; r.disabled = !s.canApproveData || !wel.texts; }
     $('as-set-actions').checked = !!act.enabled; $('as-set-actions').disabled = ag.disabled;
     for (const cb of $('as-set-kinds').querySelectorAll('input')) { cb.checked = !!(act.kinds && act.kinds[cb.dataset.kind]); cb.disabled = ag.disabled; }
     if (ag.hint) $('as-set-actions-hint').textContent = ag.hint;
@@ -246,6 +250,8 @@ window.ASSIST = (() => {
       if (!Number.isInteger(delay) || delay < 5 || delay > 90) { $('as-set-err').textContent = 'The reply delay must be a whole number of seconds from 5 to 90.'; return; }
       patch.replyDelaySeconds = delay;
     }
+    const welcome = $('as-set-welcome-personal').checked ? 'personal' : 'standard';
+    if (!$('as-set-welcome-personal').disabled && s.welcome && welcome !== (s.welcome.chosen || 'standard')) patch.welcome = welcome;
     if (!$('as-set-actions').disabled) {
       if ($('as-set-actions').checked !== !!act.enabled) patch.actionsEnabled = $('as-set-actions').checked;
       if (Object.keys(kinds).some((k) => kinds[k] !== !!(act.kinds && act.kinds[k]))) patch.actionKinds = kinds;

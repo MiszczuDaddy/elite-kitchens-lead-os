@@ -86,9 +86,10 @@ function createClient(cfg, fetchImpl = fetch) {
     sendMedia: (to, kind, mediaId, { caption, filename } = {}, opts) => post({ to, type: kind, [kind]: {
       id: mediaId, ...(caption && kind !== 'audio' ? { caption } : {}), ...(kind === 'document' && filename ? { filename } : {}) } }, opts),
     sendText: (to, body, opts) => post({ to, type: 'text', text: { body, preview_url: false } }, opts),
-    sendTemplate: (to, firstName) => post({
+    // name (optional): another approved welcome template with the same single {{1}} (the owner's choice, lib/welcome.js); the language setting is shared.
+    sendTemplate: (to, firstName, { name } = {}) => post({
       to, type: 'template',
-      template: { name: cfg.template, language: { code: cfg.lang },
+      template: { name: name || cfg.template, language: { code: cfg.lang },
         components: [{ type: 'body', parameters: [{ type: 'text', text: firstName }] }] },
     }),
     // An approved template whose header is a DOCUMENT (Phase 6.1 M7: the quotation template): the already-uploaded media id goes into

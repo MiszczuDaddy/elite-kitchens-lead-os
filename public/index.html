@@ -589,6 +589,12 @@
       <label class="as-check"><input id="as-set-auto" type="checkbox"> <span>Automatic receptionist: answers NEW Meta leads by itself after they reply to the welcome message, guides them to a home consultation, collects their preferred days and times and hands over to you with a push. Never between midnight and 7:00. Existing chats are never switched on; each chat has its own Receptionist button to pause or restart it.</span></label>
       <label class="as-delay">Receptionist reply delay (seconds)<input id="as-set-delay" type="number" inputmode="numeric"></label>
       <p id="as-set-delay-hint" class="hint">How long the receptionist waits after the customer's last message before it answers, so a few quick messages get one answer. 5 to 90 seconds; 30 is the default. Only the owner account can change it.</p>
+      <div id="as-set-welcome" class="as-welcome" role="radiogroup" aria-labelledby="as-welcome-title">
+        <strong id="as-welcome-title">Welcome message for new Meta leads</strong>
+        <label class="as-check"><input id="as-set-welcome-standard" name="as-welcome" value="standard" type="radio"> <span>Standard: <em id="as-welcome-standard-text"></em></span></label>
+        <label class="as-check"><input id="as-set-welcome-personal" name="as-welcome" value="personal" type="radio"> <span>Personal: <em id="as-welcome-personal-text"></em></span></label>
+        <p id="as-set-welcome-hint" class="hint">Sent the moment a new Meta lead arrives. Choose Personal only after WhatsApp Manager shows <strong id="as-welcome-name"></strong> as Active. If WhatsApp refuses it, the Standard one goes instead, so no lead is left without a welcome. Only the owner account can change it.</p>
+      </div>
       <label class="as-check"><input id="as-set-actions" type="checkbox"> <span>AI actions: let the assistant PREPARE changes for my approval</span></label>
       <div id="as-set-kinds" class="as-kinds"><label class="as-check as-check-sub"><input id="as-set-kind-customerNote" data-kind="customerNote" type="checkbox"> <span>Customer notes</span></label><label class="as-check as-check-sub"><input id="as-set-kind-projectUpdate" data-kind="projectUpdate" type="checkbox"> <span>Project updates (checklist, installation date, notes)</span></label></div>
       <p id="as-set-actions-hint" class="hint">Nothing is saved until you press Approve on the preview it shows. Only the person who asked can approve.</p>
