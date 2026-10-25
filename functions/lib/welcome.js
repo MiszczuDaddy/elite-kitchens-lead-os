@@ -1,6 +1,6 @@
 // The welcome message a new Meta lead gets (owner's request, 24 Oct 2026): two approved WhatsApp templates, and the owner picks which one goes out with one switch in
 // Assistant > Settings (aiSettings/current.welcome; owner only). Nothing else changes: the lead intake still sends at most one welcome, and the receptionist treats either
-// template as "our welcome" (not as a person taking the chat over).
+// template as "our welcome" (not as a person taking the chat over). The New one also offers the free home consultation (OFFERS_VISIT).
 //   standard  the original welcome (the WHATSAPP_TEMPLATE_NAME setting, elite_kitchens_new_lead). Always the fallback.
 //   personal  the owner's new wording (template welcoming_message_v_2_, created 24 Oct 2026, same language setting). If WhatsApp REFUSES it (a definite 4xx: not approved yet,
 //             paused, deleted, wrong language), the standard welcome is sent instead in the same run, so a lead never goes without a welcome. A refusal means it was
@@ -10,8 +10,11 @@ const PERSONAL_TEMPLATE = 'welcoming_message_v_2_';
 const KEYS = ['standard', 'personal'];
 const TEXT = {
   standard: (first) => `Hi ${first}, thanks for your enquiry with Elite Kitchens...`,
-  personal: (first) => `Hi ${first}, it's Tomasz from Elite Kitchens. Just saw your enquiry about a new kitchen. Have you got any plans or measurements you could send over?`,
+  // Word for word the approved template welcoming_message_v_2_ (pasted by the owner, 25 Oct 2026), with the blank line between its two paragraphs.
+  personal: (first) => `Hi ${first}, thanks for your enquiry with Elite Kitchens. We've received your details and would be happy to help with your new kitchen.\n\nWould you like us to arrange a free home consultation to go through your ideas?`,
 };
+// The New welcome itself OFFERS the home consultation: the receptionist reads the first answer to it as an answer to that offer (aiSchedule.plan).
+const OFFERS_VISIT = { standard: false, personal: true };
 // For the screen: the words of each choice, with "{{1}}" where the first name goes.
 const PREVIEW = { standard: TEXT.standard('{{1}}'), personal: TEXT.personal('{{1}}') };
 
@@ -22,6 +25,8 @@ const bodyOf = (key, standardName, first) => `[template: ${nameOf(key, standardN
 // Is this stored message one of our welcome templates (either wording)?
 const isWelcomeBody = (body, standardName) => typeof body === 'string' && [standardName, PERSONAL_TEMPLATE].some((n) => !!n && body.startsWith('[template: ' + n + ']'));
 const isPersonalBody = (body) => typeof body === 'string' && body.startsWith('[template: ' + PERSONAL_TEMPLATE + ']');
+// Did this stored welcome offer a home consultation?
+const offersVisitBody = (body) => OFFERS_VISIT.personal && isPersonalBody(body);
 
 // Which welcome the owner chose. Any problem reading the setting means the standard welcome (never no welcome).
 async function chosen(db) {
@@ -29,4 +34,4 @@ async function chosen(db) {
   catch (e) { return 'standard'; }
 }
 
-module.exports = { PERSONAL_TEMPLATE, KEYS, PREVIEW, keyOf, nameOf, bodyOf, isWelcomeBody, isPersonalBody, chosen };
+module.exports = { PERSONAL_TEMPLATE, KEYS, PREVIEW, OFFERS_VISIT, keyOf, nameOf, bodyOf, isWelcomeBody, isPersonalBody, offersVisitBody, chosen };

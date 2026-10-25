@@ -157,7 +157,8 @@ test('RECEPTIONIST: the new welcome is OUR welcome (not a person taking over), a
   await chat(body); await inbound('Hi, I am looking for a new kitchen', NOW - 120 * SEC);
   const m = model(), w = waFake();
   assert.equal(await REC.processChat(recDeps(m, w), PH, NOW), 'sent:offer_visit', 'answered as usual');
-  assert.ok(m.texts[0].includes(body.replace(/^\[template: [^\]]+\] /, '')), 'the model read the words of the new welcome');
+  const flat = (t) => t.replace(/\s+/g, ' ');                                            // the chat the model reads puts each message on one line
+  assert.ok(flat(m.texts[0]).includes(flat(body.replace(/^\[template: [^\]]+\] /, ''))), 'the model read the words of the new welcome, all of them');
   // the standard one, as before
   await db.recursiveDelete(db.doc('conversations/' + PH));
   await chat(W.bodyOf('standard', STANDARD, 'Aoife')); await inbound('Hi, I am looking for a new kitchen', NOW - 120 * SEC);
@@ -183,15 +184,67 @@ test('"IS THIS TOMASZ?": the honest line and a person, whatever the model says; 
   for (const fine of ['Thanks Tomasz', 'Hi Tomasz, yes I have some plans', 'Tomasz was recommended to me', 'thanks tomasz, talk soon']) assert.notEqual(plan({}, [NEW_WELCOME, inn(fine)]).step, 'asked_ai', fine);
 });
 
-test('A "NO" TO THE NEW WELCOME\'S QUESTION is not "not interested": no "if you change your mind" line; clear words still count as a no; the standard welcome is unchanged', () => {
-  const declinedLine = (p) => p.step === 'declined' || p.step === 'thinking' || /declined|wants to wait/.test((p.handover && p.handover.reason) || '');
-  for (const no of ['No', 'No not yet', 'not yet', 'No I dont have any', 'nope, nothing yet', 'Not at the moment', 'I\'ll get back to you with them']) {
-    assert.equal(declinedLine(plan({ visit: 'declined' }, [NEW_WELCOME, inn(no)])), false, no);
+
+// ---- the New welcome OFFERS the free home consultation: its first answer is an answer to that offer. Run exactly as the receptionist does it: plan -> analyse -> what is sent (labels test pattern).
+const R = require('../lib/aiReply');
+const KN = require('../lib/aiKnowledge');
+const { SEED } = require('../lib/aiKnowledgeSeed');
+const K = KN.compile(KN.clean(SEED), 1);
+const knFor = (messages) => { const said = messages.filter((m) => m.direction === 'in').map((m) => m.body).join(' '); return { lines: K.lines, check: (x) => KN.checkAnswer(x, K, { extra: said }), linksText: () => '' }; };
+function send(over, messages, { knowledge = false } = {}) {
+  const d = { ...base, ...over, wantsConsultation: ['asked', 'agreed'].includes(over.visit), schedule: { preference: null, opener: '', ...(over.schedule || {}) }, handover: { needed: false, reason: null, ...(over.handover || {}) } };
+  const p = SCH.plan({ decision: d, consult: null, messages, booked: false, nowMs: NOW, natural: true, kn: knowledge ? knFor(messages) : null, who: { name: 'Aoife Kavanagh', projectType: 'Kitchen' } });
+  const decision = p.step === 'none' ? (p.handover ? { ...d, handover: p.handover } : d) : { ...d, reply: p.reply, handover: p.handover || d.handover };
+  const sheet = { known: [{ field: 'name', label: 'Name', value: 'Aoife Kavanagh' }], messages, window: { state: 'open' }, consult: null, nextAppointment: null };
+  const a = R.analyse(sheet, decision, p, { knowledge });
+  return { step: p.step, sent: S_SEND(p, decision, a) ? decision.reply : '', handover: decision.handover };
+}
+const S_SEND = (p, decision, a) => SCH.SEND_STEPS.has(p.step) && !!decision.reply && !a.warnings.length;
+const asksDays = (t) => t.includes(L.ask_next_week);
+
+test('THE NEW WELCOME OFFERS THE CONSULTATION: a yes in the first reply gets the question about days (never the offer again), whatever the model labelled it', () => {
+  assert.ok(W.offersVisitBody(NEW_WELCOME.body)); assert.equal(W.offersVisitBody(OLD_WELCOME.body), false);
+  for (const yes of ['Yes please', 'yes', 'Yeah that would be great', 'Sure', 'Yes interested', 'definitely']) for (const visit of ['agreed', 'asked', 'none']) for (const intent of ['answering_questions', 'wants_consultation', 'greeting', 'new_enquiry']) for (const knowledge of [false, true]) {
+    const r = send({ visit, intent }, [NEW_WELCOME, inn(yes)], { knowledge });
+    assert.equal(r.step, 'ask_next_week', `"${yes}" visit:${visit} intent:${intent} knowledge:${knowledge} -> ${r.step}`);
+    assert.ok(asksDays(r.sent), `the days question is SENT (no warning blocked it): ${yes}`); assert.ok(!r.sent.includes(L.visit_offer), 'never the offer again');
   }
-  for (const clear of ['No thanks, not interested', 'Found someone else', 'I filled it in by mistake', 'Stop messaging me', 'no longer looking', 'I don\'t want a new kitchen']) {
-    assert.equal(declinedLine(plan({ visit: 'declined' }, [NEW_WELCOME, inn(clear)])) || /stop/i.test((plan({ visit: 'declined' }, [NEW_WELCOME, inn(clear)]).handover || {}).reason || ''), true, clear);
+  // the standard welcome is unchanged: a yes to it is never agreement (the visit is offered first)
+  for (const yes of ['Yes please', 'yes']) for (const visit of ['agreed', 'asked']) assert.notEqual(send({ visit, intent: 'answering_questions' }, [OLD_WELCOME, inn(yes)]).step, 'ask_next_week', yes);
+});
+
+test('THE NEW WELCOME: a no in the first reply gets the owner\'s "no problem" line (or a person), never the offer or the days; "stop" goes to a person', () => {
+  for (const no of ['No thanks', 'No', 'Not right now', 'not yet', 'Maybe later', 'Nah, just looking at prices for now']) for (const visit of ['declined', 'none']) {
+    const r = send({ visit, intent: 'answering_questions' }, [NEW_WELCOME, inn(no)], { knowledge: true });
+    assert.ok(['declined', 'thinking'].includes(r.step) || /declined|wants to wait/.test((r.handover && r.handover.reason) || ''), `"${no}" visit:${visit} -> ${r.step}`);
+    assert.ok(!r.sent.includes(L.visit_offer) && !asksDays(r.sent), no);
   }
-  assert.equal(declinedLine(plan({ visit: 'declined' }, [OLD_WELCOME, inn('No not yet')])), true, 'the standard welcome behaves exactly as before');
-  // only the FIRST answer to the welcome: after we wrote something else, a no is a no again
-  assert.equal(declinedLine(plan({ visit: 'declined' }, [NEW_WELCOME, inn('I want a new kitchen'), out(L.visit_offer), inn('No not yet')])), true, 'a no to our offer of a visit');
+  const stop = send({ visit: 'declined', intent: 'answering_questions' }, [NEW_WELCOME, inn('No, stop messaging me')], { knowledge: true });
+  assert.equal(stop.sent, ''); assert.match(stop.handover.reason, /stop messaging/);
+});
+
+test('THE NEW WELCOME: anything else in the first reply goes on as before (one offer from the receptionist, a price question gets the price line); from the second reply on, nothing is different', () => {
+  const r1 = send({ visit: 'none', intent: 'new_enquiry' }, [NEW_WELCOME, inn('Hi, I am looking for a new kitchen, shaker style')]);
+  assert.equal(r1.step, 'offer_visit', 'they did not answer the question: the receptionist asks once, in its own words'); assert.ok(r1.sent.includes(L.visit_offer));
+  const r2 = send({ visit: 'none', intent: 'asking_price_general' }, [NEW_WELCOME, inn('How much would a kitchen cost roughly?')]);
+  assert.ok(r2.sent.startsWith(L.price_general), r2.sent); assert.ok(!asksDays(r2.sent), 'no days before a yes');
+  // second reply: the welcome's offer no longer decides anything (a yes to "are you still looking?" is not agreement to a visit)
+  const later = [NEW_WELCOME, inn('Hi'), out(L.still_looking), inn('yes')];
+  assert.notEqual(send({ visit: 'none', intent: 'greeting' }, later).step, 'ask_next_week');
+  // a staff draft (Suggest reply) is untouched by this rule: a person reads it first
+  const draft = SCH.plan({ decision: { ...base, visit: 'none', intent: 'greeting' }, consult: null, messages: [NEW_WELCOME, inn('yes')], booked: false, nowMs: NOW, natural: false });
+  assert.notEqual(draft.step, 'ask_next_week');
+});
+
+test('THE AI IS TOLD what the welcome said: "our welcome message asked whether they would like a free home consultation" (and the old wording for the standard one)', () => {
+  const sheet = (welcome) => ({ known: [], lead: [], messages: [{ ...welcome, at: '24 Oct, 10:00' }], consult: null, window: { state: 'open' }, nextAppointment: null, stage: 'inbox', now: 'Sat 24 Oct 10:05' });
+  assert.match(R.sheetText(sheet(NEW_WELCOME)), /our welcome message asked whether they would like a free home consultation/);
+  assert.match(R.sheetText(sheet(OLD_WELCOME)), /we have NOT offered a home visit yet/);
+});
+
+test('RECEPTIONIST (end to end): "Yes please" to the New welcome is answered with the days question, once', async () => {
+  await chat(W.bodyOf('personal', STANDARD, 'Aoife')); await inbound('Yes please', NOW - 120 * SEC);
+  const w = waFake();
+  assert.equal(await REC.processChat(recDeps(model(decision({ intent: 'answering_questions', visit: 'agreed', ack: 'thanks' })), w), PH, NOW), 'sent:ask_next_week');
+  assert.equal(w.sent.length, 1); assert.ok(w.sent[0].includes(L.ask_next_week), w.sent[0]);
 });

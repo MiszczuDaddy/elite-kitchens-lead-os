@@ -210,8 +210,8 @@ const ASKS_AI = /\b(?:are|r|were|is)\s+(?:you|u|ya)\s+(?:(?:a|an|actually|really
 // honest line and a person. Only a question counts ("is this Tomasz?", "am I talking to Tomasz", "you're Tomasz, right?"); "Thanks Tomasz" or "Hi Tomasz, yes I have plans" do not.
 const ASKS_OWNER = /\b(?:(?:is|was)\s+(?:this|that|it)|are\s+(?:you|u|ya)|r\s+u|am\s+i\s+(?:talking|speaking|chatting|texting|messaging)\s+(?:to|with))\s+(?:actually\s+|really\s+|mr\.?\s+)?(?:tomasz|tomek)\b|\b(?:you'?re|youre|ur|you\s+are)\s+(?:tomasz|tomek)\b[^.!]*\?|\bwho\s+(?:is|'s)\s+(?:tomasz|tomek)\b/i;
 const asksIfAi = (text) => ASKS_AI.test(String(text || '')) || ASKS_OWNER.test(String(text || ''));
-// Clear words that they do not want to go ahead (the personal welcome's plans question: see plan()).
-const CLEAR_NO = /\b(?:not\s+interested|no\s+longer|no\s+thanks?|no\s+thank\s+you|changed\s+(?:my|our)\s+minds?|(?:found|got|went\s+with|going\s+with|gone\s+with|chose|picked|hired|booked)\s+(?:someone|somebody|another|a\s+different|other|elsewhere)|(?:don'?t|do\s+not|dont)\s+(?:want|need)\s+(?:a|the|any|it|one|anything|a\s+new)\b|not\s+(?:looking|going\s+ahead|proceeding)|(?:by|in)\s+(?:mistake|error|accident)|wrong\s+(?:number|person)|unsubscribe|leave\s+me\s+alone)\b/i;
+// A first reply to the New welcome's offer of a consultation that opens with a no ("No", "No thanks", "Not right now", "Maybe later"): see plan().
+const NO_TO_OFFER = /^\W*(?:no|nope|nah|no\s+thanks?|no\s+thank\s+you|not\s+(?:right\s+)?now|not\s+yet|not\s+at\s+the\s+moment|not\s+for\s+now|maybe\s+later)\b/i;
 // Audit 17 Oct 2026, problems 1 and 2 (a lead who replied "Hi", "Yes interested" or "what happens next?" was left with nothing to answer). Read from the customer's own words, not the model's labels:
 // they say yes or that they are interested (not a visit agreement: the visit is OFFERED, once) ...
 const INTEREST = /\b(?:yes+|yeah|yea|yeh|yep|yup|aye|interested|still looking|definitely|absolutely|sure|go on|go ahead|let'?s do it|sounds good|count me in)\b/i;
@@ -278,10 +278,12 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   const change = d.change && d.change !== 'none' ? d.change : (hand && /change booking/i.test(reason) ? 'move' : 'none');
   const out = (messages || []).filter((m) => m.direction === 'out'), said = (line) => out.some((m) => String(m.body || '').includes(line));
   const latest = latestMessages(messages, { natural }), words = latest.join('\n');
-  // The personal welcome asks whether they have plans or measurements (lib/welcome.js, 24 Oct 2026). Their first answer "no" / "not yet" answers THAT question: it does not turn down a visit (none was
-  // offered yet), so it never gets the "no problem, if you change your mind" line. Only clear words still count as a no ("not interested", "found someone else", "by mistake", "stop").
-  const plansAnswer = natural && visitRaw === 'declined' && !out.some((m) => m.type !== 'template') && out.some((m) => W.isPersonalBody(m.body)) && !CLEAR_NO.test(words) && !STOP.test(words);
-  const visit = plansAnswer ? 'none' : visitRaw;
+  const first = !out.some((m) => m.type !== 'template');
+  // The New welcome (lib/welcome.js, 25 Oct 2026) itself asks "Would you like us to arrange a free home consultation…?". The FIRST reply to it answers that offer (automatic mode only): a yes or
+  // "interested" is agreement, so the days are asked next (never the offer again); a reply that starts with "no" / "not now" / "maybe later" is a no, even when the model left the label empty.
+  // After that first reply, everything works exactly as before (the receptionist's own offer, once).
+  const welcomeOffer = natural && first && out.some((m) => m.type === 'template' && W.offersVisitBody(m.body));
+  const visit = welcomeOffer && visitRaw === 'none' && NO_TO_OFFER.test(words) ? 'declined' : visitRaw;
   // Automatic mode (nobody reads it first): the days and times must be in the customer's own latest words, and agreement to a visit counts only if we really offered one or their own words ask for one
   // (a "yes" to our welcome message labelled as agreement is not). In the staff flow a person reads the draft and the preference summary before anything is sent, so the model's reading stands there.
   const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, prefHeard = natural ? heard(prefRaw, words, nowMs) : prefRaw;
@@ -293,10 +295,10 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   // The line that acknowledges a preference: for a visit asked for today or tomorrow, the owner's "pass your request on" line (audit 17 Oct 2026, problem 5), never a promise of a time.
   const passOn = given && prefHeard && prefHeard.soon ? line('soon') : LINES.acknowledge;
   const person = (why) => ({ step: 'none', reply: null, handover: { needed: true, reason: why }, preference: null });
-  const offered = !!(consult && consult.offered) || said(LINES.visit_offer), agreed = (visit === 'asked' || visit === 'agreed') && (!natural || offered || ASKS_VISIT.test(words));
+  const offered = !!(consult && consult.offered) || said(LINES.visit_offer);
+  const agreed = ((visit === 'asked' || visit === 'agreed') && (!natural || offered || welcomeOffer || ASKS_VISIT.test(words))) || (welcomeOffer && visit !== 'declined' && keen(words));
   const question = hand || !!d.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(d.intent);          // something a person has to answer (nothing is offered or asked meanwhile)
   // R3: the code-built acknowledgement (see ackLine). With no id from the model, an opener the model offered on the first message only means "say hello".
-  const first = !out.some((m) => m.type !== 'template');
   const ackOf = () => ackLine(ACKS.includes(d.ack) ? d.ack : (opener(d.schedule && d.schedule.opener, hasOutbound) ? 'hello' : ''), whoNow, first);
 
   // 1. A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself). Decided by the model's
