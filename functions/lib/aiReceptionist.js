@@ -29,6 +29,7 @@ const store = require('./store');
 const { SEND_STEPS, PAUSE_STEPS, STOP } = require('./aiSchedule');
 const CB = require('./contactBlock');          // Phase 10: "do not contact"
 const H = require('./health');                 // Phase 10: the receptionist's faults become problems in "Needs attention"
+const W = require('./welcome');                // the two welcome wordings
 // Phase 10: tell the health check (deps.health, functions/index.js). Never throws; with no hook (tests of older behaviour) it does nothing.
 const healthReport = (deps, kind, detail) => (deps.health ? Promise.resolve(deps.health.report(kind, detail)).catch(() => null) : null);
 const healthResolve = (deps, kinds) => (deps.health ? Promise.resolve(deps.health.resolve(kinds)).catch(() => null) : null);
@@ -56,7 +57,8 @@ const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...e
 const hourOf = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(new Date(t)));
 const quiet = (t) => hourOf(t) < QUIET_UNTIL_HOUR;
 // Our own welcome template (sent by the lead intake) is not "a person took over".
-const isWelcome = (x, welcomeTemplate) => x.type === 'template' && !!welcomeTemplate && typeof x.body === 'string' && x.body.startsWith('[template: ' + welcomeTemplate + ']');
+// Either wording counts (the standard welcome, or the owner's personal one: lib/welcome.js).
+const isWelcome = (x, welcomeTemplate) => x.type === 'template' && !!welcomeTemplate && W.isWelcomeBody(x.body, welcomeTemplate);
 
 // Hand the chat over: stop the receptionist for this chat and tell the owner (a push with no names and no words).
 // The owner's alert is DURABLE (audit 17 Oct 2026, Astra F1): it is written on the chat together with the pause, BEFORE the push is tried, and it is only cleared once the push went out. A push that fails is

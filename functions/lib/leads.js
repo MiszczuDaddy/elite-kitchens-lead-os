@@ -12,6 +12,7 @@ const LeadAddress = require('./leadAddress');
 const CB = require('./contactBlock');          // Phase 10: "do not contact"
 const LeadIssues = require('./leadIssues');    // Phase 10: rejected leads shown in "Needs attention"
 const health = require('./health');
+const W = require('./welcome');                // which welcome wording goes out (the owner's choice)
 
 const MAX_BODY = 32 * 1024;
 const STALE_CLAIM_MS = 90 * 1000;          // an in-flight claim older than this is considered abandoned
@@ -163,7 +164,6 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: h
     return respond(200, { ok: true, status: 'processed', leadId: id, welcome: welcome.state, newCustomer: info.contactCreated });
   };
   const w = claim.welcome || { state: 'pending' };
-  const bodyText = `[template: ${cfg.template}] Hi ${lead.firstName}, thanks for your enquiry with Elite Kitchens...`;
 
   if (w.state === 'sent' || w.state === 'skipped_recent' || w.state === 'blocked') return finish(w);
   if (w.state === 'sending') {      // an earlier attempt died mid-send: the template may or may not have gone out. Flag it, never resend.
@@ -184,11 +184,21 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: h
   }
 
   await ref.update({ welcome: { state: 'sending', at: now } });
+  // The owner's choice of wording (lib/welcome.js). A personal welcome that WhatsApp refuses outright was definitely not sent, so the standard one goes instead, once.
+  let key = await W.chosen(db), fellBack = false;
+  const send = (k) => wa.sendTemplate(phone, lead.firstName, { name: W.nameOf(k, cfg.template) });
   try {
-    const wamid = await wa.sendTemplate(phone, lead.firstName);
-    await store.storeOutbound(db, phone, { wamid, type: 'template', body: bodyText });
+    let wamid;
+    try { wamid = await send(key); }
+    catch (e) {
+      if (key === 'standard' || classify(e) !== 'permanent') throw e;
+      log('error', 'personal welcome refused: the standard welcome is sent instead', { leadId: id, err: redact(e && e.message) });
+      key = 'standard'; fellBack = true;
+      wamid = await send(key);
+    }
+    await store.storeOutbound(db, phone, { wamid, type: 'template', body: W.bodyOf(key, cfg.template, lead.firstName) });
     await releaseWelcome(db, phone, now);
-    return finish({ state: 'sent', wamid, at: now });
+    return finish({ state: 'sent', wamid, at: now, template: key, ...(fellBack ? { fellBack: true } : {}) });
   } catch (e) {
     const kind = classify(e), err = redact(e && e.message);
     log('error', 'welcome template failed', { leadId: id, kind, err });
@@ -197,7 +207,7 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: h
       await releaseWelcome(db, phone);
       return respond(503, { ok: false, status: 'retry', leadId: id }, { 'Retry-After': '30' });
     }
-    await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`,
+    await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${W.nameOf(key, cfg.template)}]`,
       error: kind === 'unknown' ? 'Welcome message status unknown (no answer from WhatsApp). Check WhatsApp, then send it manually if needed.' : err });
     await releaseWelcome(db, phone);
     return finish({ state: kind === 'unknown' ? 'unknown' : 'failed', error: err, at: now });

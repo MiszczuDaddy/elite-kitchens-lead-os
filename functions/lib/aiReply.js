@@ -6,6 +6,7 @@
 // The receptionist call sees ONE customer only and has NO lookup tools: it cannot read anyone else's data, and the only thing it can do is call reply_decision.
 const S = require('./aiSummary');
 const SCH = require('./aiSchedule');
+const W = require('./welcome');
 const KN = require('./aiKnowledge');
 const LeadAddress = require('./leadAddress');
 const WS = require('./windowState');
@@ -165,7 +166,8 @@ function schedulingText(sh) {
   const asks = SCH.asksSoFar(sh.consult, sh.messages);
   if (sh.consult && sh.consult.stage === 'preference_given') return 'the customer\'s preference was received and passed to the team';
   const offered = !!(sh.consult && sh.consult.offered) || sh.messages.some((m) => m.direction === 'out' && String(m.body || '').includes(SCH.LINES.visit_offer));
-  const visit = offered ? 'we have already offered to call out and have a look at their space' : 'we have NOT offered a home visit yet';
+  const byWelcome = sh.messages.some((m) => m.direction === 'out' && m.type === 'template' && W.offersVisitBody(m.body));          // the New welcome itself offers a consultation (lib/welcome.js)
+  const visit = offered ? 'we have already offered to call out and have a look at their space' : byWelcome ? 'our welcome message asked whether they would like a free home consultation' : 'we have NOT offered a home visit yet';
   return visit + '; ' + (asks === 0 ? 'no question about days asked yet' : asks === 1 ? 'we asked whether next week suits' : 'we asked about next week and the following week');
 }
 function sheetText(sh) {

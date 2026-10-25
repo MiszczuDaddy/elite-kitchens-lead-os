@@ -318,6 +318,18 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   assert.equal((await settingsDoc().get()).data().replyDelaySeconds, 45, 'the new delay is saved');
   await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => document.getElementById('as-set-delay').value === '45'); await page.click('#as-set-cancel'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
   await db.doc('aiSettings/current').update({ replyDelaySeconds: 30 });
+  // the welcome a new Meta lead gets (24 Oct 2026): both texts shown, Standard until the owner picks the new one; saved in the settings document the lead intake reads on every lead
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent));          // the settings have loaded (the texts below are from the earlier opening until then)
+  assert.match(await page.locator('#as-welcome-standard-text').innerText(), /^Hi \[first name\], thanks for your enquiry with Elite Kitchens/); assert.match(await page.locator('#as-welcome-personal-text').innerText(), /^Hi \[first name\]/);
+  assert.equal(await page.locator('#as-set-welcome-standard').isChecked(), true, 'Standard until the owner chooses'); assert.equal(await page.locator('#as-set-welcome-personal').isDisabled(), false, 'the owner can choose');
+  assert.match(await page.locator('#as-welcome-name').innerText(), /^welcoming_message_v_2_$/);
+  await page.check('#as-set-welcome-personal'); await page.click('#as-set-save'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
+  for (let i = 0; i < 40 && (await settingsDoc().get()).data().welcome !== 'personal'; i++) await page.waitForTimeout(150);
+  assert.equal((await settingsDoc().get()).data().welcome, 'personal', 'the new welcome is chosen');
+  await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent)); assert.equal(await page.locator('#as-set-welcome-personal').isChecked(), true, 'shown as chosen when Settings opens again');
+  await page.check('#as-set-welcome-standard'); await page.click('#as-set-save'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
+  for (let i = 0; i < 40 && (await settingsDoc().get()).data().welcome !== 'standard'; i++) await page.waitForTimeout(150);
+  assert.equal((await settingsDoc().get()).data().welcome, 'standard', 'and back to the standard one with one click');
   await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.evaluate(() => { REPLY.checkedAt = 0; REPLY.onSelect(null); }); await page.evaluate((id) => { REPLY.onSelect(id); }, ph.anna); await page.waitForSelector('#recep-btn', { state: 'visible' });
   assert.equal(await page.locator('#recep-btn').innerText(), 'Receptionist: off');
   const recOf = async () => (await db.doc('conversations/' + ph.anna).get()).data().receptionist || null;

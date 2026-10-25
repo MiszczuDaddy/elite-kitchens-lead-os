@@ -1123,6 +1123,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .kn-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 8px; } .kn-bar input { flex: 1 1 180px; margin: 0; } .kn-empty { padding: 14px; background: var(--hover); border-radius: 6px; }
 .dlg .as-delay { display: block; font-size: 14px; margin: 10px 0 2px; } .dlg .as-delay input { display: block; width: 90px; margin-top: 4px; }
 .dlg .as-check-sub { margin-left: 26px; font-size: 13px; color: var(--muted); }
+.dlg .as-welcome { margin: 14px 0 10px; } .dlg .as-welcome > strong { display: block; font-size: 14px; margin-bottom: 8px; } .dlg .as-welcome em { font-style: normal; color: var(--muted); overflow-wrap: anywhere; white-space: pre-line; }
 @media (max-width: 899px) {
   .as-bar { padding: 8px 14px; } .as-notice { margin: 10px 14px 0; } .as-scroll { padding: 14px 14px 6px; } .as-form { padding: 8px 14px max(12px, env(safe-area-inset-bottom)); }
   .as-msg { max-width: 94%; } .as-row textarea { font-size: 16px; } .as-meter { flex-basis: 80px; }

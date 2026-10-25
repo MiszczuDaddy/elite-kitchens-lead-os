@@ -11,6 +11,7 @@
 //     (tomorrow, earlier the same day, confirm, running late) goes to a person with the request.
 //   * A preference given together with a question that needs a person is still recorded (the question is noted for the person).
 // The wording of every line is below, written by code (the owner's own words). The model only reads the chat: it says what the customer wants (visit, change, question, availability and its status).
+const W = require('./welcome');                // which welcome the customer got (the personal one asks about plans)
 const TZ = 'Europe/Dublin';
 const MAX_ASKS = 2;
 const LINES = {
@@ -205,7 +206,12 @@ const ASKS_VISIT = /\b(visit|call (?:out|over|round|around|to the house)|calling
 // They ask whether THEY are talking to a person, a bot or an AI. Only a question put to us counts ("are you a bot", "is this automated", "am I talking to a real person", "u a bot"); the words alone do not
 // ("do you have an automatic opening bin", "is a machine used to cut the doors", "can I see the computer design" are questions about kitchens; audit review of 16 Oct 2026). Any such question gets the honest line.
 const ASKS_AI = /\b(?:are|r|were|is)\s+(?:you|u|ya)\s+(?:(?:a|an|actually|really|just)\s+)*(?:bot|robot|chat ?bot|chatgpt|a\.?i\.?|artificial intelligence|human|real person|real human|actual person|person|automated|machine|computer|virtual assistant)\b|\b(?:is|was)\s+this\s+(?:(?:a|an|actually|really)\s+)*(?:bot|robot|chat ?bot|chatgpt|ai|automated|human|real person|real human|a person)\b|\b(?:am\s+i|are\s+we)\s+(?:talking|speaking|chatting|texting|messaging|writing|typing)\s+(?:to|with)\s+(?:(?:a|an|some)\s+)*(?:real\s+|actual\s+)?(?:person|human|bot|robot|chat ?bot|ai|machine|computer|someone real|somebody real)\b|\b(?:u|you)\s+a\s+(?:bot|robot|ai|real person|human)\b/i;
-const asksIfAi = (text) => ASKS_AI.test(String(text || ''));
+// The personal welcome says "it's Tomasz from Elite Kitchens" (lib/welcome.js, 24 Oct 2026). A customer who asks whether they are talking to Tomasz is asking who they are talking to: the same
+// honest line and a person. Only a question counts ("is this Tomasz?", "am I talking to Tomasz", "you're Tomasz, right?"); "Thanks Tomasz" or "Hi Tomasz, yes I have plans" do not.
+const ASKS_OWNER = /\b(?:(?:is|was)\s+(?:this|that|it)|are\s+(?:you|u|ya)|r\s+u|am\s+i\s+(?:talking|speaking|chatting|texting|messaging)\s+(?:to|with))\s+(?:actually\s+|really\s+|mr\.?\s+)?(?:tomasz|tomek)\b|\b(?:you'?re|youre|ur|you\s+are)\s+(?:tomasz|tomek)\b[^.!]*\?|\bwho\s+(?:is|'s)\s+(?:tomasz|tomek)\b/i;
+const asksIfAi = (text) => ASKS_AI.test(String(text || '')) || ASKS_OWNER.test(String(text || ''));
+// A first reply to the New welcome's offer of a consultation that opens with a no ("No", "No thanks", "Not right now", "Maybe later"): see plan().
+const NO_TO_OFFER = /^\W*(?:no|nope|nah|no\s+thanks?|no\s+thank\s+you|not\s+(?:right\s+)?now|not\s+yet|not\s+at\s+the\s+moment|not\s+for\s+now|maybe\s+later)\b/i;
 // Audit 17 Oct 2026, problems 1 and 2 (a lead who replied "Hi", "Yes interested" or "what happens next?" was left with nothing to answer). Read from the customer's own words, not the model's labels:
 // they say yes or that they are interested (not a visit agreement: the visit is OFFERED, once) ...
 const INTEREST = /\b(?:yes+|yeah|yea|yeh|yep|yup|aye|interested|still looking|definitely|absolutely|sure|go on|go ahead|let'?s do it|sounds good|count me in)\b/i;
@@ -268,10 +274,16 @@ function tidy(text, { partly = false, links = false } = {}) {
 function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null, who = null, ownLines = null }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
-  const visit = d.visit || (d.wantsConsultation ? 'asked' : 'none');
+  const visitRaw = d.visit || (d.wantsConsultation ? 'asked' : 'none');
   const change = d.change && d.change !== 'none' ? d.change : (hand && /change booking/i.test(reason) ? 'move' : 'none');
   const out = (messages || []).filter((m) => m.direction === 'out'), said = (line) => out.some((m) => String(m.body || '').includes(line));
   const latest = latestMessages(messages, { natural }), words = latest.join('\n');
+  const first = !out.some((m) => m.type !== 'template');
+  // The New welcome (lib/welcome.js, 25 Oct 2026) itself asks "Would you like us to arrange a free home consultation…?". The FIRST reply to it answers that offer (automatic mode only): a yes or
+  // "interested" is agreement, so the days are asked next (never the offer again); a reply that starts with "no" / "not now" / "maybe later" is a no, even when the model left the label empty.
+  // After that first reply, everything works exactly as before (the receptionist's own offer, once).
+  const welcomeOffer = natural && first && out.some((m) => m.type === 'template' && W.offersVisitBody(m.body));
+  const visit = welcomeOffer && visitRaw === 'none' && NO_TO_OFFER.test(words) ? 'declined' : visitRaw;
   // Automatic mode (nobody reads it first): the days and times must be in the customer's own latest words, and agreement to a visit counts only if we really offered one or their own words ask for one
   // (a "yes" to our welcome message labelled as agreement is not). In the staff flow a person reads the draft and the preference summary before anything is sent, so the model's reading stands there.
   const hasOutbound = out.length > 0, prefRaw = d.schedule && d.schedule.preference, prefHeard = natural ? heard(prefRaw, words, nowMs) : prefRaw;
@@ -283,15 +295,15 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   // The line that acknowledges a preference: for a visit asked for today or tomorrow, the owner's "pass your request on" line (audit 17 Oct 2026, problem 5), never a promise of a time.
   const passOn = given && prefHeard && prefHeard.soon ? line('soon') : LINES.acknowledge;
   const person = (why) => ({ step: 'none', reply: null, handover: { needed: true, reason: why }, preference: null });
-  const offered = !!(consult && consult.offered) || said(LINES.visit_offer), agreed = (visit === 'asked' || visit === 'agreed') && (!natural || offered || ASKS_VISIT.test(words));
+  const offered = !!(consult && consult.offered) || said(LINES.visit_offer);
+  const agreed = ((visit === 'asked' || visit === 'agreed') && (!natural || offered || welcomeOffer || ASKS_VISIT.test(words))) || (welcomeOffer && visit !== 'declined' && keen(words));
   const question = hand || !!d.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(d.intent);          // something a person has to answer (nothing is offered or asked meanwhile)
   // R3: the code-built acknowledgement (see ackLine). With no id from the model, an opener the model offered on the first message only means "say hello".
-  const first = !out.some((m) => m.type !== 'template');
   const ackOf = () => ackLine(ACKS.includes(d.ack) ? d.ack : (opener(d.schedule && d.schedule.opener, hasOutbound) ? 'hello' : ''), whoNow, first);
 
   // 1. A customer who asks whether they are talking to a person or an AI is told the truth, in one short line, and handed over (the system never lets the model answer that itself). Decided by the model's
   //    label, its hand-over reason, OR the customer's own words: a truthful answer never depends on how the model worded a reason.
-  if (d.special === 'asked_if_ai' || (hand && /asked if ai|\b(?:asks?|asked|asking|wants to know|wondering)\b[^.]{0,30}\b(?:whether|if)\b[^.]{0,40}\b(?:bot|robot|ai|a\.i|automated|real person|human)\b/i.test(reason)) || latest.some(asksIfAi)) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: 'asked if AI' }, preference: null };
+  if (d.special === 'asked_if_ai' || (hand && /asked if ai|\b(?:asks?|asked|asking|wants to know|wondering)\b[^.]{0,30}\b(?:whether|if)\b[^.]{0,40}\b(?:bot|robot|ai|a\.i|automated|real person|human)\b/i.test(reason)) || latest.some(asksIfAi)) return { step: 'asked_ai', reply: LINES.asked_ai, handover: { needed: true, reason: latest.some((t) => ASKS_OWNER.test(t)) && !latest.some((t) => ASKS_AI.test(t)) ? 'asked if this is Tomasz' : 'asked if AI' }, preference: null };
 
   // ORDER (audit 16 Oct 2026, finding 7): what the customer IS (upset, someone who wants a person, writing in another language, outside our area) comes before what they ask about a booking. A booked customer
   // who is upset and says "cancel" gets the complaint line and a person, not the sales question "do you want to move it?"; one who asks for a person is not asked about days. Order: asked-if-AI, complaint, the
