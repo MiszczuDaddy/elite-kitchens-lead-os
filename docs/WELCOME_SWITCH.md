@@ -82,4 +82,6 @@ These ran on 25 Oct 2026, on this PC, on the `welcome-switch` branch. They used 
 | Deploy script: the `welcome` step checks first, never deploys the webhook, and shows in the help | ✅ |
 | Screen: Assistant (21 checks, including the switch) | ✅ 21 of 21 |
 | Screen: Meta leads arriving | ✅ 11 of 11 |
-| **Full regression on the final code** | __FULL__ |
+| **Full regression on the final code** (`e0b5500`, 25 Oct, evening) | ✅ **Server: 999 of 999** (949 tests plus the 50 deploy-script tests) |
+| | ✅ **Screen: 21 of 23 suites pass.**<br>• 16 passed first time.<br>• 5 (conversion, crm, dnd, assistant, quotes) failed only on "wait for the save" timers while the slow deploy-script test ran beside them. Run alone, each passed in full.<br>• 2 (appointments, lead-address) stop at the same calendar drag check (`calendar-drag-checks.js:13`). It looks for another day in the month of "a week from today". On 25 Oct that is 1 Nov, so there is none. **Unchanged `main` fails it in exactly the same way today**, so it is the test's date, not this change. It will pass again from tomorrow. |
+| Not run | push, theme and reopen: these screen tests fail on this PC in the same way on `main` (known). |
