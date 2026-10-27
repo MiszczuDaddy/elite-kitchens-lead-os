@@ -1089,6 +1089,13 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .reply-pref { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; background: #e9efdf; } .reply-pref-text { font-weight: 650; overflow-wrap: anywhere; }
 .reply-btn { margin-right: 4px; flex: none; }
 @media (max-width: 899px) { .reply-panel { margin: 0 8px 8px; } .reply-btn { min-height: 44px; } }
+/* Phone: the whole width of the message bar is for typing. The Receptionist and Suggest reply buttons get their own row ABOVE the typing box (owner's report, 27 Oct 2026: beside it they squeezed the
+   box to nothing and pushed Send off the screen). The empty ::before item is a line break after the buttons; it exists only while one of them is shown, so a bar without them is unchanged. */
+@media (max-width: 899px) {
+  .composer { flex-wrap: wrap; row-gap: 0; }
+  .composer .reply-btn { order: -2; flex: 1 1 auto; margin: 0 0 8px; }
+  .composer:has(.reply-btn:not([hidden]))::before { content: ''; order: -1; flex: 0 0 100%; height: 0; }
+}
 .as-card { align-self: flex-start; max-width: 88%; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 14px; }
 .as-card[data-state=pending] { border-color: var(--accent); }
 .as-card[data-state=applied] { border-color: var(--ok); }

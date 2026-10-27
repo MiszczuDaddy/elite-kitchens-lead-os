@@ -332,6 +332,26 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   assert.equal((await settingsDoc().get()).data().welcome, 'standard', 'and back to the standard one with one click');
   await page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await page.evaluate(() => { REPLY.checkedAt = 0; REPLY.onSelect(null); }); await page.evaluate((id) => { REPLY.onSelect(id); }, ph.anna); await page.waitForSelector('#recep-btn', { state: 'visible' });
   assert.equal(await page.locator('#recep-btn').innerText(), 'Receptionist: off');
+  // On a phone the message bar must leave room to type (owner's report, 27 Oct 2026: with "Receptionist: handed to you" and "Suggest reply" in the bar, the typing box and Send were pushed off the screen).
+  // Both buttons visible, the longest label the button ever shows, at 390, 360 and 320 px: the typing box is wide enough to read, and nothing leaves the screen.
+  for (const width of [390, 360, 320]) {
+    const m = await open({ viewport: { width, height: 780 }, isMobile: true, hasTouch: true });
+    await m.page.evaluate((id) => { location.hash = '#c/' + id; }, ph.anna); await m.page.waitForSelector('#thread:not([hidden])');
+    await m.page.evaluate((id) => { REPLY.checkedAt = 0; REPLY.onSelect(null); REPLY.onSelect(id); }, ph.anna);
+    await m.page.waitForSelector('#reply-btn', { state: 'visible' }); await m.page.waitForSelector('#recep-btn', { state: 'visible' });
+    await m.page.evaluate(() => { document.getElementById('recep-btn').textContent = 'Receptionist: handed to you'; });
+    const box = async (sel) => m.page.locator(sel).boundingBox();
+    const [text, send, recep, reply, attach] = [await box('#text'), await box('#send'), await box('#recep-btn'), await box('#reply-btn'), await box('#attach-btn')];
+    for (const [name, b] of Object.entries({ text, send, recep, reply, attach })) assert.ok(b && b.x >= -0.5 && b.x + b.width <= width + 0.5, `${width}px: ${name} is on the screen (${b && Math.round(b.x)} + ${b && Math.round(b.width)})`);
+    assert.ok(text.width >= 150, `${width}px: the typing box is wide enough to see what you type (${Math.round(text.width)} px)`);
+    assert.ok(text.y > recep.y + recep.height - 1 && text.y > reply.y + reply.height - 1, `${width}px: the two buttons sit above the typing box, not beside it`);
+    assert.ok(Math.abs((send.y + send.height) - (text.y + text.height)) < 12, `${width}px: Send is next to the typing box`);
+    assert.equal(await m.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${width}px: no sideways scrolling`);
+    await m.page.fill('#text', 'Yes I will be there in 35 min, is that ok?'); assert.equal(await m.page.locator('#text').inputValue(), 'Yes I will be there in 35 min, is that ok?');
+    if (width === 360) await m.page.screenshot({ path: path.join(SHOTS, 'assistant-phone-composer.png') });
+    await m.ctx.close();
+  }
+  ok('on a phone the message bar leaves room to type: the Receptionist and Suggest reply buttons sit above the typing box; nothing is pushed off the screen (390, 360 and 320 px)');
   const recOf = async () => (await db.doc('conversations/' + ph.anna).get()).data().receptionist || null;
   await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: on'); const on1 = await recOf(); assert.deepEqual([on1.on, on1.paused, on1.count], [true, null, 0]); assert.equal(await page.locator('#recep-btn.on').count(), 1);
   assert.equal((await db.collection('appointments').get()).size, 0, 'switching it on books nothing');
