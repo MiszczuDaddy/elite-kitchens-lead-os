@@ -817,6 +817,10 @@ setInterval(() => { if (S.selected) updateComposer(); }, 60000);          // a w
 const ta = $('text');
 ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'; });
 ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('composer').requestSubmit(); } });
+// The chat gets shorter when the phone keyboard opens (or the window or the typing box changes size): a chat that was at its newest message stays there, so you can see what you answer.
+let msgsAtBottom = true;
+$('msgs').addEventListener('scroll', () => { const b = $('msgs'); msgsAtBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80; }, { passive: true });
+if (window.ResizeObserver) new ResizeObserver(() => { const b = $('msgs'); if (msgsAtBottom) b.scrollTop = b.scrollHeight; }).observe($('msgs'));
 
 const finishPending = (p, phone) => {
   if (S.snapSeq > p.seq) S.pending = S.pending.filter((x) => x !== p); else p.done = true;   // drop it now if the real message already arrived
