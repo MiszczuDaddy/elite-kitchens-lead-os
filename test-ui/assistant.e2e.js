@@ -349,9 +349,24 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
     assert.equal(await m.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${width}px: no sideways scrolling`);
     await m.page.fill('#text', 'Yes I will be there in 35 min, is that ok?'); assert.equal(await m.page.locator('#text').inputValue(), 'Yes I will be there in 35 min, is that ok?');
     if (width === 360) await m.page.screenshot({ path: path.join(SHOTS, 'assistant-phone-composer.png') });
+    if (width === 390) {
+      // The keyboard opens (owner's report, 29 Oct 2026). With interactive-widget=resizes-content the phone makes the page shorter, exactly like this resize: the typing box, Send and
+      // the newest message must all stay on the screen above the keyboard.
+      await m.page.click('#text'); await m.page.waitForTimeout(150);
+      const lastMsg = m.page.locator('#msgs > :last-child');
+      for (const h of [520, 420]) {
+        await m.page.setViewportSize({ width, height: h }); await m.page.waitForTimeout(250);
+        const [t, sd, last, msgs] = [await box('#text'), await box('#send'), await lastMsg.boundingBox(), await box('#msgs')];
+        assert.ok(t.y >= 0 && t.y + t.height <= h + 0.5, `keyboard open (${h}px left): the typing box is above it (${Math.round(t.y)}+${Math.round(t.height)})`);
+        assert.ok(sd.y + sd.height <= h + 0.5, `keyboard open (${h}px left): Send is above it`);
+        assert.ok(last && last.y + last.height <= msgs.y + msgs.height + 1 && last.y + last.height > msgs.y, `keyboard open (${h}px left): the newest message is still in view`);
+        assert.equal(await m.page.evaluate(() => document.activeElement && document.activeElement.id), 'text', 'still typing in the box');
+      }
+      await m.page.screenshot({ path: path.join(SHOTS, 'assistant-phone-keyboard.png') });
+    }
     await m.ctx.close();
   }
-  ok('on a phone the message bar leaves room to type: the Receptionist and Suggest reply buttons sit above the typing box; nothing is pushed off the screen (390, 360 and 320 px)');
+  ok('on a phone the message bar leaves room to type: the Receptionist and Suggest reply buttons sit above the typing box; nothing is pushed off the screen (390, 360 and 320 px); with the keyboard open, the typing box, Send and the newest message stay above it');
   const recOf = async () => (await db.doc('conversations/' + ph.anna).get()).data().receptionist || null;
   await page.click('#recep-btn'); await page.waitForFunction(() => document.getElementById('recep-btn').innerText === 'Receptionist: on'); const on1 = await recOf(); assert.deepEqual([on1.on, on1.paused, on1.count], [true, null, 0]); assert.equal(await page.locator('#recep-btn.on').count(), 1);
   assert.equal((await db.collection('appointments').get()).size, 0, 'switching it on books nothing');

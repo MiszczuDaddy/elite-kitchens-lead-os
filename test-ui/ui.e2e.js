@@ -97,7 +97,9 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
 
   console.log('E2E: real page + real functions + emulators + mocked Meta');
   await page.goto('http://127.0.0.1:5055/');
-  assert(await page.locator('#login').isVisible()); ok('signed-out visitors see only the login screen');
+  // The page opens on "Opening Elite OS…" until Firebase has said nobody is signed in (docs/SIGNIN_PHONE.md), then the sign-in page: wait for that answer, a moment after loading.
+  await page.waitForSelector('#login:not([hidden])', { timeout: 10000 });
+  assert(await page.locator('#login').isVisible()); assert(!(await page.locator('#boot').isVisible())); ok('signed-out visitors see only the login screen');
   assert(!(await page.locator('#app').isVisible()));
 
   // --- unauthorised user (TEST I) ---

@@ -26,6 +26,15 @@ test('the manifest has what Chrome and Edge need to offer installation, and ever
   assert.deepEqual(pngSize('icons/favicon-32.png'), [32, 32]); assert.deepEqual(pngSize('icons/favicon-48.png'), [48, 48]);
 });
 
+test('the phone keyboard makes the page shorter instead of covering the typing box (owner\'s report, 29 Oct 2026)', () => {
+  // Since Chrome 108 on Android the keyboard only covers the page unless the page asks to be resized; the chat's bar is at the bottom of a full-height layout, so it was hidden.
+  const tag = /<meta name="viewport" content="([^"]+)">/.exec(read('index.html')); assert.ok(tag, 'the viewport tag is missing');
+  const parts = tag[1].split(',').map((s) => s.trim());
+  assert.ok(parts.includes('interactive-widget=resizes-content'), 'the page must ask to be resized by the keyboard: ' + tag[1]);
+  for (const p of ['width=device-width', 'initial-scale=1', 'viewport-fit=cover']) assert.ok(parts.includes(p), 'kept: ' + p);
+  assert.match(read('app.css'), /\.app \{[^}]*height: 100dvh/, 'the app fills the visible height (which the keyboard now shrinks)');
+});
+
 test('the installed app uses the same light colours as the page', () => {
   const html = read('index.html'), m = manifest();
   assert.equal(/<meta name="theme-color" content="([^"]+)"/.exec(html)[1].toLowerCase(), m.theme_color.toLowerCase());
