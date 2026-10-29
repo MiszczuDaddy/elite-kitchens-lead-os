@@ -17,7 +17,19 @@
 </head>
 <body>
 
-<section id="login" class="login">
+<!-- The first screen: "Opening Elite OS…" while Firebase says who is signed in on this device and the server renews their staff access (app.js, "opening").
+     The sign-in page shows only when nobody is signed in, or access was refused. -->
+<section id="boot" class="login boot" aria-live="polite">
+  <div class="login-card">
+    <div class="brand">ELITE KITCHENS</div>
+    <div class="brand-sub">Lead OS</div>
+    <p id="boot-msg">Opening Elite OS…</p>
+    <button id="boot-retry" class="btn btn-primary" type="button" hidden>Try again</button>
+    <button id="boot-signout" class="btn btn-link" type="button" hidden>Sign out</button>
+  </div>
+</section>
+
+<section id="login" class="login" hidden>
   <div class="login-card">
     <div class="brand">ELITE KITCHENS</div>
     <div class="brand-sub">Lead OS</div>

@@ -157,25 +157,63 @@ function stopAccessRenewal() { if (accessTimer) { clearInterval(accessTimer); ac
 function startAccessRenewal() { stopAccessRenewal(); lastAccessAt = Date.now(); accessTimer = setInterval(renewAccess, ACCESS_RENEW_MS); }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && accessTimer && Date.now() - lastAccessAt > 15 * 60 * 1000) renewAccess(); });
 
+// ---------- opening ----------
+// The page starts on "Opening Elite OS…" (#boot), never on the sign-in page (owner's report, 27 Oct 2026: "it keeps making me log in every time I open it on my phone"). Firebase keeps the
+// person signed in on this device and says who it is a moment after the page loads; the server then renews their staff access (claimAccess, which takes several seconds when it has been
+// idle). The sign-in page used to be on screen during all of that, so it looked like being signed out. Now: nobody signed in -> the sign-in page; signed in -> the opening screen until the
+// access is renewed, then the app. Nothing is shown before the server has said yes, exactly as before. A connection problem keeps the person signed in and tries again by itself; only a
+// refusal (not on the staff list) shows "not authorised", and a session that has ended (Firebase refuses the account) signs out to the sign-in page.
+const BOOT_RETRY_MS = [2000, 4000, 8000, 15000, 30000];
+const RETRYABLE = new Set(['functions/unavailable', 'functions/deadline-exceeded', 'functions/internal', 'functions/unknown', 'functions/resource-exhausted', 'functions/aborted', 'functions/cancelled',
+  'auth/network-request-failed', 'auth/internal-error', 'auth/too-many-requests', 'auth/timeout']);
+const SESSION_ENDED = new Set(['functions/unauthenticated', 'auth/user-disabled', 'auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-not-found']);
+let bootGen = 0, bootTimer = null, bootRetry = null, authReported = false;
+function showScreen(which) { $('boot').hidden = which !== 'boot'; $('login').hidden = which !== 'login'; $('app').hidden = which !== 'app'; }
+function bootMessage(text, { trouble = false } = {}) { showScreen('boot'); $('boot-msg').textContent = text; $('boot-retry').hidden = !trouble; $('boot-signout').hidden = !trouble; }
+const retryNow = () => { if (bootRetry) { const r = bootRetry; bootRetry = null; clearTimeout(bootTimer); r(); } };
+$('boot-retry').onclick = () => { if (!authReported) { location.reload(); return; } bootMessage('Opening Elite OS…'); retryNow(); };
+$('boot-signout').onclick = doSignOut;
+window.addEventListener('online', retryNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') retryNow(); });
+// Firebase not answering at all (no connection while the page was loading): say so after a while; Try again reloads the page.
+setTimeout(() => { if (!authReported) bootMessage('This is taking longer than usual. Check your connection.', { trouble: true }); }, 20000);
+
 auth.onAuthStateChanged(async (user) => {
+  authReported = true;
   stopListening();
   $('login-signout').hidden = true;
+  const gen = ++bootGen; clearTimeout(bootTimer); bootRetry = null;
   if (!user) {
     stopAccessRenewal();
     if (window.ASSIST) ASSIST.forget();            // Phase 9: a signed-out browser keeps no conversation
-    $('login').hidden = false; $('app').hidden = true;
+    showScreen('login');
     return;
   }
+  bootMessage('Opening Elite OS…');
+  openApp(user, gen, 0);
+});
+
+async function openApp(user, gen, attempt) {
   try {
     if (window.PUSH && PUSH.ready) await PUSH.ready();      // Phase 8: sets up notifications first (they make every function call ask for a token); never fails, never waits long
     await call('claimAccess')();          // server checks the allowlist and sets the staff claim
     await user.getIdToken(true);          // pick up the new claim
   } catch (e) {
+    if (gen !== bootGen) return;          // signed out, or another account, meanwhile
+    const code = (e && e.code) || '';
+    if (SESSION_ENDED.has(code)) { $('loginmsg').textContent = 'Please sign in again.'; await doSignOut(); return; }
+    if (RETRYABLE.has(code) || !code) {   // the connection or the server, not the person: stay signed in and try again by itself (Try again does it at once)
+      bootMessage('Can\'t reach Elite OS right now. Trying again…', { trouble: true });
+      bootRetry = () => { if (gen === bootGen) { bootMessage('Opening Elite OS…'); openApp(user, gen, attempt + 1); } };
+      bootTimer = setTimeout(retryNow, BOOT_RETRY_MS[Math.min(attempt, BOOT_RETRY_MS.length - 1)]);
+      return;
+    }
     $('loginmsg').textContent = `${user.email} is not authorised. ${errText(e)}`;
-    $('login').hidden = false; $('app').hidden = true; $('login-signout').hidden = false;
+    showScreen('login'); $('login-signout').hidden = false;
     return;
   }
-  $('login').hidden = true; $('app').hidden = false;
+  if (gen !== bootGen) return;
+  showScreen('app');
   startAccessRenewal();
   watchList();
   if (window.CONSULT) CONSULT.start();                // Phase 9 R2b: consultation requests waiting for a booking
@@ -184,7 +222,7 @@ auth.onAuthStateChanged(async (user) => {
   if (!location.hash && window.TODAY) history.replaceState(null, '', location.pathname + location.search + '#today');
   routeFromHash();
   if (window.PUSH) PUSH.start();                    // Phase 8: keeps this device's notification address fresh; opens the chat a clicked notification was about
-});
+}
 
 function stopListening() {
   statusRequests.clear(); statusErrors.clear(); S.statusFilter = 'inbox';
