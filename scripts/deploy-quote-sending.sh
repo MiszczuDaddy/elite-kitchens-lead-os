@@ -81,7 +81,7 @@ AI_FUNCS="$AI_NEW"
 SAFETY_NEW="setDoNotContact attentionAction healthSweep healthOnMessageWrite"                                       # Phase 10: new. The two callables are made public (each checks the signed-in staff account); healthSweep (every 10 minutes) and healthOnMessageWrite (a trigger) cannot be called from outside
 SAFETY_CHANGED="sendReply sendMedia startConversation reopenConversation deliverQuote retryQuoteDelivery sendQuote leadIntake receptionistSweep receptionistOnMessage pushReceipt"   # Phase 10: "do not contact" in every send, the WhatsApp outcome, rejected leads, the receptionist's heartbeat
 SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
-TODAY_NEW="saveReminder snoozeQuote"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
+TODAY_NEW="saveReminder snoozeQuote dismissReply"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
 WELCOME_FUNCS="leadIntake receptionistOnMessage receptionistSweep setAiSettings aiStatus aiSuggestReply"                # the welcome switch: the intake sends the chosen welcome, the receptionist knows both, the settings save and show the choice (all exist already)
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
@@ -414,11 +414,11 @@ case "${1:-}" in
     [ -n "$(serving_revision attentionaction)" ] || { echo "Deploy the safety net first: $0 safety"; exit 1; }
     check_settings; check_access; check_routing $TODAY_FUNCS
     echo "Functions: $TODAY_FUNCS"
-    echo "New: saveReminder (add, done, undo, snooze, delete a reminder) and snoozeQuote (follow-up snooze): staff only, they send nothing to anyone."
+    echo "New: saveReminder (add, done, undo, snooze, delete a reminder), snoozeQuote (follow-up snooze) and dismissReply (hide a \"Waiting for your reply\" alert until the customer writes again): staff only, they send nothing to anyone."
     echo "Changed: deleteCustomer (it now also erases the customer's reminders and quote notes). NOT deployed: the WhatsApp webhook."
     confirm "Deploy the Phase 11 (Today) backend to the LIVE project?"
     install; save_revisions deleteCustomer; deploy_functions $TODAY_FUNCS
-    echo "==> making the 2 new staff functions reachable (each checks the signed-in staff account itself)"
+    echo "==> making the new staff functions reachable (each checks the signed-in staff account itself)"
     for f in $TODAY_NEW; do
       gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
     done
@@ -547,6 +547,7 @@ case "${1:-}" in
     if [ -f functions/lib/directory.js ] && [ -z "$(serving_revision customerdirectory)" ]; then echo "Deploy the Inbox search backend first: $0 search"; exit 1; fi        # the Inbox All tab and search call customerDirectory
     if [ -f functions/lib/bookingNotices.js ] && [ -z "$(serving_revision resolvebookingnotice)" ]; then echo "Deploy the bookings backend first: $0 bookings"; exit 1; fi        # Phase 12: the screen calls resolveBookingNotice
     if [ -f functions/lib/today.js ] && [ -z "$(serving_revision savereminder)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # Phase 11: the screen calls saveReminder and snoozeQuote
+    if grep -q dismissReply functions/index.js && [ -z "$(serving_revision dismissreply)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # the Dismiss button on a reply alert calls dismissReply
     if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact
     if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions
     no_test_folders

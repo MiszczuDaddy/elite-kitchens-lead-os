@@ -431,6 +431,7 @@ async function resolveBookingNotice(auth, data, deps) {
 const todayLib = require('./today');
 const saveReminder = staffAction(todayLib.saveReminder);
 const snoozeQuote = staffAction(todayLib.snoozeQuote);
+const dismissReply = staffAction(todayLib.dismissReply);
 // Phase 9.2a: Approve / Reject on a proposal. Staff only; only the person who asked can decide; no model, no secret.
 const aiDecide = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return ai.decideProposal({ db: deps.db }, actorOf(auth), data, { uid: auth.uid }); };
 
@@ -456,7 +457,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

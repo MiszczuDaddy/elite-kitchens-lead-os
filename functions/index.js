@@ -270,6 +270,7 @@ exports.setDoNotContact = onCall({}, (req) => h.setDoNotContact(req.auth, req.da
 exports.customerDirectory = onCall({ memory: '512MiB', timeoutSeconds: 60 }, (req) => h.customerDirectory(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.saveReminder = onCall({}, (req) => h.saveReminder(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.snoozeQuote = onCall({}, (req) => h.snoozeQuote(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
+exports.dismissReply = onCall({}, (req) => h.dismissReply(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.attentionAction = onCall({}, (req) => h.attentionAction(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 // Who gets the alert emails (comma-separated; empty = no alert emails, the phone alerts and the screen still work). They are sent through the quote mailer (MAIL_* settings), so
 // only while email sending is on. A plain setting, not a secret.

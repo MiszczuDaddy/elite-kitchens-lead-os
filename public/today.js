@@ -36,7 +36,7 @@ window.TODAY = (() => {
     listen(T.unsubs, 'booking', db.collection('conversations').where('consult.needsBooking', '==', true).limit(200), (s) => { T.booking = new Map(s.docs.map((d) => [d.id, { id: d.id, ...d.data() }])); });
     listen(T.unsubs, 'quotes', db.collection('quotes').where('status', '==', 'sent').limit(300), (s) => { T.quotes = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
     listen(T.unsubs, 'reminders', db.collection('reminders').where('status', '==', 'open').limit(300), (s) => { T.reminders = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
-    listen(T.unsubs, 'marks', db.collection('todayMarks').orderBy('at', 'desc').limit(300), (s) => { T.marks = {}; for (const d of s.docs) { const x = d.data(); if (x.kind === 'quote' && x.quoteId) T.marks['quote|' + x.quoteId] = x; } });
+    listen(T.unsubs, 'marks', db.collection('todayMarks').orderBy('at', 'desc').limit(300), (s) => { T.marks = {}; for (const d of s.docs) { const x = d.data(); if (x.kind === 'quote' && x.quoteId) T.marks['quote|' + x.quoteId] = x; else if (x.kind === 'reply' && x.phone) T.marks['reply|' + x.phone] = x; } });
     listen(T.unsubs, 'appts', db.collection('appointments').where('start', '>=', TS.fromMillis(now - 8 * 3600e3)).orderBy('start').limit(400), (s) => { T.appts = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
     listen(T.unsubs, 'issues', db.collection('healthIssues').where('status', '==', 'open'), (s) => { T.issues = s.size; });
     listen(T.unsubs, 'leadIssues', db.collection('leadIssues').where('status', '==', 'open').limit(100), (s) => { T.leadIssues = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
@@ -120,6 +120,7 @@ window.TODAY = (() => {
   }
   const reminder = (data) => call('saveReminder')(data);
   const snoozeQuote = (id, days) => call('snoozeQuote')({ id, days });
+  const dismissReply = (phone, undo) => call('dismissReply')(undo ? { phone, undo: true } : { phone });
   function snoozeChoices(c) {
     const today = M.dateKey(Date.now()), row = el('div', 'td-snooze'); row.append(el('span', 'td-snooze-l', 'Snooze until'));
     const pick = (label, n) => btn(label, 'btn-ghost', () => { T.snoozeFor = null;
@@ -133,6 +134,7 @@ window.TODAY = (() => {
     const row = el('div', 'td-actions'), open = target(c);
     if (c.kind === 'customer') {
       row.append(btn('Open chat', 'btn-primary', open, null));
+      if (c.reasons.some((r) => r.type === 'reply')) row.append(btn('Dismiss', 'btn-ghost', () => act('d' + c.phone, () => dismissReply(c.phone), 'Dismissed. It comes back only if they write again.', () => dismissReply(c.phone, true)), 'd' + c.phone));      // e.g. they only said "Ok perfect"
       const bk = c.reasons.find((r) => r.type === 'booking');
       if (bk) { const b = btn('Book visit', 'btn-ghost', () => window.APPT && APPT.openBook && APPT.openBook(c.phone, bk.bookOn, bk.bookAt), null); b.disabled = !window.APPT; row.append(b,
         btn('Not needed', 'btn-link', () => act('n' + c.phone, () => call('aiDismissConsult')({ phone: c.phone }), 'Cleared. Nothing was sent.'), 'n' + c.phone)); }
@@ -222,7 +224,7 @@ window.TODAY = (() => {
     const lt = $('today-later'); lt.hidden = !r.later.length; $('today-later-n').textContent = r.later.length ? '(' + r.later.length + ')' : ''; $('today-later-list').replaceChildren(...r.later.map((c) => cardNode(c, now)));
     const dn = $('today-done'); dn.hidden = !r.doneToday.length; $('today-done-n').textContent = r.doneToday.length ? '(' + r.doneToday.length + ')' : '';
     $('today-done-list').replaceChildren(...r.doneToday.map((d) => { const row = el('div', 'td-done'); row.append(el('span', 'td-done-t', d.title + ' · ' + hhmm(d.at)),
-      btn('Undo', 'btn-ghost', () => act('u' + d.id, () => (d.kind === 'quote' ? snoozeQuote(d.id, 0) : reminder({ action: 'undo', id: d.id })), 'Back on your list.'), 'u' + d.id)); return row; }));
+      btn('Undo', 'btn-ghost', () => act('u' + d.id, () => (d.kind === 'quote' ? snoozeQuote(d.id, 0) : d.kind === 'reply' ? dismissReply(d.id, true) : reminder({ action: 'undo', id: d.id })), 'Back on your list.'), 'u' + d.id)); return row; }));
   }
   function toast(text, undo, error) {
     const t = $('today-toast'); clearTimeout(T.toastTimer); t.replaceChildren(); t.hidden = !text; t.className = 'toast q-toast' + (error ? ' err' : '');

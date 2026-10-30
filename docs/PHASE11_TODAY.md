@@ -57,7 +57,9 @@ If several are true the most serious wins, in the order above. A lead that is **
 - `reminders/{r_…}`: your own reminders (title, optional customer, day and optional time, open/done). A reminder's id comes from the request id, so pressing Add twice makes one.
 - `todayMarks/quote_{id}`: "do not show this quote's follow-up until…", with the quote's sent time (read by the server, never the screen).
 
-Both are written only by two staff-only functions (`saveReminder`, `snoozeQuote`) and read by the screen. **"Delete customer" erases the customer's reminders and quote notes.** No security rule changed.
+- `todayMarks/reply_{phone}`: "I have dealt with this reply alert" (the **Dismiss** button on a *Waiting for your reply* card, for example when the customer only wrote "Ok perfect"). It stores the time of the customer's last message, read by the server. The alert stays hidden until the customer writes again, and the dismissal is listed under *Done today* with **Undo**.
+
+All are written only by three staff-only functions (`saveReminder`, `snoozeQuote`, `dismissReply`) and read by the screen. **"Delete customer" erases the customer's reminders, quote notes and dismissed reply alerts.** No security rule changed.
 
 ## Cost, settings and security
 - **No new Google Cloud setting and no new database index.** Every question the screen asks is a single-field one.

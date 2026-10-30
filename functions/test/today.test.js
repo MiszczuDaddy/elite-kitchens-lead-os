@@ -114,6 +114,42 @@ test('QUOTE SNOOZE: only a sent, unanswered quote; strict input; extra fields re
   assert.equal(await mark(), null);
 });
 
+// ================================================================ reply-alert dismiss ===================================
+const dismissR = (data, nowMs = NOW) => T.dismissReply({ db }, actor, data, { nowMs });
+const replyMark = async () => { const s = await db.doc('todayMarks/reply_' + P).get(); return s.exists ? s.data() : null; };
+const IN = NOW - 2 * 3600e3;
+async function wrote(text = 'Ok perfect', at = IN) { await db.doc('conversations/' + P).update({ lastMessage: text, lastMessageDirection: 'in', lastInboundAt: ts(at), inboxStatus: 'inbox' }); }
+
+test('REPLY DISMISS: the customer\'s last-written time comes from the SERVER; the model then hides exactly that message; a NEW message brings the alert back; undo removes the note', async () => {
+  await wrote();
+  const r = await dismissR({ phone: P }); assert.deepEqual(r, { ok: true, basis: IN });
+  const m = await replyMark(); assert.deepEqual([m.kind, m.phone, m.basis, m.by, m.at.toMillis()], ['reply', P, IN, 'thomas@example.com', NOW]);
+  const conv = async () => [{ id: P, ...(await db.doc('conversations/' + P).get()).data() }];
+  const marks = { ['reply|' + P]: { basis: m.basis, at: m.at } };
+  assert.equal(M.build({ convs: await conv(), marks: {}, now: NOW }).cards.length, 1, 'before the note: listed');
+  assert.equal(M.build({ convs: await conv(), marks, now: NOW }).cards.length, 0, 'with the note: hidden');
+  await wrote('Actually, one more question', NOW - 1800e3);
+  assert.equal(M.build({ convs: await conv(), marks, now: NOW }).cards.length, 1, 'they wrote again: the alert is back');
+  assert.deepEqual(await dismissR({ phone: P, undo: true }), { ok: true, undone: true }); assert.equal(await replyMark(), null);
+  assert.deepEqual(await dismissR({ phone: P, undo: true }), { ok: true, undone: true }, 'undo twice is harmless');
+});
+
+test('REPLY DISMISS: pressing it twice on the same message changes nothing more; a customer who has not written, or does not exist, is a plain refusal; strict input', async () => {
+  await rejects(dismissR({ phone: '353870009999' }), 'not-found');
+  await rejects(dismissR({ phone: P }), 'failed-precondition', /not written/);                      // the beforeEach customer has never written
+  await wrote(); await dismissR({ phone: P }); const a = await replyMark(); await dismissR({ phone: P }, NOW + 1000); const b = await replyMark();
+  assert.equal(a.basis, b.basis); assert.equal((await db.collection('todayMarks').get()).size, 1, 'still one note');
+  for (const data of [{}, { phone: '12' }, { phone: 'abc' }, { phone: P, extra: 1 }, { phone: P, undo: 'yes' }, null]) await rejects(dismissR(data), 'invalid-argument');
+});
+
+test('REPLY DISMISS: only staff, through the real wrapper; the note is erased with the customer', async () => {
+  await rejects(h.dismissReply(null, { phone: P }, { db, cfg }), 'unauthenticated');
+  await rejects(h.dismissReply({ uid: 'x', token: { email: 'other@example.com', email_verified: true, staff: true } }, { phone: P }, { db, cfg }), 'permission-denied');
+  await wrote(); assert.equal((await h.dismissReply(staff, { phone: P }, { db, cfg })).ok, true); assert.ok(await replyMark());
+  await h.deleteCustomer(staff, { phone: P, confirm: P.slice(-4) }, { db, cfg, bucket: getStorage().bucket(BUCKET) });
+  assert.equal(await replyMark(), null, 'the note went with the customer');
+});
+
 test('ERASING A CUSTOMER erases their reminders and quote notes, and nobody else\'s', async () => {
   const bucket = getStorage().bucket(BUCKET);
   await create({ phone: P }); await create({ requestId: 'req-other001', title: 'Nobody', dueDate: '2026-10-19' }); await sentQuote(); await snooze(3);
