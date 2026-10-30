@@ -736,8 +736,15 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
   .appts-head #appts-new { margin-left: auto; }
   .appts-toggle { margin-left: 0; }
   .cal-cell { min-height: 60px; padding: 2px; gap: 2px; }
-  .cal-month-scroll .cal-cell { align-items: stretch; min-height: 110px; padding: 4px; }
-  .cal-month-scroll .cal-ev, .cal-month-scroll .cal-more { min-height: 44px; }
+  /* The whole month on one phone screen (owner's request, 29 Oct 2026): the 980 px wide month (bigger screens) showed 2 to 3 days at a time and scrolled sideways. Here: 7 days across, compact
+     rows, each visit as its time ("13:00", up to three a day, then "+1 more"); a tap on the day lists its visits with names below the month. The whole day is the tap target. */
+  .cal-month-scroll { overflow-x: visible; }
+  .cal-month-scroll .cal-grid { min-width: 0; }
+  .cal-month-scroll .cal-cell { align-items: stretch; min-height: 58px; padding: 2px 2px 4px; gap: 2px; }
+  .cal-month-scroll .cal-select { height: 30px; max-width: 30px; }
+  .cal-month-scroll .cal-ev { min-height: 0; padding: 1px 2px 1px 3px; justify-content: center; font-size: 10.5px; line-height: 1.35; }
+  .cal-month-scroll .cal-ev-name { display: none; }
+  .cal-month-scroll .cal-more { min-height: 0; padding: 0 2px; align-self: center; font-size: 10.5px; white-space: nowrap; }
   .cal-select { align-self: center; min-width: 0; width: 100%; max-width: 44px; height: 44px; }
   .cal-nav .icon-btn { width: 44px; min-height: 44px; }
   .cal-status { display: none; }

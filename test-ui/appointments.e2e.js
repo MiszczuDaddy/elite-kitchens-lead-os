@@ -162,7 +162,10 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
     await pg.locator(`.cal-cell[data-day="${k}"]`).waitFor();
   }
   await page.click('#nav-appointments');
-  await page.waitForSelector('.time-column');
+  await page.waitForSelector('#appts-cal:not([hidden]) .cal-cell');                                     // Month is the first view (owner's request, 29 Oct 2026)
+  assert.equal(await page.getAttribute('#appts-view button[data-view="calendar"]', 'aria-pressed'), 'true');
+  assert.equal(await page.getAttribute('#appts-view button[data-view="week"]', 'aria-pressed'), 'false');
+  await page.click('#appts-view button[data-view="week"]'); await page.waitForSelector('.time-column');
   assert.equal(await page.getAttribute('#appts-view button[data-view="week"]', 'aria-pressed'), 'true');
   await require('./calendar-timeline-checks')({ page, db, cal, ok, SHOTS, token, browser });
   await page.click('#appts-view button[data-view="calendar"]');
@@ -371,8 +374,8 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await mp.evaluate((t) => firebase.auth().signInWithCustomToken(t), token);
   await mp.waitForSelector('#app:not([hidden])'); await mp.evaluate(() => { if (location.hash === '#today') location.hash = ''; });
   await mp.tap('#to-appointments');
-  await mp.waitForSelector('.time-column');
-  assert.equal(await mp.getAttribute('#appts-view button[data-view="day"]', 'aria-pressed'), 'true');
+  await mp.waitForSelector('#appts-cal:not([hidden]) .cal-cell');                                          // Month first on a phone too (it was Day)
+  assert.equal(await mp.getAttribute('#appts-view button[data-view="calendar"]', 'aria-pressed'), 'true');
   await mp.tap('#appts-view button[data-view="list"]');
   await mp.waitForSelector('.arow');
   assert.equal(await mp.getAttribute('#app', 'data-view'), 'appointments');
@@ -410,14 +413,33 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await md1.locator('.cal-ev').first().waitFor();
   assert.equal(await md1.locator('.cal-ev').first().isVisible(), true);               // readable chips remain visible on phones
   assert.equal(await md1.locator('.cal-dot').count(), 2);
+  // The whole month on one phone screen (owner's request, 29 Oct 2026): all 7 days across with no sideways scrolling, every week from the view buttons down to the last row on one 844 px
+  // screen, and each visit shows its time inside its day (the names are in the list below the month when the day is tapped).
+  for (const [vw, vh] of [[390, 844], [360, 780]]) {
+    await mp.setViewportSize({ width: vw, height: vh }); await mp.waitForTimeout(200);
+    const grid = await mp.locator('#cal-grid').boundingBox();
+    assert.ok(grid.x >= 0 && grid.x + grid.width <= vw + 0.5, `${vw}px: the month fits the width (${Math.round(grid.x)} + ${Math.round(grid.width)})`);
+    for (const dow of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) { const b = await mp.locator('.cal-dow', { hasText: dow }).boundingBox(); assert.ok(b.x >= 0 && b.x + b.width <= vw + 0.5, `${vw}px: ${dow} is on the screen`); }
+    assert.equal(await mp.locator('.cal-month-scroll').evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, `${vw}px: no sideways scrolling inside the calendar`);
+    const tabs = await mp.locator('#appts-view').boundingBox();
+    assert.ok(grid.y + grid.height - tabs.y <= vh, `${vw}px: from the view buttons to the last week fits one screen (${Math.round(grid.y + grid.height - tabs.y)} of ${vh} px)`);
+    const chip = await md1.locator('.cal-ev').first().boundingBox(), cellBox = await md1.boundingBox();
+    assert.ok(chip.x >= cellBox.x - 0.5 && chip.x + chip.width <= cellBox.x + cellBox.width + 0.5, `${vw}px: the visit stays inside its day`);
+    assert.match(await md1.locator('.cal-ev .cal-ev-time').first().innerText(), /^\d{2}:\d{2}$/, `${vw}px: the visit shows its time`);
+    assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${vw}px: no sideways scrolling`);
+  }
+  await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-month.png') });
+  await mp.setViewportSize({ width: 390, height: 844 });
   await md1.locator('.cal-select').tap();
   assert.equal(await mp.getAttribute('#appts-view button[data-view="calendar"]', 'aria-pressed'), 'true');
   await mp.waitForFunction((k) => document.querySelector(`.cal-cell[data-day="${k}"]`).classList.contains('sel'), D1);
   await mp.locator('#cal-day .agenda-entry').nth(1).waitFor();
   assert.equal(await mp.locator('#cal-day .agenda-entry').count(), 2);
+  const firstName = /^\d{2}:\d{2} (.+?),/.exec(await md1.locator('.cal-ev').first().getAttribute('aria-label'))[1];
+  assert.ok((await mp.locator('#cal-day').innerText()).includes(firstName), 'the tapped day lists its visits with the customer names: ' + firstName);
   assert.equal(await mp.locator('.cal-select[aria-pressed="true"]').getAttribute('data-focus'), 'day-' + D1);
   await mp.screenshot({ path: path.join(SHOTS, 'appointments-phone-calendar.png') });
-  ok('phone: Day is the default; Month shows appointment times and names, and tapping a date retains Month and displays its agenda; the month agenda remains available');
+  ok('phone: Month is the default and shows the whole month on one screen with each visit\'s time, and tapping a date retains Month and lists its visits with names; the month agenda remains available');
   await mp.locator('.agenda-entry summary').first().tap();
   await mp.waitForSelector('#appt-detail-dlg[open]');
   assert.match(await mp.locator('#appt-detail-content').innerText(), /Lena Lead/);
