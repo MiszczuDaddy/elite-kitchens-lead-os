@@ -21,7 +21,7 @@ window.APPT = (() => {
   const VIEW_KEY = 'ek.apptView.v2';
   function initialView() {
     try { const v = sessionStorage.getItem(VIEW_KEY); if (['calendar', 'week', 'day', 'list'].includes(v)) return v; } catch (e) { /* private mode */ }
-    return window.matchMedia('(min-width: 900px)').matches ? 'week' : 'day';
+    return 'calendar';                    // Month first, on a computer and on a phone (owner's request, 29 Oct 2026; it was Week on a computer and Day on a phone). A view chosen since stays for this session.
   }
   const ts = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : null);
   const syncOf = (a) => (a.sync && a.sync.google) || {};
