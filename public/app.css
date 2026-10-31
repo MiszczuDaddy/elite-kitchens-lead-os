@@ -72,7 +72,13 @@ h1, h2, p { overflow-wrap: anywhere; }
 .new-conversation { border: 1px solid var(--line); width: 36px; min-height: 36px; }
 .count { vertical-align: middle; margin-left: 5px; font-size: 12px; font-weight: 600; background: var(--selected); color: var(--accent); padding: 2px 7px; border-radius: 4px; letter-spacing: 0; }
 .pane-caption { color: var(--muted); font-size: 13px; margin: 4px 22px 10px; }
-.install-m { margin: -6px 10px 6px; min-height: 40px; font-weight: 500; }                /* phones only (.only-mobile), and only while the browser offers installation (Phase 6.2) */
+/* Phone section buttons: every section the desktop rail has, as one grid of identical icon + word buttons (phones only). Notifications and Install appear only when the browser offers them. */
+.phone-nav { display: none; }
+.pn-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; min-height: 64px; padding: 8px 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); font: inherit; font-size: 12px; font-weight: 550; line-height: 1.2; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.pn-btn:hover { background: var(--hover); }
+.pn-btn svg { flex: none; color: var(--accent); }
+.pn-btn span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-btn.is-on svg { color: #3f6a3a; }
 
 /* ---- Projects (Phase 7, docs/PROJECTS.md): the dashboard and one project reuse the Quotes screen's header, scroll area, filters, list rows and chips ---- */
 .projects-pane { display: none; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg); }
@@ -357,6 +363,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 @media (max-width: 899px) {
   .app { grid-template-columns: minmax(0,1fr); }.rail { display: none; }
   .only-mobile { display: inline-flex; }
+  .phone-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 16px 14px; }
   .app[data-view=list] .thread-pane, .app[data-view=thread] .list-pane { display: none; }
   .pane-head { padding: max(20px,env(safe-area-inset-top)) 20px 0; }
   .pane-caption { margin: 5px 20px 10px; }
@@ -1310,3 +1317,5 @@ div.td-open { cursor: default; }
 .list-note { margin: -8px 18px 10px; font-size: 12.5px; color: var(--muted); }
 .list-more { display: block; width: calc(100% - 24px); min-height: 44px; margin: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
 .list-more:hover { background: var(--hover); }
+/* small phones (360 wide): a little less spacing so "Notifications" still fits in its button */
+@media (max-width: 374px) { .phone-nav { gap: 6px; margin-left: 12px; margin-right: 12px; } .pn-btn { padding: 8px 0; font-size: 11px; } }
