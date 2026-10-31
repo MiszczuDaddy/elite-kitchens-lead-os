@@ -307,12 +307,13 @@ async function ensureDirectory(force) {
   renderList();
 }
 const PAGE = 100;
+const listScroller = () => (getComputedStyle($('list')).overflowY === 'visible' ? document.querySelector('.list-pane') : $('list'));      // the whole pane scrolls on a phone (the Today card and buttons slide away), the list itself on a desktop
 function renderList() {
   const q = S.query.trim().toLowerCase();
   const allTab = S.statusFilter === 'all';
   const stage = allTab ? 'All' : INBOX_STATUSES[S.statusFilter];
   const list = $('list');
-  const keep = list.scrollTop;
+  const scroller = listScroller(), keep = scroller.scrollTop;
   const consultOnly = !!(window.CONSULT && CONSULT.filter && CONSULT.count());       // Phase 9 R2b: only the customers waiting for you to book a consultation
   let shown, more = 0, note = '';
   if (!consultOnly && (allTab || q)) {
@@ -325,7 +326,7 @@ function renderList() {
   const kids = shown.map(convItem);
   if (more > 0) { const b = el('button', 'list-more', `Show ${Math.min(PAGE, more)} more (${more.toLocaleString('en-IE')} left)`); b.type = 'button'; b.onclick = () => { S.shownCount += PAGE; renderList(); }; kids.push(b); }
   list.replaceChildren(...kids);
-  list.scrollTop = keep;
+  scroller.scrollTop = keep;
   const ln = $('list-note'); ln.hidden = !note; ln.textContent = note;
 
   const empty = $('list-empty');
@@ -386,7 +387,7 @@ $('status-filters').addEventListener('click', e => {
   if (!button) return;
   S.statusFilter = button.dataset.status;
   S.shownCount = 100; if (S.statusFilter === 'all') ensureDirectory();
-  $('list').scrollTop = 0;
+  listScroller().scrollTop = 0;
   renderList();
 });
 
