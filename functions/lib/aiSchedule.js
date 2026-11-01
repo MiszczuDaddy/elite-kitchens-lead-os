@@ -19,7 +19,9 @@ const LINES = {
   visit_offer: 'Would you like us to call out and have a look at your space?',
   ask_next_week: 'Would any day next week suit you for a home consultation?',
   ask_following_week: 'No problem. Would the following week suit you? Do you have any particular days or times that work best?',
-  acknowledge: 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.',
+  // 1 Nov 2026 (live review): no "Perfect" (it sounded like the day they suggested, or a question they asked, was settled), and after 20:00 "tomorrow" instead of "shortly" (nobody is at the phone).
+  acknowledge: 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you shortly.',
+  acknowledge_evening: 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you tomorrow.',
   // A complaint or an upset customer (owner's wording, 15 Oct 2026): one line, then a person takes over at once. No promise about resolving it, and the automatic conversation does not continue.
   complaint: 'I\'m sorry to hear that. I\'ll pass this on to the team so they can look into it.',
   asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
@@ -42,6 +44,8 @@ const LINES = {
   // response is implied.
   soon: 'Thanks, I\'ll pass your request on to the team and they\'ll get back to you.',
 };
+const EVENING_FROM = 20;                                  // from 20:00 Irish time the automatic acknowledgement says "tomorrow"
+const hourOf = (ms) => +new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(new Date(ms));
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const WEEKS = ['this', 'next', 'following', 'other'];
 const STATUSES = ['available', 'unavailable', 'tentative', 'unknown'];
@@ -217,6 +221,8 @@ const NO_TO_OFFER = /^\W*(?:no|nope|nah|no\s+thanks?|no\s+thank\s+you|not\s+(?:r
 const INTEREST = /\b(?:yes+|yeah|yea|yeh|yep|yup|aye|interested|still looking|definitely|absolutely|sure|go on|go ahead|let'?s do it|sounds good|count me in)\b/i;
 const NEGATIVE = /\b(?:no|nope|nah|not|never|don'?t|dont|cancel|stop)\b/i;
 const keen = (words) => INTEREST.test(words) && !NEGATIVE.test(words);
+// A yes to OUR question that already offers a consultation ("Are you looking to arrange a consultation for your new kitchen?"): the usual yes words, plus "please", "if you can", "probably", "that would be great".
+const YES_TO_OUR_OFFER = new RegExp(INTEREST.source + "|\\bplease\\b|\\bif you can\\b|\\bprobably\\b|\\b(?:would|will|that'?d|that would|that will) be (?:great|good|lovely|brilliant|perfect|fine)\\b", 'i');
 // ... or they ask about the next step or how it all works (the visit IS the next step, so it is offered with the answer; a plain question of fact still is not).
 const NEXT_STEP = /\b(?:what(?:'s|s| is)?\s+(?:the\s+)?(?:next|process|procedure)\b|what\s+(?:happens|do\s+(?:i|we)\s+do)\s+(?:next|now|after|from here)|how\s+(?:does|do|would)\s+(?:it|this|that|the process|the whole thing|it all)\s+work|how\s+(?:do|would|can)\s+(?:i|we)\s+(?:go about it|proceed|start|get started|go ahead|move forward)|where\s+do\s+(?:i|we)\s+go\s+from\s+here|next\s+steps?|what\s+are\s+the\s+steps)\b/i;
 // Audit repairs of 17 Oct 2026 (both audits), read from the customer's own words:
@@ -293,10 +299,15 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
   const whoNow = natural && projectSaid(words) ? { ...(who || {}), projectType: projectSaid(words) } : who;       // the acknowledgement names the project they ask about now
   const line = (k) => ((kn && kn.lines) || ownLines || {})[k] || LINES[k];                // the owner's line (Knowledge Centre) when there is one, else the default
   // The line that acknowledges a preference: for a visit asked for today or tomorrow, the owner's "pass your request on" line (audit 17 Oct 2026, problem 5), never a promise of a time.
-  const passOn = given && prefHeard && prefHeard.soon ? line('soon') : LINES.acknowledge;
+  const confirmLine = natural && hourOf(nowMs) >= EVENING_FROM ? LINES.acknowledge_evening : LINES.acknowledge;          // the staff flow is a draft a person reads: always the daytime wording
+  const passOn = given && prefHeard && prefHeard.soon ? line('soon') : confirmLine;
   const person = (why) => ({ step: 'none', reply: null, handover: { needed: true, reason: why }, preference: null });
   const offered = !!(consult && consult.offered) || said(LINES.visit_offer);
-  const agreed = ((visit === 'asked' || visit === 'agreed') && (!natural || offered || welcomeOffer || ASKS_VISIT.test(words))) || (welcomeOffer && visit !== 'declined' && keen(words));
+  // The owner's greeting question can itself offer a consultation ("Are you looking to arrange a consultation…?", Knowledge Centre line). A yes to it is agreement: the days are asked next, never the visit offer on
+  // top of it (live review of 1 Nov 2026: "Yep" to that question was asked "Would you like us to call out…?" as well).
+  const stillQ = line('still_looking'), lastOutBody = String((out[out.length - 1] || {}).body || '');
+  const answersOurOffer = natural && ASKS_VISIT.test(stillQ) && lastOutBody.includes(stillQ) && YES_TO_OUR_OFFER.test(words) && !NEGATIVE.test(words);
+  const agreed = ((visit === 'asked' || visit === 'agreed') && (!natural || offered || welcomeOffer || ASKS_VISIT.test(words))) || (welcomeOffer && visit !== 'declined' && keen(words)) || answersOurOffer;
   const question = hand || !!d.hasQuestion || ['asking_info', 'asking_price', 'complaint'].includes(d.intent);          // something a person has to answer (nothing is offered or asked meanwhile)
   // R3: the code-built acknowledgement (see ackLine). With no id from the model, an opener the model offered on the first message only means "say hello".
   const ackOf = () => ackLine(ACKS.includes(d.ack) ? d.ack : (opener(d.schedule && d.schedule.opener, hasOutbound) ? 'hello' : ''), whoNow, first);
@@ -328,7 +339,7 @@ function plan({ decision, consult, messages, booked, nowMs, natural = false, kn 
     }
     if (change === 'move') {
       const asked = said(LINES.change_ask);
-      if (given) return { step: 'change_given', reply: LINES.acknowledge, handover: { needed: true, reason: 'wants to move booking: preference received' }, preference: given };
+      if (given) return { step: 'change_given', reply: confirmLine, handover: { needed: true, reason: 'wants to move booking: preference received' }, preference: given };
       return asked ? { step: 'change_pass_on', reply: LINES.no_preference, handover: { needed: true, reason: 'wants to move booking' }, preference: null } : { step: 'change_ask', reply: LINES.change_ask, handover: { needed: true, reason: 'wants to move booking' }, preference: null };
     }
     // The automatic receptionist with published knowledge sends the owner's short line first (owner's decision, 16 Oct 2026), then a person takes over; staff drafts and older setups stay silent as before.

@@ -27,6 +27,7 @@ const ai = require('./ai');
 const outbound = require('./outbound');
 const store = require('./store');
 const { SEND_STEPS, PAUSE_STEPS, STOP } = require('./aiSchedule');
+const AR = require('./autoReply');            // a business's own away message is not a person writing
 const CB = require('./contactBlock');          // Phase 10: "do not contact"
 const H = require('./health');                 // Phase 10: the receptionist's faults become problems in "Needs attention"
 const W = require('./welcome');                // the two welcome wordings
@@ -102,6 +103,17 @@ const answered = (c, r, lastIn) => (seqOf(c) != null ? seqOf(c) <= ((r && r.hand
 const newerThan = (cur, seq, lastIn) => (seq != null && seqOf(cur) != null ? seqOf(cur) > seq : ms(cur && cur.lastInboundAt) > lastIn);
 const handledMark = (lastIn, seq) => ({ 'receptionist.handledMs': lastIn, ...(seq != null ? { 'receptionist.handledSeq': seq } : {}) });
 // A person has written to this customer since the receptionist was switched on (recorded before every staff send: outbound.noteHuman).
+// The customer's messages since our last one are ONLY a business's automatic reply to our very first (welcome) message: nobody has written yet. `desc` = the newest messages first.
+function isAutoReplyOnly(desc, welcomeTemplate) {
+  const burst = []; for (const x of desc) { if (x.direction !== 'in') break; burst.push(x); }
+  if (!burst.length || desc.length >= 12) return false;                                    // a long chat is a conversation, not a first answer
+  const older = desc.slice(burst.length);
+  if (older.some((x) => x.direction === 'in')) return false;                               // they have written before: a person
+  if (!burst.every((x) => AR.looksAutomatic(x.body))) return false;
+  const welcome = older.find((x) => isWelcome(x, welcomeTemplate)); if (!welcome) return false;
+  const gap = ms(burst[burst.length - 1].createdAt) - ms(welcome.createdAt);
+  return gap >= 0 && gap <= 180000;                                                       // an automatic reply comes within moments of the message that triggered it
+}
 const personWrote = (rec) => ms(rec && rec.humanAt) > ms(rec && rec.at);
 
 // What must happen after an automatic message went out (audit 16 Oct 2026, finding 4): the consultation request for the owner, the pause, the push, and the record that this customer message is answered. The plan is stored in the
@@ -183,6 +195,9 @@ async function processChat(deps, phone, nowMs = Date.now(), { waitMs = WAIT_MS }
     // a person has taken the chat over (anything sent by staff since it was switched on, except our own welcome template)
     const recent = await ref.collection('messages').orderBy('createdAt', 'desc').limit(12).get();
     if (recent.docs.some((d) => { const x = d.data(); return x.direction === 'out' && !x.auto && !isWelcome(x, deps.welcomeTemplate) && ms(x.createdAt) > at; })) { await handOver(deps, ref, phone, 'a person replied', nowMs, { notify: false }); return 'staff_replied'; }
+    // A shop's own automatic away message, sent back within moments of our welcome ("Thank you for contacting …, let us know how we can help"), is not a person writing: nothing is sent, the AI is not asked and
+    // nobody is bothered; the chat waits for the lead's real answer (live review of 1 Nov 2026: such a message was answered as if the lead had written).
+    if (isAutoReplyOnly(recent.docs.map((d) => d.data()), deps.welcomeTemplate)) { await ref.update(handledMark(lastIn, seq)); return 'auto_reply'; }
     const day = ai.dayId(nowMs);
     if (r.day === day && (r.count || 0) >= DAILY_CAP) return 'daily_limit';
     // one run at a time per chat (two overlapping checks must never both answer). The state is read AGAIN inside the lock: a check that was waiting must not act on what it read before another one finished.

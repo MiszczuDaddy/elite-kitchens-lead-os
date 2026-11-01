@@ -20,9 +20,9 @@ const out = (text, type = 'text') => ({ direction: 'out', type, body: text }), i
 const sent = (p) => p.reply || '';
 
 test('the owner\'s approved lines are in place and make no promise, no date and no availability claim (the price line is the only one with a figure)', () => {
-  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'cancel_noted', 'change_ask', 'complaint', 'no_preference', 'price_general', 'privacy', 'soon', 'still_looking', 'tentative', 'visit_offer']);
+  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'acknowledge_evening', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'cancel_noted', 'change_ask', 'complaint', 'no_preference', 'price_general', 'privacy', 'soon', 'still_looking', 'tentative', 'visit_offer']);
   assert.equal(L.visit_offer, 'Would you like us to call out and have a look at your space?'); assert.equal(L.cancel_ask, 'No problem, do you want to move it to any other date?'); assert.equal(L.tentative, 'No problem at all, just let us know when suits.');
-  assert.equal(L.acknowledge, 'Perfect, I\'ll pass that on to the team and we\'ll confirm a time shortly.');
+  assert.equal(L.acknowledge, 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you shortly.'); assert.equal(L.acknowledge_evening, 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you tomorrow.');
   for (const [k, l] of Object.entries(L)) if (k !== 'price_general') assert.doesNotMatch(l, /\b(booked|confirmed available|availability|\d)\b/i, k);
   assert.equal(S.MAX_ASKS, 2);
   assert.equal(offersVisit(L.visit_offer), true); assert.equal(asksDays(L.visit_offer), false, 'the offer never asks about days'); assert.equal(asksDays(L.ask_next_week), true); assert.equal(offersVisit(L.ask_next_week), false);
