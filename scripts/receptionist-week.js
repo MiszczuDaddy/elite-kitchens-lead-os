@@ -28,8 +28,8 @@ async function facts(db) {
   const live = await db.doc('aiKnowledge/live').get();
   console.log('############ PART A: what the receptionist is allowed to say (the published business facts)');
   if (!live.exists) { console.log('(no published knowledge: the receptionist uses only its built-in lines)\n'); return; }
-  const k = live.data();
-  console.log('Published version:', k.version == null ? '?' : k.version);
+  const rec = live.data(), k = rec.data || {};                                         // the published record is { version, data: { sections, lines, instructions … } }
+  console.log('Published version:', rec.version == null ? '?' : rec.version);
   if (k.instructions) console.log('\nINSTRUCTIONS: ' + clip(plain(k.instructions), 1500));
   for (const s of k.sections || []) {
     console.log('\n## ' + s.title);
