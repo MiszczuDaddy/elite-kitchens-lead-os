@@ -194,6 +194,8 @@ h1, h2, p { overflow-wrap: anywhere; }
 .conv-sub { color: var(--muted); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-prev { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
 .conv-prev .t { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-call { flex: none; align-self: center; min-width: 54px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--accent); font-size: 14px; font-weight: 600; text-decoration: none; }      /* the No reply tab: tap to ring the lead */
+.conv-call:hover { background: var(--hover); }
 .conv.unread .conv-name { font-weight: 700; }
 .conv.unread .conv-prev .t { color: var(--ink); font-weight: 550; }
 .conv.unread .conv-time { color: var(--accent); }
@@ -436,7 +438,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 [data-stage=booked], [data-status=booked] { --st: var(--st-booked); --st-rgb: var(--st-booked-rgb); --tint: .055; --tint-drag: .12; }
 [data-stage=quoted], [data-status=quoted] { --st: var(--st-quoted); --st-rgb: var(--st-quoted-rgb); --tint: .05; --tint-drag: .11; }
 [data-stage=won], [data-status=won] { --st: var(--st-won); --st-rgb: var(--st-won-rgb); --tint: .055; --tint-drag: .12; }
-[data-stage=closed], [data-status=closed] { --st: var(--st-closed); --st-rgb: var(--st-closed-rgb); --tint: .055; --tint-drag: .12; }
+[data-stage=closed], [data-status=closed], [data-status=noreply] { --st: var(--st-closed); --st-rgb: var(--st-closed-rgb); --tint: .055; --tint-drag: .12; }
 [data-status=all] { --st: var(--muted); --st-rgb: 98 105 112; --tint: .05; --tint-drag: .11; }
 .lane { position: relative; isolation: isolate; min-width: 0; min-height: 280px; padding-top: 16px; }
 .lane::before { content: ''; position: absolute; inset: 6px -6px 0; border-radius: 8px; background: rgb(var(--st-rgb) / var(--tint)); z-index: -1; transition: background-color 120ms ease-out; }
@@ -1326,3 +1328,5 @@ div.td-open { cursor: default; }
 .list-more:hover { background: var(--hover); }
 /* small phones (360 wide): a little less spacing so "Notifications" still fits in its button */
 @media (max-width: 374px) { .phone-nav { gap: 6px; margin-left: 12px; margin-right: 12px; } .pn-btn { padding: 8px 0; font-size: 11px; } }
+/* phones: the note under the search ("2 leads have never replied") starts right below the pinned filters; it must come after the base .list-note rule above to win */
+@media (max-width: 899px) { .list-note { margin-top: 0; } }

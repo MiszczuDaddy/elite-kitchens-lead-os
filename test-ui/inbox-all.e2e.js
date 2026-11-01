@@ -70,12 +70,12 @@ const OLD = {
   await page.waitForSelector('#list .conv');
 
   // ------------------------------------------------------------ 1. the tabs: All is added, the others are unchanged
-  assert.deepEqual(await page.locator('#status-filters button').allInnerTexts(), ['All', 'New lead', 'Booked', 'Quoted', 'Won', 'Closed']);
+  assert.deepEqual(await page.locator('#status-filters button').allInnerTexts(), ['All', 'New lead', 'Booked', 'Quoted', 'Won', 'No reply']);
   assert.equal(await page.getAttribute('#status-filters button[data-status="inbox"]', 'aria-pressed'), 'true', 'the Inbox still opens on New lead');
   const liveInbox = await page.evaluate(() => S.live.filter((c) => inboxStatus(c) === 'inbox').length);
   assert.equal(await rows().count(), liveInbox, 'New lead shows exactly the live New leads, as before');
   assert.equal(await page.evaluate(() => S.live.length), 300, 'the live list is still the 300 newest');
-  await page.click('#status-filters button[data-status="closed"]'); assert.equal(await rows().count(), await page.evaluate(() => S.live.filter((c) => inboxStatus(c) === 'closed').length));
+  await page.click('#status-filters button[data-status="won"]'); assert.equal(await rows().count(), await page.evaluate(() => S.live.filter((c) => inboxStatus(c) === 'won').length));
   await page.click('#status-filters button[data-status="inbox"]');
   assert.equal(await page.locator('#list .conv', { hasText: 'Zoe Oldham' }).count(), 0, 'the old closed customer is not among the live 300');
   ok('"All" is added as the first tab; New lead is still the default and every stage tab still shows exactly its live conversations');

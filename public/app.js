@@ -11,6 +11,7 @@ const call = (name) => fns.httpsCallable(name);
 const TZ = 'Europe/Dublin';
 const INBOX_STATUSES = { inbox: 'New lead', booked: 'Booked', quoted: 'Quoted', won: 'Won', closed: 'Closed' };
 const inboxStatus = (c) => Object.hasOwn(INBOX_STATUSES, c.inboxStatus) ? c.inboxStatus : 'inbox';
+const filterLabel = (f) => (f === 'noreply' ? 'No reply' : INBOX_STATUSES[f]);       // the status tabs, plus "No reply" (leads who never wrote back: not a stage, so it is not in INBOX_STATUSES)
 const statusRequests = new Map();
 const statusErrors = new Map();
 
@@ -311,7 +312,8 @@ const listScroller = () => (getComputedStyle($('list')).overflowY === 'visible' 
 function renderList() {
   const q = S.query.trim().toLowerCase();
   const allTab = S.statusFilter === 'all';
-  const stage = allTab ? 'All' : INBOX_STATUSES[S.statusFilter];
+  const stage = allTab ? 'All' : filterLabel(S.statusFilter);
+  const noReply = S.statusFilter === 'noreply' && !q;
   const list = $('list');
   const scroller = listScroller(), keep = scroller.scrollTop;
   const consultOnly = !!(window.CONSULT && CONSULT.filter && CONSULT.count());       // Phase 9 R2b: only the customers waiting for you to book a consultation
@@ -322,6 +324,9 @@ function renderList() {
     if (S.dirState === 'loading') note = q ? 'Searching the latest chats while every customer loads…' : 'Loading every customer…';
     else if (S.dirState === 'error') note = 'Could not load the older customers (' + S.dirError + '). Showing the latest 300 chats. Press the All tab again to retry.';
     else if (dir) note = (S.dirTruncated ? 'Showing the ' + S.dirTotal.toLocaleString('en-IE') + ' most recent customers. ' : '') + (q ? all.length.toLocaleString('en-IE') + ' found' : all.length.toLocaleString('en-IE') + ' customers');
+  } else if (noReply && !consultOnly) {
+    shown = noReplyRows();
+    note = NR.error ? 'Could not check every lead (' + NR.error + '). Press the No reply tab again to retry.' : NR.busy ? 'Checking which leads have not replied…' : shown.length + (shown.length === 1 ? ' lead has' : ' leads have') + ' never replied. Oldest first.';
   } else shown = S.convs.filter((c) => consultOnly ? CONSULT.has(c) && (!q || matchesQuery(c, q)) : q ? matchesQuery(c, q) : inboxStatus(c) === S.statusFilter);
   const kids = shown.map(convItem);
   if (more > 0) { const b = el('button', 'list-more', `Show ${Math.min(PAGE, more)} more (${more.toLocaleString('en-IE')} left)`); b.type = 'button'; b.onclick = () => { S.shownCount += PAGE; renderList(); }; kids.push(b); }
@@ -332,7 +337,7 @@ function renderList() {
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
   else if (!S.convs.length && !(S.dirItems && S.dirItems.length)) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = S.dirState === 'loading' ? 'Searching…' : q ? 'No conversations match your search across the stages. Try another name, phone number, email or town.' : allTab ? 'No customers yet.' : 'No conversations marked ' + stage + '. Choose another stage to see more.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = S.dirState === 'loading' ? 'Searching…' : q ? 'No conversations match your search across the stages. Try another name, phone number, email or town.' : allTab ? 'No customers yet.' : noReply ? (NR.busy ? 'Checking…' : 'Every lead has replied, or been moved on.') : 'No conversations marked ' + stage + '. Choose another stage to see more.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;
@@ -345,7 +350,7 @@ function renderList() {
     const status = button.dataset.status;
     const unread = S.convs.filter(c => (status === 'all' || inboxStatus(c) === status) && isUnread(c)).length;
     button.setAttribute('aria-pressed', String(status === S.statusFilter));
-    button.setAttribute('aria-label', (status === 'all' ? 'All conversations' : INBOX_STATUSES[status]) + (unread ? ', ' + unread + ' unread conversation' + (unread === 1 ? '' : 's') : ''));
+    button.setAttribute('aria-label', (status === 'all' ? 'All conversations' : filterLabel(status)) + (unread ? ', ' + unread + ' unread conversation' + (unread === 1 ? '' : 's') : ''));
     button.querySelector('.status-unread').hidden = !unread;
   }
 }
@@ -362,23 +367,47 @@ function convItem(c) {
   const top = el('div', 'conv-top');
   top.append(el('div', 'conv-name', displayName(c)), el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
-  const tag = [(S.query.trim() || S.statusFilter === 'all') ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
+  const nrMode = S.statusFilter === 'noreply' && !S.query.trim();
+  const tag = nrMode ? [(NoReply.ageText(NoReply.ageDays(c, Date.now())) || 'New') + ', no reply', c.projectType, c.location].filter(Boolean).join(' · ')
+    : [(S.query.trim() || S.statusFilter === 'all') ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
   if (tag) body.append(el('div', 'conv-sub', tag));
   if (window.CONSULT && CONSULT.has(c)) body.append(el('div', 'conv-consult', 'Needs booking'));
   if (dncOf(c)) body.append(el('div', 'conv-dnc', 'Do not contact'));                                                  // Phase 10
   if (c.receptionist && c.receptionist.notifyFailed) body.append(el('div', 'conv-alert', 'Alert did not reach your phone'));   // Phase 10: see Needs attention
   const prev = el('div', 'conv-prev');
-  prev.append(el('span', 't', previewOf(c) || (c.fromDirectory && c.email) || ' '));
+  prev.append(el('span', 't', previewOf(c) || (nrMode ? 'No message has been sent to them yet' : (c.fromDirectory && c.email) || ' ')));
   if (unread) {
     if (typeof c.unreadCount === 'number' && c.unreadCount > 0) { const b = el('span', 'badge', c.unreadCount > 99 ? '99+' : String(c.unreadCount)); b.title = c.unreadCount + ' unread'; prev.append(b); }
     else { const d = el('span', 'dot'); d.title = 'Unread'; prev.append(d); }
   }
   body.append(prev);
   item.append(body);
+  const tel = nrMode ? NoReply.callHref(c.id) : null;
+  if (tel) { const call = el('a', 'conv-call', 'Call'); call.href = tel; call.setAttribute('aria-label', 'Call ' + displayName(c)); call.onclick = (e) => e.stopPropagation(); item.append(call); }       // a tap on Call rings them; it does not open the chat
   const open = () => openConversation(c.id);
   item.onclick = open;
-  item.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  item.onkeydown = (e) => { if (e.target.closest && e.target.closest('.conv-call')) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
   return item;
+}
+
+// ---------- the "No reply" tab: leads who never wrote back ----------
+// The live list holds the 300 newest chats, so the older ones are read once when the tab is pressed: every chat whose last message is ours. A lead whose record lacks "they wrote" is then
+// confirmed against the chat's own messages (older records may not have it), one tiny read each, and remembered for the session.
+const NR = { extra: [], checked: new Map(), busy: false, error: '' };
+const noReplyRows = () => NoReply.rows(S.convs, NR.extra, NR.checked);
+async function loadNoReply() {
+  if (NR.busy) return;
+  NR.busy = true; NR.error = ''; renderList();
+  try {
+    NR.extra = (await db.collection('conversations').where('lastMessageDirection', '==', 'out').limit(2000).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderList();
+    const todo = noReplyRows().map((c) => c.id).filter((id) => !NR.checked.has(id));
+    for (let i = 0; i < todo.length; i += 8) {
+      await Promise.all(todo.slice(i, i + 8).map(async (id) => { const m = await db.collection('conversations').doc(id).collection('messages').where('direction', '==', 'in').limit(1).get(); NR.checked.set(id, !m.empty); }));
+      if (S.statusFilter === 'noreply') renderList();
+    }
+  } catch (e) { NR.error = errText(e); }
+  NR.busy = false; renderList();
 }
 
 $('search').addEventListener('input', (e) => { S.query = e.target.value; S.shownCount = 100; if (S.query.trim()) ensureDirectory(); renderList(); });
@@ -386,7 +415,7 @@ $('status-filters').addEventListener('click', e => {
   const button = e.target.closest('button[data-status]');
   if (!button) return;
   S.statusFilter = button.dataset.status;
-  S.shownCount = 100; if (S.statusFilter === 'all') ensureDirectory();
+  S.shownCount = 100; if (S.statusFilter === 'all') ensureDirectory(); if (S.statusFilter === 'noreply') loadNoReply();
   listScroller().scrollTop = 0;
   renderList();
 });
