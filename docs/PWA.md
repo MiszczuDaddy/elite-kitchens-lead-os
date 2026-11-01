@@ -7,7 +7,7 @@ Screen files and `firebase.json` only: no backend, no rules, no functions. Branc
 | File | What it does |
 |---|---|
 | `manifest.webmanifest` | Name "Elite Kitchens Lead OS" (short "Elite OS"), opens its own window at `/`, light colours of the app. |
-| `icons/` | `EK` monogram made from the real E and K of the logo, bone letters on the brand green. `icon-192.png`, `icon-512.png` (rounded), `icon-maskable-512.png` (the shape Android crops), two favicons. Made by `scripts/make-icons.js`. |
+| `icons/` | `EK` monogram made from the real E and K of the logo, bone letters on black. `icon-192.png`, `icon-512.png` (rounded), `icon-maskable-512.png` (the shape Android crops), two favicons. Made by `scripts/make-icons.js`. |
 | `sw.js` | A tiny service worker. See below. |
 | `offline.html` | "You're offline" with a **Retry** button (also retries by itself when the connection returns). |
 | `pwa.js` | Registers the worker and shows **Install Elite OS** only when the browser offers installation. |
