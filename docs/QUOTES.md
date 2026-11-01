@@ -722,9 +722,10 @@ customer; AI.
 * **Number fields.** In the Quotes screens a number field is selected when entered and leading zeros are removed as you type ("085" becomes "85"; "0.5" and "0" are left alone). Only what is shown changes; the calculator reads the same number and nothing saved is touched (`public/quote-numbers.js`).
 * **Tests.** `test-ui/quote-pdf.e2e.js` (layout with 0, 1, 2, 3, 5 renders; the PDF has the preview's pages; number fields), and Preview PDF checks in `test-ui/quote-send.e2e.js`.
 
-## Known issue: "Blum runners" wording on the quote (recorded 16 Oct 2026, not fixed)
-The owner confirmed on 16 Oct 2026 that the **standard drawers are Cemux soft-close**. Blum drawer systems are an optional upgrade, and the hinges are Blum soft-close as standard. Two fixed quote texts still say the drawer runners are Blum:
-* `functions/lib/quoteEngine.js:323` and `public/quote-engine.js:323`: the fact row **"Hinges & runners: Blum soft-close throughout"**.
-* `public/quote-document.js:179`: **"Hinges and runners are Blum throughout, soft-close as standard."**
-
-These are wrong for a quote whose drawers are Cemux (or that has no drawer boxes). The fix is a wording change the owner must approve. One option: say "Blum soft-close hinges", and add the runners only when the chosen drawer box is Blum. That changes printed quotes, so it needs the quote tests (`quote-engine`, `quote-template`, the legacy-parity test) and a PDF check. It was deliberately left out of the receptionist audit branch.
+## Fixed 1 Nov 2026: the quote no longer says the drawer runners are Blum
+The standard drawers are Cemux soft-close; Blum drawer systems are an optional upgrade, and the hinges are Blum soft-close as standard. The quote used to print "Hinges & runners: Blum soft-close throughout" and "Hinges and runners are Blum throughout, soft-close as standard". The owner decided on 1 Nov 2026 that it should simply say **"Blum soft-close hinges and soft-close drawer runners"**, whichever drawer box the quote has (a Blum drawer upgrade is done without being named in these lines).
+* `functions/lib/quoteEngine.js` and `public/quote-engine.js` (identical copies): the fact row **"Hinges & runners: Blum soft-close hinges and soft-close drawer runners"**.
+* `public/quote-document.js`: **"Blum soft-close hinges and soft-close drawer runners as standard."**
+* The parity test's copy of the original app's output (`functions/test/legacy-quote-app.js`) carries the new row on purpose; the original quoting app still prints the old wording.
+* Needs both the server (the quote functions recalculate the price sheet on every save and send) and the screen (the document). A quote already **sent** keeps the wording it was sent with; a **draft** takes the new wording the next time it is saved; to change a sent quote, revise it (v2). The engine version is unchanged (wording only, no price moves).
+* Not changed: the package cards still list the drawer boxes by name ("Cemux Soft-Close drawer boxes", "Blum Merivobox drawer boxes") when a package has drawers.

@@ -320,7 +320,7 @@
   function documentWording(a, hasWorktop) {
     const p = PROJECT_LISTS[a.project];
     const facts = [
-      { label: 'Hinges & runners', value: 'Blum soft-close throughout' },
+      { label: 'Hinges & runners', value: 'Blum soft-close hinges and soft-close drawer runners' },
       { label: 'Panels & gables', value: 'Finished to match your door colour' },
       { label: 'Handles', value: 'From our standard range' },
     ];

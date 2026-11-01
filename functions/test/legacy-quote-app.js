@@ -62,7 +62,8 @@ function legacyPdf(q, ST, D) {
 
   // ── Specification facts ── (the original wrote '&amp;' in HTML; plain text here)
   const facts = [];
-  facts.push({ label: 'Hinges & runners', value: 'Blum soft-close throughout' });
+  // DELIBERATE difference from the original app (owner's decision, 1 Nov 2026): standard drawers are Cemux, so the quote no longer says the runners are Blum. The original app still prints 'Blum soft-close throughout'.
+  facts.push({ label: 'Hinges & runners', value: 'Blum soft-close hinges and soft-close drawer runners' });
   facts.push({ label: 'Panels & gables', value: 'Finished to match your door colour' });
   facts.push({ label: 'Handles', value: 'From our standard range' });
   if (wtT > 0) facts.push({ label: 'Worktops', value: 'Supplied and fitted', note: 'Laminate worktops are not covered against water damage.' });
