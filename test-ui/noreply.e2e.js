@@ -1,6 +1,6 @@
 'use strict';
 // The Inbox "No reply" tab (replaces the Closed tab), in a REAL browser: it lists every New lead who never wrote back, oldest first, including leads older than the live list's 300 chats,
-// leaves out anyone who wrote, anyone moved on, and anyone marked "do not contact", shows how long and a Call button that does not open the chat, and updates live. Every name and number is made up.
+// leaves out anyone who wrote, anyone moved on, and anyone marked "do not contact", shows how long, and a Call button on a phone only (it does not open the chat), and updates live. Every name and number is made up.
 // Run: bash test-ui/run.sh noreply.e2e.js
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
 const { chromium } = require('playwright');
@@ -68,14 +68,10 @@ http.createServer((req, res) => {
   assert.match(await page.locator('#list .conv', { hasText: 'Nora Nomsg' }).locator('.conv-prev .t').innerText(), /No message has been sent to them yet/);
   ok('No reply lists the leads who never wrote, oldest first, including one older than the live list, with how long; not those who wrote (even in an old record), closed, booked or do-not-contact');
 
-  // ------------------------------------------------------------------ 3. Call rings; it does not open the chat
-  assert.equal(await page.locator('#list .conv .conv-call').count(), 3);
-  assert.equal(await page.locator('#list .conv', { hasText: 'Oona Oldwait' }).locator('.conv-call').getAttribute('href'), 'tel:+353871120001');
-  await page.evaluate(() => document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('.conv-call')) e.preventDefault(); }, true));       // the test browser has no phone app
-  await page.locator('#list .conv', { hasText: 'Oona Oldwait' }).locator('.conv-call').click(); await sleep(400);
-  assert.equal(await page.evaluate(() => S.selected || null), null, 'pressing Call did not open the chat');
+  // ------------------------------------------------------------------ 3. a laptop has no Call button; a row opens its chat
+  assert.equal(await page.locator('#list .conv .conv-call').count(), 3); assert.equal(await page.locator('#list .conv .conv-call').first().isVisible(), false, 'no Call button on a laptop');
   await page.locator('#list .conv', { hasText: 'Oona Oldwait' }).locator('.conv-name').click(); await page.waitForFunction(() => S.selected === '353871120001');
-  ok('each lead has a Call button (tel: link); pressing it does not open the chat, pressing the row does');
+  ok('on a laptop there is no Call button, and pressing a lead opens the chat');
 
   // ------------------------------------------------------------------ 4. live: a reply removes the lead; a search still looks through everyone
   await page.click('#status-filters button[data-status="noreply"]'); await until(async () => (await names(page)).length === 3, 'back on the tab');
@@ -90,9 +86,14 @@ http.createServer((req, res) => {
   await page.tap('#status-filters button[data-status="noreply"]'); await until(async () => /2 leads have never replied/.test(await page.innerText('#list-note')), 'phone: the tab');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scrolling');
   const noteTop = (await page.locator('#list-note').boundingBox()).y, pinnedBottom = (await page.locator('.list-sticky').boundingBox()); assert.ok(noteTop >= pinnedBottom.y + pinnedBottom.height - 1, 'the note is not hidden under the pinned filters and search: ' + JSON.stringify([noteTop, pinnedBottom]));
+  assert.equal(await page.locator('#list .conv .conv-call').first().isVisible(), true, 'phone: the Call button is shown');
+  assert.equal(await page.locator('#list .conv', { hasText: 'Oona Oldwait' }).locator('.conv-call').getAttribute('href'), 'tel:+353871120001', 'it is a phone link with the lead\'s number');
+  await page.evaluate(() => document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('.conv-call')) e.preventDefault(); }, true));       // the test browser has no phone app
+  await page.locator('#list .conv', { hasText: 'Oona Oldwait' }).locator('.conv-call').tap(); await sleep(400);
+  assert.equal(await page.evaluate(() => S.selected || null), null, 'pressing Call did not open the chat');
   const call = await page.locator('#list .conv-call').first().boundingBox(); assert.ok(call.height >= 40 && call.x + call.width <= 390, 'the Call button is easy to tap and inside the screen');
   await page.screenshot({ path: path.join(SHOTS, 'no-reply-phone.png') });
-  ok('phone: the tab works, no sideways scrolling, the Call button is easy to tap');
+  ok('phone: the tab works, no sideways scrolling, each lead has a Call button (a phone link) that is easy to tap and does not open the chat');
   await ctx.close();
 
   assert.deepEqual(errors, [], 'no JavaScript errors: ' + JSON.stringify(errors)); ok('no JavaScript errors in the browser');

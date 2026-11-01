@@ -194,7 +194,7 @@ h1, h2, p { overflow-wrap: anywhere; }
 .conv-sub { color: var(--muted); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-prev { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
 .conv-prev .t { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.conv-call { flex: none; align-self: center; min-width: 54px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--accent); font-size: 14px; font-weight: 600; text-decoration: none; }      /* the No reply tab: tap to ring the lead */
+.conv-call { flex: none; align-self: center; min-width: 54px; min-height: 40px; display: none; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--accent); font-size: 14px; font-weight: 600; text-decoration: none; }      /* the No reply tab: tap to ring the lead */
 .conv-call:hover { background: var(--hover); }
 .conv.unread .conv-name { font-weight: 700; }
 .conv.unread .conv-prev .t { color: var(--ink); font-weight: 550; }
@@ -367,6 +367,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
   .app { grid-template-columns: minmax(0,1fr); }.rail { display: none; }
   .only-mobile { display: inline-flex; }
   .phone-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 16px 14px; }
+  .conv-call { display: inline-flex; }                    /* the Call button of the No reply tab is for phones only */
   /* On a phone the whole inbox scrolls as one: the Today card and the section buttons slide up out of the way, and the filters and search stay at the top. */
   .list-pane { overflow-y: auto; overscroll-behavior-y: contain; }
   .list { flex: none; overflow: visible; padding-top: 8px; }

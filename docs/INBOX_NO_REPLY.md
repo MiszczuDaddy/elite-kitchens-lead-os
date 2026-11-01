@@ -10,7 +10,7 @@ A lead is listed when **all** of these are true:
 
 A lead nobody has messaged yet (the welcome did not go) is listed too, with "No message has been sent to them yet".
 
-Each row says how long it has been ("40 days, no reply"), shows the project and area, and has a **Call** button (a normal phone link). Pressing Call rings them; pressing the row opens the chat. A lead who writes leaves the tab by itself.
+Each row says how long it has been ("40 days, no reply"), shows the project and area, and, **on a phone only**, a **Call** button (a normal phone link). Pressing Call opens the dialer with their number; pressing the row opens the chat. A laptop shows no Call button. A lead who writes leaves the tab by itself.
 
 ## Older leads
 The Inbox's live list holds the 300 newest chats. When the tab is pressed Elite OS also reads every chat whose last message is ours, so older leads are not missed. Each candidate is then confirmed against the chat's own messages (one small read each, remembered for the session), because an older record might not have noted that the customer once wrote. While it checks, a line under the search says so.
