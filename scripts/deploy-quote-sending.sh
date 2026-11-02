@@ -40,6 +40,7 @@
 #   ./scripts/deploy-quote-sending.sh today      Phase 11 (docs/PHASE11_TODAY.md): the 2 functions behind the Today tab (saveReminder, snoozeQuote) and deleteCustomer (it now also erases reminders). Run it BEFORE "live". Does NOT deploy the webhook.
 #   ./scripts/deploy-quote-sending.sh bookings   Phase 12 (docs/PHASE12_BOOKINGS.md): the evening-before visit reminder (bookingReminderSweep, resolveBookingNotice), the Installation visit (appointment, project and calendar functions) and deleteCustomer. Run it BEFORE "live". The evening reminder stays OFF.
 #   ./scripts/deploy-quote-sending.sh reminders on|off   switch the automatic evening-before reminder ON or OFF (writes BOOKING_REMINDERS to the settings file and redeploys bookingReminderSweep). Needs the reminder template (elite_kitchens_consultation_reminder) approved by Meta first.
+#   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
 #   ./scripts/deploy-quote-sending.sh safety     Phase 10 (docs/PHASE10_SAFETY_NET.md): "do not contact" in every send, problems and rejected leads in "Needs attention", the 10-minute health check
@@ -83,6 +84,7 @@ SAFETY_CHANGED="sendReply sendMedia startConversation reopenConversation deliver
 SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
 TODAY_NEW="saveReminder snoozeQuote dismissReply"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
 WELCOME_FUNCS="leadIntake receptionistOnMessage receptionistSweep setAiSettings aiStatus aiSuggestReply"                # the welcome switch: the intake sends the chosen welcome, the receptionist knows both, the settings save and show the choice (all exist already)
+ASAP_FUNCS="leadIntake updateContact"                                                                                      # the ⭐ "wants it as soon as possible": a new lead gets it from its form answer, editing the Notes keeps it in step (both exist already)
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
 BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
@@ -96,7 +98,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,52p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,53p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -424,6 +426,16 @@ case "${1:-}" in
     done
     check_reachable "$TODAY_FUNCS"
     echo "Done. Next: $0 live (the Today screen). To go back: git checkout 5244e73 -- functions, then firebase deploy --only functions:deleteCustomer, and firebase functions:delete $TODAY_NEW --region $REGION --project $PROJECT"
+    ;;
+  asap)
+    [ -f functions/lib/asap.js ] || { echo "This checkout has no asap code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    check_settings; check_access; check_routing $ASAP_FUNCS
+    echo "Functions: $ASAP_FUNCS (both exist already; no new function, nothing made public)."
+    echo "leadIntake gives a NEW lead the star when its lead-form answer says asap; updateContact keeps the star in step when someone edits the Notes. NOT deployed: the WhatsApp webhook. Nothing is sent to any customer."
+    confirm "Deploy the asap star to the LIVE project?"
+    install; save_revisions $ASAP_FUNCS; deploy_functions $ASAP_FUNCS
+    echo "Done. Next: node scripts/mark-asap-leads.js (shows what it would change), then the same with --apply for the existing leads, then $0 live (the screen)."
+    echo "To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:leadIntake,functions:updateContact --project $PROJECT"
     ;;
   welcome)
     [ -f functions/lib/welcome.js ] || { echo "This checkout has no welcome switch code. Update it first: git checkout main && git pull --ff-only"; exit 1; }

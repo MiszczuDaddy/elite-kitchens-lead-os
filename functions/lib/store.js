@@ -3,6 +3,7 @@
 //   conversations/{phone}                 (one per contact; doc id = phone digits)
 //   conversations/{phone}/messages/{id}   (id = WhatsApp message id when known -> free, atomic dedup)
 const { Timestamp, FieldValue } = require('firebase-admin/firestore');
+const Asap = require('./asap');
 
 const RANK = { failed: 0, sent: 1, delivered: 2, read: 3 };
 const preview = (s) => String(s || '').slice(0, 120);
@@ -151,6 +152,7 @@ async function updateContact(db, phone, fields) {
     tx.set(contactRef, { phone, ...fields, updatedAt: now }, { merge: true });
     const denorm = {};
     for (const k of ['name', 'location', 'projectType']) if (k in fields) denorm[k] = fields[k];
+    if ('notes' in fields) denorm.asap = Asap.fromNotes(fields.notes);          // the ⭐ follows the Notes: removing the lead's answer from them takes it away
     if (Object.keys(denorm).length) tx.set(convRef, denorm, { merge: true });   // does not touch updatedAt: no inbox reorder
     return true;
   });

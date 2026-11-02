@@ -209,7 +209,7 @@
       const rs = reasonsOf(c, { now, booked, today, leadFailed: failureOf(c.id, c), replyDismissed: replyDismissedOf(c, input.marks) });
       if (!rs.length) continue;
       const head = rs[0], urgency = Math.max(...rs.map((r) => r.urgency));
-      cards.push({ key: 'c|' + c.id, kind: 'customer', phone: String(c.id), name: c.name || '', facts: [c.projectType, c.location].filter(Boolean).join(' · '), reasons: rs, urgency, since: head.since, primary: head.type,
+      cards.push({ key: 'c|' + c.id, kind: 'customer', phone: String(c.id), name: c.name || '', asap: c.asap === true, facts: [c.projectType, c.location].filter(Boolean).join(' · '), reasons: rs, urgency, since: head.since, primary: head.type,
         last: { text: preview(c.lastMessage), mine: c.lastMessageDirection === 'out' } });
     }
     cards.push(...quoteCards(input.quotes, input.marks, convById, now));
@@ -259,7 +259,7 @@
       else if (!c.lastMessageDirection && !ms(c.lastInboundAt)) { status = 'needs'; text = 'No message has been sent to them yet'; }
       else if (receptionistHandling(c)) { status = 'ai'; text = 'The receptionist is handling it'; }
       else { status = 'contacted'; text = w === 'blocked' ? 'Welcome message held back' : ms(rec.humanAt) > at || c.lastMessageDirection === 'out' ? 'Contacted' : 'Welcome message sent'; }
-      items.push({ phone, name: c.name || ct.name || '', facts: [c.projectType || ct.projectType, c.location || ct.location].filter(Boolean).join(' · '), source: ml ? 'Meta form' : (ct.source || 'WhatsApp'), at, status, text });
+      items.push({ phone, asap: c.asap === true, name: c.name || ct.name || '', facts: [c.projectType || ct.projectType, c.location || ct.location].filter(Boolean).join(' · '), source: ml ? 'Meta form' : (ct.source || 'WhatsApp'), at, status, text });
     }
     for (const li of leadIssues || []) {                  // a lead with no usable phone number: there is no customer, only the saved form
       if (!li || li.status !== 'open' || !(ms(li.receivedAt) >= t0)) continue;

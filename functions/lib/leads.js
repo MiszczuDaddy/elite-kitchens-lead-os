@@ -9,6 +9,7 @@ const store = require('./store');
 const { normalizeLeadPhone } = require('./phone');
 const { mapLead, buildNote } = require('./leadmap');
 const LeadAddress = require('./leadAddress');
+const Asap = require('./asap');                 // the ⭐ "wants it as soon as possible": read from the lead's notes only
 const CB = require('./contactBlock');          // Phase 10: "do not contact"
 const LeadIssues = require('./leadIssues');    // Phase 10: rejected leads shown in "Needs attention"
 const health = require('./health');
@@ -63,6 +64,8 @@ async function upsertLeadCustomer(db, phone, lead, now) {
     tx.set(cRef, upd, { merge: true });
     const cv = {};
     for (const k of ['name', 'location', 'projectType']) { const v = upd[k] || cd[k]; if (v && !vd[k]) cv[k] = v; }
+    const asap = Asap.fromNotes(upd.notes !== undefined ? upd.notes : old);       // from the notes as they now stand (a retry that adds nothing still sets it right)
+    if (asap !== !!vd.asap) cv.asap = asap;
     if (!conv.exists) tx.set(convRef, { phone, ...cv, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     else if (Object.keys(cv).length) tx.set(convRef, cv, { merge: true });    // never touches updatedAt / unread / inboxStatus
     return { contactCreated: !c.exists, conversationCreated: !conv.exists };

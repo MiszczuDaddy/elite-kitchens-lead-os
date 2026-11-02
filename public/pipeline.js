@@ -100,6 +100,7 @@ window.PIPE = (() => {
     item.setAttribute('aria-label', name + (r.unread ? ', unread messages' : '') + '. Open conversation');
     const main = el('div', 'prow-main');
     const top = el('div', 'prow-top'); top.append(el('span', 'prow-name', name));
+    if (r.asap) top.append(asapStar());
     if (r.unread) { const d = el('span', 'dot'); d.title = 'Unread'; top.append(d); }
     main.append(top);
     const sub = [r.location, r.projectType].filter(Boolean).join(' · ');

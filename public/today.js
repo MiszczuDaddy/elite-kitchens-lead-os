@@ -161,6 +161,7 @@ window.TODAY = (() => {
     const open = target(c), main = el(open ? 'button' : 'div', 'td-open'); if (open) { main.type = 'button'; main.onclick = open; }
     const top = el('div', 'td-top'), title = c.kind === 'reminder' ? c.title : nameOf(c);
     top.append(el('span', 'td-dot'), el('strong', 'td-name', title));
+    if (c.asap) top.append(asapStar());
     const tags = el('span', 'td-tags'); for (const t of new Set(c.reasons.map((r) => r.type))) tags.append(el('span', 'td-tag t-' + t, UTYPE[t])); top.append(tags);
     main.append(top);
     if (c.kind === 'reminder' && c.name) main.append(el('div', 'td-meta', 'About ' + c.name));
@@ -175,7 +176,9 @@ window.TODAY = (() => {
   function leadRow(l) {
     const open = l.phone ? () => go('#c/' + l.phone) : () => window.ATTN && ATTN.addLead(l.lead);
     const b = el('button', 'td-lead s-' + l.status); b.type = 'button'; b.onclick = open; b.dataset.status = l.status; if (l.phone) b.dataset.phone = l.phone;
-    const top = el('div', 'td-top'); top.append(el('strong', 'td-name', l.name || (l.phone ? formatPhone(l.phone) : 'Lead')), el('span', 'td-status st-' + l.status, M.STATUS_LABEL[l.status]));
+    const top = el('div', 'td-top'); top.append(el('strong', 'td-name', l.name || (l.phone ? formatPhone(l.phone) : 'Lead')));
+    if (l.asap) top.append(asapStar());
+    top.append(el('span', 'td-status st-' + l.status, M.STATUS_LABEL[l.status]));
     b.append(top, el('div', 'td-reason', l.text), el('div', 'td-meta', [l.at ? hhmm(l.at) : '', l.source, l.facts].filter(Boolean).join(' · ')));
     return b;
   }

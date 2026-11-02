@@ -1331,3 +1331,6 @@ div.td-open { cursor: default; }
 @media (max-width: 374px) { .phone-nav { gap: 6px; margin-left: 12px; margin-right: 12px; } .pn-btn { padding: 8px 0; font-size: 11px; } }
 /* phones: the note under the search ("2 leads have never replied") starts right below the pinned filters; it must come after the base .list-note rule above to win */
 @media (max-width: 899px) { .list-note { margin-top: 0; } }
+/* the ⭐ beside a customer who wants the kitchen as soon as possible (Inbox, Today, Pipeline) */
+.asap-star { flex: none; margin-left: 5px; font-size: 13px; line-height: 1; cursor: default; }
+.conv-top .asap-star { margin: 0 auto 0 5px; }

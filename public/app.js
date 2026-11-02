@@ -356,16 +356,21 @@ function renderList() {
 }
 
 
+// The ⭐ beside a customer who wants the kitchen as soon as possible (from the lead form's answer in their Notes: functions/lib/asap.js). Used by the Inbox, Today and the Pipeline.
+function asapStar() { const s = el('span', 'asap-star', '\u2B50'); s.title = 'Wants it as soon as possible (from the lead form)'; s.setAttribute('role', 'img'); s.setAttribute('aria-label', 'Wants it as soon as possible'); return s; }
+
 function convItem(c) {
   const unread = isUnread(c);
   const item = el('div', 'conv' + (unread ? ' unread' : '') + (c.id === S.selected ? ' sel' : ''));
   item.setAttribute('role', 'listitem'); item.tabIndex = 0; item.dataset.phone = c.id;
   if (c.id === S.selected) item.setAttribute('aria-current', 'true');
-  item.setAttribute('aria-label', displayName(c) + (unread ? ', unread messages' : '') + '. Open conversation');
+  item.setAttribute('aria-label', displayName(c) + (c.asap === true ? ', wants it as soon as possible' : '') + (unread ? ', unread messages' : '') + '. Open conversation');
   item.append(el('div', 'avatar', initials(c)));
   const body = el('div', 'conv-body');
   const top = el('div', 'conv-top');
-  top.append(el('div', 'conv-name', displayName(c)), el('div', 'conv-time', listTime(ms(c.updatedAt))));
+  top.append(el('div', 'conv-name', displayName(c)));
+  if (c.asap === true) top.append(asapStar());
+  top.append(el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
   const nrMode = S.statusFilter === 'noreply' && !S.query.trim();
   const tag = nrMode ? [(NoReply.ageText(NoReply.ageDays(c, Date.now())) || 'New') + ', no reply', c.projectType, c.location].filter(Boolean).join(' · ')
