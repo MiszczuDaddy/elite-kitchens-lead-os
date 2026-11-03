@@ -7,6 +7,8 @@ Thomas ran `scripts/receptionist-week.js` and the five real conversations of tha
 3. **No "Perfect".** The acknowledgement is now "Thanks, I'll pass that on to the team and we'll confirm a time with you shortly." ("Perfect" sounded as if the day they suggested, or a question they asked, was settled.)
 4. **After 20:00 Irish time** the automatic acknowledgement says "…we'll confirm a time with you tomorrow." instead of "shortly". A staff draft (a person reads it) always has the daytime wording.
 
+5. **An invitation to look at the work (3 Nov 2026, owner).** Every time the automatic receptionist passes on a customer who wants a consultation (days given, a visit "today or tomorrow", or no days after its questions; also when an answer or "I'll check the rest" comes first), the message now ends with: "In the meantime you can have a look at some of our latest work on our Instagram page:" and the address https://www.instagram.com/elite_kitchens_ie/ on its own line (`LINES.see_our_work` in `functions/lib/aiSchedule.js`). WhatsApp makes the address tappable (the receptionist sends text without a link preview card). Added once, at the very end, only by the automatic receptionist: never with a greeting, the price line, a booked customer moving the visit, or a staff draft. The reply checker treats the line as one of the fixed lines (the only link it allows). To change the address, change that one line.
+
 Not changed: the Knowledge Centre lines, the quiet hours, the daily cap, the answer checker, or anything the receptionist may say about prices.
 
-Tests: `functions/test/ai-receptionist-live-review.test.js` (6) and the updated `ai-schedule.test.js`. Deploy: `./scripts/deploy-quote-sending.sh receptionist` (the functions only; the screen is unchanged).
+Tests: `functions/test/ai-receptionist-live-review.test.js` (7) and the updated `ai-schedule.test.js`. Deploy: `./scripts/deploy-quote-sending.sh receptionist` (the functions only; the screen is unchanged).

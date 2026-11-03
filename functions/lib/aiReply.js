@@ -219,7 +219,7 @@ function safety(text, { checked = false, names = null } = {}) {
 // Warnings for the person who will send it. Never blocks: staff decide.
 const ASKS = { address: /\b(eircode|post ?code|address)\b/i, budget: /\bbudget\b/i, projectType: /\b(kitchen or|what (?:kind|type) of|which room)\b/i, timing: /\b(what day|which day|what time|when (?:would|suits|are you)|suit you)\b/i, name: /\b(your (?:full )?name)\b/i };
 function lint(reply, known, asked, { checked = false, fixed = [], names = null } = {}) {
-  const w = [], r = String(reply || '').split(SCH.LINES.price_general).join('');                  // the owner's own price line is the one price statement that is allowed
+  const w = [], r = String(reply || '').split(SCH.LINES.price_general).join('').split(SCH.LINES.see_our_work).join('');                  // the owner's own price line is the one price statement that is allowed; the Instagram invitation (a link) is the one link
   if (!r) return w;
   w.push(...safety(stripFixed(r, fixed), { checked, names }));
   if (checked) {                                                                                  // approved knowledge in use: the answer checker (aiKnowledge.js) has already judged money, links, numbers, promises and days in context

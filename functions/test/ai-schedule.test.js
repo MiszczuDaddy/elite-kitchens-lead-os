@@ -20,7 +20,7 @@ const out = (text, type = 'text') => ({ direction: 'out', type, body: text }), i
 const sent = (p) => p.reply || '';
 
 test('the owner\'s approved lines are in place and make no promise, no date and no availability claim (the price line is the only one with a figure)', () => {
-  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'acknowledge_evening', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'cancel_noted', 'change_ask', 'complaint', 'no_preference', 'price_general', 'privacy', 'soon', 'still_looking', 'tentative', 'visit_offer']);
+  assert.deepEqual(Object.keys(L).sort(), ['acknowledge', 'acknowledge_evening', 'ask_following_week', 'ask_next_week', 'asked_ai', 'cancel_ask', 'cancel_noted', 'change_ask', 'complaint', 'no_preference', 'price_general', 'privacy', 'see_our_work', 'soon', 'still_looking', 'tentative', 'visit_offer']);
   assert.equal(L.visit_offer, 'Would you like us to call out and have a look at your space?'); assert.equal(L.cancel_ask, 'No problem, do you want to move it to any other date?'); assert.equal(L.tentative, 'No problem at all, just let us know when suits.');
   assert.equal(L.acknowledge, 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you shortly.'); assert.equal(L.acknowledge_evening, 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you tomorrow.');
   for (const [k, l] of Object.entries(L)) if (k !== 'price_general') assert.doesNotMatch(l, /\b(booked|confirmed available|availability|\d)\b/i, k);
@@ -183,7 +183,7 @@ test('asked whether it is a person or an AI: one honest line (written by code), 
 test('GENERAL PRICE: the owner\'s line only; booked, declined or already handed over: the line alone; with a preference: recorded; a specific price, quote or discount is never answered', () => {
   assert.equal(sent(P({ intent: 'asking_price_general' }, { booked: true })), L.price_general); assert.equal(sent(P({ intent: 'asking_price_general', visit: 'declined' })), L.price_general);
   assert.equal(sent(P({ intent: 'asking_price_general' }, { consult: { stage: 'preference_given' } })), L.price_general);
-  const withPref = P({ intent: 'asking_price_general', ...pref({ days: ['friday'], text: 'Fri' }) }); assert.deepEqual([withPref.step, sent(withPref), withPref.handover.needed], ['acknowledge', L.price_general + ' ' + L.acknowledge, true]);
+  const withPref = P({ intent: 'asking_price_general', ...pref({ days: ['friday'], text: 'Fri' }) }); assert.deepEqual([withPref.step, sent(withPref), withPref.handover.needed], ['acknowledge', L.price_general + ' ' + L.acknowledge + '\n' + L.see_our_work, true]);
   for (const o of [{ intent: 'asking_price', handover: { needed: true, reason: 'asks about price' } }, { handover: { needed: true, reason: 'wants a discount' }, intent: 'asking_price_general' }]) { const p = P(o); assert.equal(p.step, 'none'); assert.equal(p.reply, null); }
   assert.equal(S.advance(null, 'price_general', null, 1), null);
 });

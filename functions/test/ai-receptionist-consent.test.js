@@ -134,7 +134,7 @@ test('PREFERENCES ARE KEPT: a day given together with a question that needs a pe
   await turn(PHONES[0], 'Can someone come and look at the kitchen?', decision({ intent: 'wants_consultation', visit: 'asked' }), w, p);
   const r = await turn(PHONES[0], 'Monday afternoon works for me. Is that free to come out to Cork?', decision({ intent: 'asking_info', visit: 'agreed', hasQuestion: true, handover: { needed: true, reason: 'asks if the visit is free' }, ...pref({ weeks: 'next', days: ['monday'], times: 'afternoons', text: 'Monday afternoon works for me' }) }), w, p);
   const c = await conv(PHONES[0]);
-  assert.deepEqual(r.got, [L.acknowledge]); assert.equal(c.consult.needsBooking, true, 'the request card and the Needs booking count are there'); assert.deepEqual([c.consult.preference.days, c.consult.preference.times], [['monday'], 'afternoons']); assert.match(c.consult.preference.text, /Monday afternoon works/);
+  assert.deepEqual(r.got, [L.acknowledge + '\n' + L.see_our_work]); assert.equal(c.consult.needsBooking, true, 'the request card and the Needs booking count are there'); assert.deepEqual([c.consult.preference.days, c.consult.preference.times], [['monday'], 'afternoons']); assert.match(c.consult.preference.text, /Monday afternoon works/);
   assert.match(c.receptionist.paused, /consultation passed to you/); assert.equal(p.events.length, 1);
   await newLead(PHONES[1]); const w2 = waFake(), p2 = pushFake();
   const angry = await turn(PHONES[1], 'Your fitter wrecked my floor, come Tuesday and fix it', decision({ intent: 'complaint', handover: { needed: true, reason: 'upset customer' }, ...pref({ days: ['tuesday'], text: 'come Tuesday' }) }), w2, p2);

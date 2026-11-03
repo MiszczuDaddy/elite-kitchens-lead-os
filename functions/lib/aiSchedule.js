@@ -22,6 +22,8 @@ const LINES = {
   // 1 Nov 2026 (live review): no "Perfect" (it sounded like the day they suggested, or a question they asked, was settled), and after 20:00 "tomorrow" instead of "shortly" (nobody is at the phone).
   acknowledge: 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you shortly.',
   acknowledge_evening: 'Thanks, I\'ll pass that on to the team and we\'ll confirm a time with you tomorrow.',
+  // 3 Nov 2026 (owner): every time the receptionist passes on a customer who wants a consultation, the message ends with this invitation. A bare address on its own line: WhatsApp makes it tappable.
+  see_our_work: 'In the meantime you can have a look at some of our latest work on our Instagram page:\nhttps://www.instagram.com/elite_kitchens_ie/',
   // A complaint or an upset customer (owner's wording, 15 Oct 2026): one line, then a person takes over at once. No promise about resolving it, and the automatic conversation does not continue.
   complaint: 'I\'m sorry to hear that. I\'ll pass this on to the team so they can look into it.',
   asked_ai: 'I\'m an automated assistant for Elite Kitchens, but I\'ll pass this on to the team and they\'ll be in touch.',
@@ -277,7 +279,7 @@ function tidy(text, { partly = false, links = false } = {}) {
   return keep.join(' ').trim();
 }
 // `ownLines`: the owner's lines when the knowledge path asks this plan for the consultation step after an answer (it passes no `kn`, so the knowledge branch is not entered twice).
-function plan({ decision, consult, messages, booked, nowMs, natural = false, kn = null, who = null, ownLines = null }) {
+function planCore({ decision, consult, messages, booked, nowMs, natural = false, kn = null, who = null, ownLines = null }) {
   const none = { step: 'none', reply: null, handover: null, preference: null };
   const d = decision, hand = !!(d.handover && d.handover.needed), reason = (d.handover && d.handover.reason) || '';
   const visitRaw = d.visit || (d.wantsConsultation ? 'asked' : 'none');
@@ -516,4 +518,12 @@ const SEND_STEPS = new Set(['offer_visit', 'price_offer', 'ack_only', 'cancel_as
 // After these the chat is the owner's: the receptionist stays out. ('answer' does too when a person has to follow up.)
 const PAUSE_STEPS = new Set(['acknowledge', 'no_preference', 'asked_ai', 'change_given', 'change_pass_on', 'answer_holding', 'holding', 'human', 'outside_area', 'declined_job', 'other_language', 'complaint',
   'attachment', 'late', 'booking_confirm', 'booking_specific', 'cancel_noted', 'privacy']);      // declined, thinking, price_concern and browsing do NOT pause: the customer may write again
+// A customer who wants a consultation (days given, "today or tomorrow", or no days after our questions) is passed on to the team, and the automatic message ends with the owner's invitation to look at the work
+// on Instagram (3 Nov 2026). Only the automatic receptionist: a staff draft is a person's to write. Added once, at the very end (an answer or the "I'll check the rest" line may come before it).
+const PASS_ON_STEPS = new Set(['acknowledge', 'no_preference']);
+function plan(args) {
+  const r = planCore(args);
+  if (args && args.natural && !args.booked && r && PASS_ON_STEPS.has(r.step) && r.reply && !r.reply.includes(LINES.see_our_work)) return { ...r, reply: r.reply + '\n' + LINES.see_our_work };
+  return r;
+}
 module.exports = { STOP, SEND_STEPS, PAUSE_STEPS, LINES, MAX_ASKS, WEEKDAYS, WEEKS, STATUSES, ACKS, THINKING, INTEREST, NEXT_STEP, cleanPreference, heard, reasonable, describe, noteOf, weekOf, asksSoFar, opener, acknowledgement, ackLine, firstName, latestMessages, latestBurst, asksIfAi, ASKS_VISIT, plan, advance };

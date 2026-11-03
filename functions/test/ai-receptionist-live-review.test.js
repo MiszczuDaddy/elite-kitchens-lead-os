@@ -49,12 +49,25 @@ test('3 and 4. NO "PERFECT"; AFTER 20:00 THE AUTOMATIC ACKNOWLEDGEMENT SAYS "TOM
   const sat = { schedule: { preference: SCH.cleanPreference({ status: 'available', days: ['saturday'], text: 'Hope Saturday is fine by you' }), opener: '' }, intent: 'scheduling', visit: 'agreed' };
   const msgs = [WELCOME, inn('Hope Saturday is fine by you')];
   const day = plan(sat, msgs), evening = plan(sat, msgs, { nowMs: TUE_EVENING }), draft = plan(sat, msgs, { nowMs: TUE_EVENING, natural: false });
-  assert.equal(day.step, 'acknowledge'); assert.equal(day.reply, "Thanks, I'll pass that on to the team and we'll confirm a time with you shortly.");
-  assert.equal(evening.reply, "Thanks, I'll pass that on to the team and we'll confirm a time with you tomorrow.");
-  assert.equal(draft.reply, day.reply, 'a draft a person reads keeps the daytime wording');
+  const SEE = '\n' + SCH.LINES.see_our_work;                                                         // the automatic receptionist's pass-on ends with the Instagram invitation (3 Nov 2026)
+  assert.equal(day.step, 'acknowledge'); assert.equal(day.reply, "Thanks, I'll pass that on to the team and we'll confirm a time with you shortly." + SEE);
+  assert.equal(evening.reply, "Thanks, I'll pass that on to the team and we'll confirm a time with you tomorrow." + SEE);
+  assert.equal(draft.reply, "Thanks, I'll pass that on to the team and we'll confirm a time with you shortly.", 'a draft a person reads keeps the daytime wording, with no Instagram line');
   for (const r of [day, evening, draft]) assert.doesNotMatch(r.reply, /perfect/i);
-  const edge = (h, m = 0) => plan(sat, msgs, { nowMs: Date.UTC(2026, 9, 13, h - 1, m) }).reply;
+  const edge = (h, m = 0) => plan(sat, msgs, { nowMs: Date.UTC(2026, 9, 13, h - 1, m) }).reply.split('\n')[0];
   assert.match(edge(19, 59), /shortly/); assert.match(edge(20, 0), /tomorrow/); assert.match(edge(23, 30), /tomorrow/); assert.match(edge(7, 30), /shortly/);
+});
+
+test('5. THE INSTAGRAM INVITATION goes only with a consultation pass-on (days given, today/tomorrow, the owner\'s "soon" line), once, at the very end; never with a greeting, a price line, a booking move or a staff draft', () => {
+  const SEE = SCH.LINES.see_our_work, once = (t) => t.split(SEE).length === 2, ends = (t) => t.endsWith(SEE);
+  const sat = { schedule: { preference: SCH.cleanPreference({ status: 'available', days: ['saturday'], text: 'Saturday suits' }), opener: '' }, intent: 'scheduling', visit: 'agreed' };
+  const msgs = [WELCOME, inn('Saturday suits')];
+  const given = plan(sat, msgs); assert.equal(given.step, 'acknowledge'); assert.ok(once(given.reply) && ends(given.reply), 'days given: pass-on, then the invitation');
+  const soon = plan({ ...sat, schedule: { preference: SCH.cleanPreference({ status: 'available', text: 'tomorrow', weeks: 'this' }), opener: '' } }, [WELCOME, inn('Can you come tomorrow?')]); assert.ok(once(soon.reply) && ends(soon.reply), 'today or tomorrow');
+  assert.ok(!plan({}, [WELCOME, inn('Hi')]).reply.includes(SEE), 'a greeting');
+  assert.ok(!plan({ intent: 'asking_price_general', visit: 'none' }, [WELCOME, inn('How much is a kitchen?')]).reply.includes(SEE), 'the price line with the visit offer');
+  const move = plan({ ...sat, change: 'move' }, [WELCOME, inn('Can we move it to Saturday?')], { booked: true }); assert.equal(move.step, 'change_given'); assert.ok(!move.reply.includes(SEE), 'a booked customer moving the visit');
+  assert.ok(!plan(sat, msgs, { natural: false }).reply.includes(SEE), 'a staff draft is the person\'s to write');
 });
 
 // ---------------------------------------------------------------- a business's own away message (pure detector)

@@ -70,7 +70,7 @@ test('AVAILABILITY IS CHECKED BY CODE: no status means unknown (never "available
   assert.equal(S.cleanPreference({ times: 'evenings' }).status, 'unknown'); assert.equal(S.cleanPreference({ days: ['monday'], weeks: 'next' }).status, 'unknown');
   // what they really said is still recorded
   const ok = run({ visit: 'agreed', intent: 'scheduling', schedule: { preference: S.cleanPreference({ status: 'available', weeks: 'next', days: ['tuesday'], times: 'afternoons', text: 'Tuesday afternoon' }) } }, { ...OFFERED, messages: [...OFFERED.messages, inn('Tues afternoon next week works')] });
-  assert.equal(ok.step, 'acknowledge'); assert.deepEqual([ok.plan.preference.days, ok.plan.preference.times], [['tuesday'], 'afternoons']); assert.equal(ok.sent, L.acknowledge);
+  assert.equal(ok.step, 'acknowledge'); assert.deepEqual([ok.plan.preference.days, ok.plan.preference.times], [['tuesday'], 'afternoons']); assert.equal(ok.sent, L.acknowledge + '\n' + L.see_our_work);
   const partly = run({ visit: 'agreed', intent: 'scheduling', schedule: { preference: S.cleanPreference({ status: 'available', days: ['tuesday', 'friday'], times: 'evenings', text: 'Tuesday' }) } }, { ...OFFERED, messages: [...OFFERED.messages, inn('Tuesday is best')] });
   assert.deepEqual([partly.plan.preference.days, partly.plan.preference.times], [['tuesday'], null], 'only the day they wrote is kept');
 });
