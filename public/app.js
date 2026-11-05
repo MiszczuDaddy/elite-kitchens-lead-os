@@ -344,6 +344,7 @@ function renderList() {
   $('total-unread').hidden = !n; $('total-unread').textContent = n;
   $('rail-badge').hidden = !n; $('rail-badge').textContent = n > 9 ? '9+' : n;
   if (window.CONSULT) CONSULT.render();
+  if (window.FOLLOWUP) FOLLOWUP.render();
   if (window.REPLY && REPLY.drawRecep) REPLY.drawRecep();
   document.title = (n ? `(${n}) ` : '') + 'Inbox · Elite Kitchens';
   for (const button of $('status-filters').querySelectorAll('button')) {
@@ -373,7 +374,7 @@ function convItem(c) {
   top.append(el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
   const nrMode = S.statusFilter === 'noreply' && !S.query.trim();
-  const tag = nrMode ? [(NoReply.ageText(NoReply.ageDays(c, Date.now())) || 'New') + ', no reply', c.projectType, c.location].filter(Boolean).join(' · ')
+  const tag = nrMode ? [(NoReply.ageText(NoReply.ageDays(c, Date.now())) || 'New') + ', no reply', window.FOLLOWUP ? FOLLOWUP.emailedText(c) : '', c.projectType, c.location].filter(Boolean).join(' · ')
     : [(S.query.trim() || S.statusFilter === 'all') ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
   if (tag) body.append(el('div', 'conv-sub', tag));
   if (window.CONSULT && CONSULT.has(c)) body.append(el('div', 'conv-consult', 'Needs booking'));
@@ -388,10 +389,11 @@ function convItem(c) {
   body.append(prev);
   item.append(body);
   const tel = nrMode ? NoReply.callHref(c.id) : null;
+  if (nrMode && window.FOLLOWUP && FOLLOWUP.canEmail(c)) { const mail = el('button', 'conv-mail', 'Email'); mail.type = 'button'; mail.setAttribute('aria-label', 'Email ' + displayName(c)); mail.onclick = (e) => { e.stopPropagation(); FOLLOWUP.openOne(c.id); }; item.append(mail); }
   if (tel) { const call = el('a', 'conv-call', 'Call'); call.href = tel; call.setAttribute('aria-label', 'Call ' + displayName(c)); call.onclick = (e) => e.stopPropagation(); item.append(call); }       // a tap on Call rings them; it does not open the chat
   const open = () => openConversation(c.id);
   item.onclick = open;
-  item.onkeydown = (e) => { if (e.target.closest && e.target.closest('.conv-call')) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  item.onkeydown = (e) => { if (e.target.closest && e.target.closest('.conv-call, .conv-mail')) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
   return item;
 }
 
@@ -403,6 +405,7 @@ const noReplyRows = () => NoReply.rows(S.convs, NR.extra, NR.checked);
 async function loadNoReply() {
   if (NR.busy) return;
   NR.busy = true; NR.error = ''; renderList();
+  ensureDirectory();                                                                    // the customers' email addresses (for the Email button) come with it
   try {
     NR.extra = (await db.collection('conversations').where('lastMessageDirection', '==', 'out').limit(2000).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
     renderList();

@@ -1334,3 +1334,11 @@ div.td-open { cursor: default; }
 /* the ⭐ beside a customer who wants the kitchen as soon as possible (Inbox, Today, Pipeline) */
 .asap-star { flex: none; margin-left: 5px; font-size: 13px; line-height: 1; cursor: default; }
 .conv-top .asap-star { margin: 0 auto 0 5px; }
+/* follow-up emails in the No reply tab */
+.conv-mail { flex: none; align-self: center; min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--accent); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.conv-mail:hover { background: var(--hover); }
+.nr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 18px 10px; }
+#nr-email-all { white-space: nowrap; }
+.nr-bar-t { color: var(--muted); font-size: 12.5px; }
+.fu-batch { max-height: 140px; overflow-y: auto; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--muted); }
+#fu-body { min-height: 230px; }

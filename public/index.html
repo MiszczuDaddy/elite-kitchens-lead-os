@@ -122,6 +122,7 @@
         <input id="search" type="search" placeholder="Search name, phone, email, town…" autocomplete="off" aria-label="Search every customer by name, phone number, email or town">
       </div>
     </div>
+    <div id="nr-bar" class="nr-bar" hidden><button id="nr-email-all" type="button" class="btn btn-ghost btn-sm">Email all</button><span class="nr-bar-t">Send each of them one short follow-up email. You read it first.</span></div>
     <p id="list-note" class="list-note" role="status" hidden></p>
     <div id="toast" class="toast" role="status" hidden></div>
     <div id="list" class="list" role="list"></div>
@@ -576,6 +577,17 @@
   <div class="dlg-actions"><button type="button" id="attn-close" class="btn btn-ghost">Close</button></div>
 </dialog>
 
+<dialog id="fu-dlg" class="dlg dlg-wide">
+  <h2 id="fu-title">Email follow-up</h2>
+  <p id="fu-to" class="hint"></p>
+  <div id="fu-batch" class="fu-batch" hidden></div>
+  <label>Subject<input id="fu-subject" type="text" maxlength="120" autocomplete="off"></label>
+  <label>Message<textarea id="fu-body" rows="12" maxlength="2000"></textarea></label>
+  <p class="hint">It goes out from Elite Kitchens by email, and their reply comes to your normal inbox. A lead is emailed at most twice, 14 days apart.</p>
+  <div id="fu-err" class="dlg-err" role="alert"></div>
+  <div class="dlg-actions"><button type="button" id="fu-cancel" class="btn btn-ghost">Cancel</button><button type="button" id="fu-send" class="btn btn-primary">Send email</button></div>
+</dialog>
+
 <dialog id="notif-dlg" class="dlg dlg-wide">
   <h2>Notifications</h2>
   <p id="notif-state" class="notif-state"></p>
@@ -806,7 +818,9 @@
 <script src="/attention-model.js"></script>
 <script src="/inbox-search-model.js"></script>
 <script src="/noreply-model.js"></script>
+<script src="/followup-text.js"></script>
 <script src="/app.js"></script>
+<script src="/followup.js"></script>
 <script src="/pipeline.js"></script>
 <script src="/booking-rules.js"></script>
 <script src="/appointments.js"></script>
