@@ -41,6 +41,7 @@
 #   ./scripts/deploy-quote-sending.sh bookings   Phase 12 (docs/PHASE12_BOOKINGS.md): the evening-before visit reminder (bookingReminderSweep, resolveBookingNotice), the Installation visit (appointment, project and calendar functions) and deleteCustomer. Run it BEFORE "live". The evening reminder stays OFF.
 #   ./scripts/deploy-quote-sending.sh reminders on|off   switch the automatic evening-before reminder ON or OFF (writes BOOKING_REMINDERS to the settings file and redeploys bookingReminderSweep). Needs the reminder template (elite_kitchens_consultation_reminder) approved by Meta first.
 #   ./scripts/deploy-quote-sending.sh followup   Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md): ONE new staff function (sendFollowUpEmail). Needs email sending on (it is for the quotes). Run it BEFORE "live". Sends nothing by itself.
+#   ./scripts/deploy-quote-sending.sh assistantmail  The Assistant's "email all leads who never replied" (docs/FOLLOW_UP_EMAIL.md): aiChat, aiStatus, setAiSettings, aiDecide (all exist already). OFF until the owner ticks it in Assistant > Settings; then it emails only after you press Approve. Run it after "followup" and BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -87,6 +88,7 @@ TODAY_NEW="saveReminder snoozeQuote dismissReply"                               
 WELCOME_FUNCS="leadIntake receptionistOnMessage receptionistSweep setAiSettings aiStatus aiSuggestReply"                # the welcome switch: the intake sends the chosen welcome, the receptionist knows both, the settings save and show the choice (all exist already)
 ASAP_FUNCS="leadIntake updateContact"                                                                                      # the ⭐ "wants it as soon as possible": a new lead gets it from its form answer, editing the Notes keeps it in step (both exist already)
 FOLLOWUP_FUNCS="sendFollowUpEmail"                                                                                # follow-up emails to leads who never replied: one new staff function (made public: it checks the signed-in staff account itself)
+ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                                                          # the Assistant's follow-up emails: it prepares them (aiChat), shows the switch (aiStatus, setAiSettings) and sends after Approve (aiDecide); all exist already
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
 BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
@@ -100,7 +102,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,54p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,55p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -440,6 +442,17 @@ case "${1:-}" in
     gcloud run services add-iam-policy-binding "$(svc sendFollowUpEmail)" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: sendFollowUpEmail"
     check_reachable "$FOLLOWUP_FUNCS"
     echo "Done. Next: $0 live (the screen). To go back: firebase functions:delete sendFollowUpEmail --region $REGION --project $PROJECT and roll the screen back in Firebase console > Hosting."
+    ;;
+  assistantmail)
+    [ -f functions/lib/followUpText.js ] || { echo "This checkout has no follow-up email code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    grep -q "propose_followup_emails" functions/lib/aiActions.js || { echo "This checkout has no Assistant follow-up email code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision aidecide)" ] || { echo "The Assistant is not deployed yet: run $0 ai first."; exit 1; }
+    check_settings; check_access; check_routing $ASSISTMAIL_FUNCS
+    echo "Functions: $ASSISTMAIL_FUNCS (all exist already; no new function, nothing made public)."
+    echo "You will be able to tick \"Follow-up emails to leads who never replied\" in Assistant > Settings (it is OFF until you do). Then asking the Assistant to follow up the leads who did not reply prepares ONE card; emails go out only when you press Approve. Same email sending as the quotes (MAIL_SEND). NOT deployed: the WhatsApp webhook. Nothing is sent by this stage."
+    confirm "Deploy the Assistant follow-up emails to the LIVE project?"
+    install; save_revisions $ASSISTMAIL_FUNCS; deploy_functions $ASSISTMAIL_FUNCS
+    echo "Done. Next: $0 live (the screen), then tick the new box in Assistant > Settings. To go back: untick it there (instant). Full undo: git checkout <the earlier commit> -- functions, then firebase deploy --only $(echo $ASSISTMAIL_FUNCS | sed 's/[^ ]*/functions:&/g; s/ /,/g') --project $PROJECT"
     ;;
   asap)
     [ -f functions/lib/asap.js ] || { echo "This checkout has no asap code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }

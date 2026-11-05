@@ -94,7 +94,7 @@
     const exp = p.expiresAt && typeof p.expiresAt.toMillis === 'function' ? p.expiresAt.toMillis() : (typeof p.expiresAt === 'number' ? p.expiresAt : null);
     const status = p.status === 'pending' && exp != null && nowMs > exp ? 'expired' : String(p.status || '');
     const pv = p.preview || {};
-    return { id: p.id, title: String(p.title || ''), rows: Array.isArray(pv.rows) ? pv.rows : [], footer: String(pv.footer || ''), status, label: STATE_LABEL[status] || status, canDecide: status === 'pending',
+    return { id: p.id, kind: String(p.kind || ''), title: String(p.title || ''), rows: Array.isArray(pv.rows) ? pv.rows : [], footer: String(pv.footer || ''), status, label: STATE_LABEL[status] || status, canDecide: status === 'pending',
       minutes: exp != null && status === 'pending' ? Math.max(1, Math.ceil((exp - nowMs) / 60000)) : null, message: (p.result && p.result.message) || '', results: (p.result && Array.isArray(p.result.results)) ? p.result.results : [] };
   }
   // AI actions in Settings: only the owner account can change them (the server enforces it too).

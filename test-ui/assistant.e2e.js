@@ -71,7 +71,7 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   assert.equal(await page.locator('#as-input').isDisabled(), true); assert.equal(await page.locator('#as-send').isDisabled(), true);
   assert.equal(await page.locator('#as-suggest button').count(), 4);
   assert.match(await page.locator('#as-meter-label').innerText(), /€0\.00 of €15 used this month/);
-  assert.match(await page.locator('.as-foot').innerText(), /Read-only/);
+  assert.match(await page.locator('.as-foot').innerText(), /Nothing is changed or sent until you press Approve/);
   ok('the Assistant opens from the rail; a fresh install is OFF, says so, and cannot be asked');
   await page.screenshot({ path: path.join(SHOTS, 'assistant-off.png') });
 
@@ -159,7 +159,7 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent));
   assert.equal(await page.locator('#as-set-actions').isDisabled(), false); assert.equal(await page.locator('#as-set-actions').isChecked(), false);
   await page.check('#as-set-actions'); await page.check('#as-set-kind-customerNote'); await page.check('#as-set-kind-projectUpdate'); await page.click('#as-set-save'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
-  const act = (await settingsDoc().get()).data(); assert.equal(act.actionsEnabled, true); assert.deepEqual(act.actionKinds, { customerNote: true, projectUpdate: true });
+  const act = (await settingsDoc().get()).data(); assert.equal(act.actionsEnabled, true); assert.deepEqual(act.actionKinds, { customerNote: true, projectUpdate: true, followUpEmails: false });
   for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
   const notesNow = async () => ((await db.doc('contacts/' + ph.anna).get()).data() || {}).notes || null;
   await ask('note: call after 5pm');

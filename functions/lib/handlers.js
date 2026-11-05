@@ -436,7 +436,7 @@ const saveReminder = staffAction(todayLib.saveReminder);
 const snoozeQuote = staffAction(todayLib.snoozeQuote);
 const dismissReply = staffAction(todayLib.dismissReply);
 // Phase 9.2a: Approve / Reject on a proposal. Staff only; only the person who asked can decide; no model, no secret.
-const aiDecide = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return ai.decideProposal({ db: deps.db }, actorOf(auth), data, { uid: auth.uid }); };
+const aiDecide = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return ai.decideProposal({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data, { uid: auth.uid }); };
 
 async function projectRenderUrl(auth, data, deps) { assertStaff(auth, deps.cfg); return projects.renderLink(deps, actorOf(auth), data, { signedUrl: mediaLib.signedUrl }); }
 

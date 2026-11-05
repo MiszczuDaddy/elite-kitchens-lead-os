@@ -40,6 +40,9 @@ Asked to summarise a customer, Haiku and Sonnet used to answer differently. The 
 * The summary never invents: a missing fact is labelled, free-text notes are shown as recorded (an instruction inside a note is just text on the screen).
 Examples (from the test data): a full record, a sparse record (every missing field labelled), a test record (⚠ line) are in `functions/test/ai.test.js` ("EXAMPLES").
 
+## Follow-up emails (5 Nov 2026): the one kind that sends
+`propose_followup_emails` (kind `followUpEmails`, OFF until the owner ticks it in Settings) prepares one card listing every lead who never replied and the exact fixed email; **Approve** then sends one email per lead through `functions/lib/followUp.js`. The model supplies no input and no words. Full detail: `docs/FOLLOW_UP_EMAIL.md`. `aiDecide` is therefore given the mailer and a 180-second limit; it is still not bound to the model key.
+
 ## Phase 9.2a: AI actions with approval (customer notes, project updates)
 **Branch `phase-9-2a-actions`: not merged, not deployed.** The assistant can PREPARE a change; only a person can APPLY it.
 1. **Propose.** Asked for a change ("note: call after 5pm", "tick doors ordered and set installation for 20 Nov"), the model calls `propose_customer_note` or `propose_project_update`. Code checks the request with the same limits as the screens, builds the **exact before/after preview**, and stores one `aiProposals/{id}` record. Nothing else is written. The model supplies only ids and the wording you asked for. The reply is a fixed sentence (no second model call), the same for Haiku and Sonnet.

@@ -1131,6 +1131,9 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .as-card-foot { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
 .as-card-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; } .as-card-exp { font-size: 12px; color: var(--muted); }
 .as-card-state { margin-top: 10px; font-size: 13px; font-weight: 600; } .as-card[data-state=applied] .as-card-state { color: var(--ok); } .as-card[data-state=stale] .as-card-state, .as-card[data-state=failed] .as-card-state, .as-card[data-state=partial] .as-card-state { color: var(--err); }
+.as-card-list { font-size: 13px; margin: 2px 0 0; padding: 0 0 0 18px; max-height: 180px; overflow: auto; overflow-wrap: anywhere; } .as-card-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; background: #f4f1ea; border-radius: 4px; padding: 6px 8px; margin-top: 2px; max-height: 220px; overflow: auto; }
+.as-tray .as-card-actions { position: sticky; bottom: 0; z-index: 1; background: var(--panel); margin-top: 6px; padding: 8px 0 2px; }          /* a tall card (the follow-up emails) scrolls inside the tray, but Approve and Reject stay on screen */
+@media (max-width: 899px) { .as-card-list { max-height: 96px; } .as-card-text { max-height: 110px; } }
 .as-card-res { font-size: 12px; margin: 4px 0 0; padding: 0; list-style: none; } .as-card-res .bad { color: var(--err); }
 .as-actions { margin: 6px 0 10px; } .as-kinds { margin-left: 4px; }
 @media (max-width: 899px) { .as-card { max-width: 96%; } }

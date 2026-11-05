@@ -119,7 +119,9 @@ window.ASSIST = (() => {
     if (v.canDecide && !tray) { d.append(el('div', 'as-card-state', 'Waiting for your approval: use Approve or Reject in the box below.')); return d; }          // the buttons live in ONE place, the tray
     for (const r of v.rows) {
       const row = el('div', 'as-card-row'); row.append(el('div', 'as-card-label', r.label || ''));
-      if (r.type === 'append') { if (r.existing) row.append(el('div', 'as-card-old', r.existing)); row.append(el('div', 'as-card-new', '+ ' + (r.added || ''))); }
+      if (r.type === 'list') { const ul = el('ul', 'as-card-list'); for (const it of (Array.isArray(r.items) ? r.items : [])) ul.append(el('li', '', String(it))); row.append(ul); }
+      else if (r.type === 'text') row.append(el('div', 'as-card-text', r.text || ''));
+      else if (r.type === 'append') { if (r.existing) row.append(el('div', 'as-card-old', r.existing)); row.append(el('div', 'as-card-new', '+ ' + (r.added || ''))); }
       else { row.append(el('div', 'as-card-old before', 'Before: ' + (r.before == null ? '' : r.before))); row.append(el('div', 'as-card-new', 'After: ' + (r.after == null ? '' : r.after))); }
       d.append(row);
     }
@@ -131,7 +133,7 @@ window.ASSIST = (() => {
       bar.append(ok, no); if (v.minutes != null) bar.append(el('span', 'as-card-exp', 'Expires in ' + v.minutes + ' min')); d.append(bar);
     } else {
       d.append(el('div', 'as-card-state', v.label + (v.message && v.status !== 'rejected' && v.status !== 'expired' ? ': ' + v.message : '')));
-      if (v.status === 'partial' && v.results.length) { const ul = el('ul', 'as-card-res'); for (const x of v.results) ul.append(el('li', x.ok ? '' : 'bad', (x.ok ? 'Saved: ' : 'Not saved: ') + (x.label || ''))); d.append(ul); }
+      if ((v.status === 'partial' || (v.status === 'failed' && v.kind === 'followUpEmails')) && v.results.length) { const ul = el('ul', 'as-card-res'); for (const x of v.results) ul.append(el('li', x.ok ? '' : 'bad', (x.ok ? (v.kind === 'followUpEmails' ? 'Sent: ' : 'Saved: ') : (v.kind === 'followUpEmails' ? 'Not sent: ' : 'Not saved: ')) + (x.label || '') + (!x.ok && x.message ? ' (' + x.message + ')' : ''))); d.append(ul); }
     }
     if (note && v.canDecide) d.append(el('div', 'as-card-state', note));
     return d;

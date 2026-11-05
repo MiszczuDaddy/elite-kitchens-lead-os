@@ -276,7 +276,7 @@
   <main id="assistant" class="assistant-pane" aria-label="Assistant">
     <header class="quotes-head">
       <button id="as-back" class="icon-btn" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
-      <div class="quotes-titles"><h1>Assistant</h1><div id="as-subtitle" class="q-subtitle">Looks things up in Elite OS. Cannot change or send anything.</div></div>
+      <div class="quotes-titles"><h1>Assistant</h1><div id="as-subtitle" class="q-subtitle">Looks things up in Elite OS. It changes or sends nothing until you press Approve.</div></div>
       <button id="as-new" type="button" class="btn btn-ghost btn-sm" title="Start a new conversation">New chat</button>
       <button id="as-settings" type="button" class="icon-btn" aria-label="Assistant settings" title="Assistant settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button>
     </header>
@@ -291,7 +291,7 @@
       <div class="as-tools"><div id="as-model" class="seg as-model" role="group" aria-label="Model"><button type="button" data-model="haiku" aria-pressed="true" title="Fast and cheap. The default.">Haiku</button><button type="button" data-model="sonnet" aria-pressed="false" title="Slower and costs more, better at harder questions.">Sonnet</button></div><span class="as-model-hint">Haiku is fast and cheap. Sonnet is for harder questions.</span></div>
       <div id="as-context" class="as-context" hidden><span id="as-context-text"></span><button type="button" id="as-context-x" class="as-chip-x" aria-label="Stop using this as context" title="Stop using this as context">×</button></div>
       <div class="as-row"><textarea id="as-input" rows="1" maxlength="2000" placeholder="Ask the assistant…" aria-label="Your question"></textarea><button id="as-send" type="submit" class="btn btn-primary">Ask</button></div>
-      <p class="as-foot">Read-only. It can be wrong: check anything important in Elite OS before you act on it.</p>
+      <p class="as-foot">It can be wrong: check anything important in Elite OS before you act on it. Nothing is changed or sent until you press Approve.</p>
     </form>
   </main>
 
@@ -625,7 +625,7 @@
         <p id="as-set-welcome-hint" class="hint">Sent the moment a new Meta lead arrives. Choose New only after WhatsApp Manager shows <strong id="as-welcome-name"></strong> as Active. If WhatsApp refuses it, the Standard one goes instead, so no lead is left without a welcome. Only the owner account can change it.</p>
       </div>
       <label class="as-check"><input id="as-set-actions" type="checkbox"> <span>AI actions: let the assistant PREPARE changes for my approval</span></label>
-      <div id="as-set-kinds" class="as-kinds"><label class="as-check as-check-sub"><input id="as-set-kind-customerNote" data-kind="customerNote" type="checkbox"> <span>Customer notes</span></label><label class="as-check as-check-sub"><input id="as-set-kind-projectUpdate" data-kind="projectUpdate" type="checkbox"> <span>Project updates (checklist, installation date, notes)</span></label></div>
+      <div id="as-set-kinds" class="as-kinds"><label class="as-check as-check-sub"><input id="as-set-kind-customerNote" data-kind="customerNote" type="checkbox"> <span>Customer notes</span></label><label class="as-check as-check-sub"><input id="as-set-kind-projectUpdate" data-kind="projectUpdate" type="checkbox"> <span>Project updates (checklist, installation date, notes)</span></label><label class="as-check as-check-sub"><input id="as-set-kind-followUpEmails" data-kind="followUpEmails" type="checkbox"> <span>Follow-up emails to leads who never replied (sends emails, after you press Approve)</span></label></div>
       <p id="as-set-actions-hint" class="hint">Nothing is saved until you press Approve on the preview it shows. Only the person who asked can approve.</p>
     </div>
     <div class="as-know"><button type="button" id="as-know-open" class="btn btn-ghost btn-sm">AI Knowledge Centre…</button><span class="hint">What the receptionist may say about the business: edit, test, publish, roll back.</span></div>

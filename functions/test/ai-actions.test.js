@@ -53,14 +53,14 @@ beforeEach(async () => {
 
 // ======================================================= switches =====================================================
 test('SWITCHES: AI actions are off by default; only the owner changes them; the kinds are checked; the model is offered the tools only when everything is on', async () => {
-  const d = await ai.loadSettings(db); assert.equal(d.actionsEnabled, false); assert.deepEqual(d.actionKinds, { customerNote: false, projectUpdate: false });
+  const d = await ai.loadSettings(db); assert.equal(d.actionsEnabled, false); assert.deepEqual(d.actionKinds, { customerNote: false, projectUpdate: false, followUpEmails: false });
   const save = (who, data) => ai.saveSettings({ db, owners: OWNERS }, who, data, { nowMs: NOW });
   await rejects(save(otherActor, { actionsEnabled: true }), 'permission-denied', /Only the owner/); await rejects(save(otherActor, { actionKinds: { customerNote: true } }), 'permission-denied');
   assert.equal((await db.doc('aiSettings/current').get()).exists, false);
   await rejects(save(actor, { actionsEnabled: 'yes' }), 'invalid-argument'); await rejects(save(actor, { actionKinds: {} }), 'invalid-argument'); await rejects(save(actor, { actionKinds: { quote: true } }), 'invalid-argument', /Unknown kind/);
   await rejects(save(actor, { actionKinds: { customerNote: 'yes' } }), 'invalid-argument'); await rejects(save(actor, { actionKinds: ['customerNote'] }), 'invalid-argument'); await rejects(save(actor, { actionKinds: { __proto__: 1, constructor: true } }), 'invalid-argument');
   const s = await save(actor, { actionsEnabled: true, actionKinds: { customerNote: true } });
-  assert.deepEqual([s.actions.enabled, s.actions.kinds], [true, { customerNote: true, projectUpdate: false }]); assert.deepEqual(s.actions.labels, A.KINDS);
+  assert.deepEqual([s.actions.enabled, s.actions.kinds], [true, { customerNote: true, projectUpdate: false, followUpEmails: false }]); assert.deepEqual(s.actions.labels, A.KINDS);
   const log = (await db.collection('auditLog').where('action', '==', 'aiSettings').get()).docs.map((x) => x.data()); assert.equal(log.length, 1); assert.deepEqual(log[0].changed.sort(), ['actionKinds', 'actionsEnabled']);
   // the tools reach the model only when the AI, customer data, AI actions and that kind are all on
   const offered = async (extra) => { await on(extra); const m = fake(); await chat(m, { message: 'hi' }, { uid: 'x' + Math.random() }); return m.calls[0].tools.map((t) => t.name).filter((n) => n.startsWith('propose_')); };
@@ -253,13 +253,14 @@ test('READ-ONLY CHAT: the chat code never writes customer data itself; only deci
   assert.equal(/PR\.|projects'\)|store\.|updateContact|setStep|contacts\//.test(aiSrc), false, 'ai.js must not touch customer records');
   assert.equal(/\.(set|update|delete|add|create|batch|runTransaction|commit)\s*\(/.test(tools), false, 'the lookup tools still cannot write');
   const touched = new Set([...actions.matchAll(/(?:doc|collection)\(\s*['"`]([A-Za-z]+)/g)].map((m) => m[1]));
-  assert.deepEqual([...touched].sort(), ['aiProposals', 'auditLog', 'contacts', 'conversations', 'projects']);
+  assert.deepEqual([...touched].sort(), ['aiProposals', 'auditLog', 'contacts', 'conversations', 'messages', 'projects']);          // messages: only to READ whether a lead ever wrote (follow-up emails)
   const proposeSrc = actions.slice(actions.indexOf('async function propose('), actions.indexOf('const messageOf'));
   assert.equal(/tx\.|runTransaction|PR\.(save|setStep)|doc\('(?:contacts|projects|conversations)[^)]*\)\.(?:set|update)/.test(proposeSrc), false, 'proposing never writes customer data');
-  assert.equal(/wa\.|sendText|fetch\(|bucket/.test(actions), false, 'nothing is ever sent');
+  assert.equal(/wa\.|sendText|fetch\(|bucket/.test(actions), false, 'no WhatsApp message or web request is ever made from here');
+  assert.equal((actions.match(/sendRaw|FU\.send\(/g) || []).length, 1, 'the ONLY thing that can send is the follow-up email, through lib/followUp.js, and only after Approve');
   assert.equal(/\.delete\s*\(/.test(actions), false, 'nothing is ever deleted');
   const idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
-  assert.match(idx, /exports\.aiDecide = onCall\(\{\}, \(req\) => h\.aiDecide\(req\.auth, req\.data, quoteDeps\(\)\)\)/, 'approving needs no model key');
+  assert.match(idx, /exports\.aiDecide = onCall\(\{ timeoutSeconds: 180 \}, \(req\) => h\.aiDecide\(req\.auth, req\.data, \{ \.\.\.quoteDeps\(\), mailer: followUpMailer\(\) \}\)\)/, 'approving needs no model key (it gets the mailer for the follow-up emails)');
 });
 
 test('ERASURE: deleting a customer also deletes their proposals; other customers\' proposals stay', async () => {
@@ -278,7 +279,7 @@ test('HONESTY: a kind that is switched off is named to the model; a model that c
   assert.deepEqual(r.proposals, []); assert.match(r.reply, /I could not prepare that change, so nothing is waiting for your approval/); assert.doesNotMatch(r.reply, /Prepared for your approval/);
   const ok = await chat(fake([note('fine')]), { message: 'note' }, { uid: 'h2' });
   assert.match(ok.reply, /^Prepared for your approval: Add a note to/); assert.equal(ok.proposals.length, 1);
-  await on(); const m2 = fake(); await chat(m2, { message: 'hi' }, { uid: 'h3' }); assert.doesNotMatch(m2.calls[0].system, /NOT switched on/);
+  await on({ actionKinds: { customerNote: true, projectUpdate: true, followUpEmails: true } }); const m2 = fake(); await chat(m2, { message: 'hi' }, { uid: 'h3' }); assert.doesNotMatch(m2.calls[0].system, /NOT switched on/);
 });
 
 test('TRUTH: the model is told what is really waiting; an earlier claim in the chat is not believed when nothing waits; the same change twice shows the same proposal', async () => {

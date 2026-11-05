@@ -4,7 +4,9 @@
 //   decide      (called by the person, from the Approve / Reject buttons)   re-checks that nothing changed since the proposal, then applies it through the existing Elite OS
 //               functions (projects.js), or one small transaction for notes, as the person who approved. Applied once at most; every step is audited.
 // Rules this file keeps: a proposal expires after 30 minutes; only the person who asked can decide it; if the record changed since the proposal it is refused ("stale"), never overwritten;
-// nothing is applied while the AI is switched off, customer data is off, AI actions are off, or that kind of action is off; nothing is ever deleted or sent.
+// nothing is applied while the AI is switched off, customer data is off, AI actions are off, or that kind of action is off; nothing is ever deleted. ONE kind sends: "followUpEmails" (3 Nov 2026, owner's
+// decision), the follow-up email to leads who never replied (lib/followUp.js): the model supplies NO words (the email is fixed, lib/followUpText.js), the preview lists every recipient and the exact text, and
+// nothing goes until the person presses Approve; the send then applies the same rules again lead by lead.
 // The model supplies only ids and the wording the person asked for. It never supplies numbers, previews, or the final text: those are built here.
 const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -13,9 +15,13 @@ const { normalizePhone } = require('./whatsapp');
 const T = require('./aiTools');
 const S = require('./aiSummary');
 const PR = require('./projects');
+const FU = require('./followUp');
+const FT = require('./followUpText');
+const Gmail = require('./gmail');
 
-const KINDS = { customerNote: 'Customer notes', projectUpdate: 'Project updates' };
+const KINDS = { customerNote: 'Customer notes', projectUpdate: 'Project updates', followUpEmails: 'Follow-up emails to leads who never replied' };
 const EXPIRY_MS = 30 * 60 * 1000, MAX_PENDING = 5, NOTE_MAX = 1000, CONTACT_NOTES_MAX = 5000;
+const MAX_FOLLOWUPS = 30;                                                                // leads in one proposal (ask again for the rest)
 const PROPOSAL_ID = /^ap_[0-9a-f]{24}$/, PROJECT_ID = /^[pm]_[0-9a-f]{24}$/, DATE = /^\d{4}-\d{2}-\d{2}$/;
 const STEP_LABEL = { designApproved: 'Final 3D design approved', carcassesOrdered: 'Carcasses ordered', doorsOrdered: 'Doors ordered', readyForInstall: 'Ready for installation', installed: 'Installation completed' };
 
@@ -45,6 +51,8 @@ const TOOLS = [
       installDate: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear the date' },
       notes: { type: 'object', properties: { mode: { type: 'string', enum: ['append', 'replace'] }, text: { type: 'string' } }, required: ['mode', 'text'], additionalProperties: false } },
     required: ['projectId'], additionalProperties: false } },
+  { name: 'propose_followup_emails', kind: 'followUpEmails', description: 'Prepare the follow-up email to ALL leads who never replied (still a New lead, never wrote, have an email address, at least a day old, not emailed in the last 14 days). Use ONLY when the person asked to email or follow up the leads who did not reply. You write no words: Elite OS builds the email and the list of who gets it. Nothing is sent until the person approves the preview.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false } },
 ];
 const offKinds = (settings) => { const a = available(settings); return Object.keys(KINDS).filter((k) => !a[k]).map((k) => KINDS[k]); };       // the kinds that are not switched on, by name
 const isProposeTool =(name) => TOOLS.some((t) => t.name === name);
@@ -119,6 +127,30 @@ async function buildProject(db, input, nowMs) {
     preview: { rows, footer: 'Each change is saved on the project with your name in its history.' }, payload, baseline };
 }
 
+// Every lead who may be emailed right now, worked out from the database by the same rules the Email button and the server use (lib/followUp.js).
+async function buildFollowUps(db, input, nowMs) {
+  only(input, []);
+  const snap = await db.collection('conversations').where('lastMessageDirection', '==', 'out').limit(1000).get();
+  const cands = snap.docs.filter((d) => !FU.refusal(d.data(), nowMs)), rows = [];
+  for (let i = 0; i < cands.length; i += 20) {
+    await Promise.all(cands.slice(i, i + 20).map(async (d) => {
+      const k = await db.doc('contacts/' + d.id).get(), email = String((k.exists && k.data().email) || '').trim();
+      if (!email || !Gmail.EMAIL_RE.test(email)) return;
+      if (!(await d.ref.collection('messages').where('direction', '==', 'in').limit(1).get()).empty) return;          // an older record may not say they wrote: the chat itself is the proof (the send checks this too)
+      rows.push({ phone: d.id, name: String(k.data().name || d.data().name || '').trim(), email, born: (d.data().createdAt && d.data().createdAt.toMillis && d.data().createdAt.toMillis()) || 0 });
+    }));
+  }
+  rows.sort((a, b) => (a.born || Infinity) - (b.born || Infinity) || a.phone.localeCompare(b.phone));
+  if (!rows.length) throw new T.ToolError('There is nobody to email right now: every lead who never replied has been emailed lately, has no email address, arrived less than a day ago, or has written to you.');
+  const more = Math.max(0, rows.length - MAX_FOLLOWUPS), chosen = rows.slice(0, MAX_FOLLOWUPS), n = chosen.length;
+  return { kind: 'followUpEmails', phone: null, targetId: 'followUpEmails', title: `Email ${n} lead${n === 1 ? '' : 's'} who never replied`,
+    preview: { rows: [
+      { label: n === 1 ? 'Who gets it' : `Who gets it (${n})`, type: 'list', items: chosen.map((r) => `${S.one(r.name || 'A lead', 60)} · ${r.email}`) },
+      { label: 'The email (subject: ' + FT.SUBJECT + ')', type: 'text', text: FT.bodyFor({ first: '{first name}' }) },
+    ], footer: `Press Approve to send ${n === 1 ? 'this email' : `these ${n} emails`}, each starting with the lead's own first name. They go out as Elite Kitchens and replies come to your inbox. Nothing is sent before you press Approve.${more ? ` ${more} more could be emailed afterwards: ask again.` : ''}` },
+    payload: { phones: chosen.map((r) => r.phone) }, baseline: { count: n } };
+}
+
 const audit = (db, { nowMs, ...e }) => db.collection('auditLog').add({ action: 'aiProposal', ...e, at: Timestamp.fromMillis(nowMs) }).catch(() => {});          // never holds the text of a note
 async function propose({ db, actor, uid, model, nowMs = Date.now() }, name, input, settings) {
   const tool = TOOLS.find((t) => t.name === name);
@@ -126,7 +158,7 @@ async function propose({ db, actor, uid, model, nowMs = Date.now() }, name, inpu
   if (!available(settings)[tool.kind]) throw new T.ToolError('This kind of change is not switched on.');
   const mine = await db.collection('aiProposals').where('createdByUid', '==', uid).get();
   const pending = mine.docs.map((d) => d.data()).filter((p) => p.status === 'pending' && p.expiresAt.toMillis() > nowMs);
-  const built = name === 'propose_customer_note' ? await buildNote(db, input, nowMs) : await buildProject(db, input, nowMs);
+  const built = name === 'propose_customer_note' ? await buildNote(db, input, nowMs) : name === 'propose_followup_emails' ? await buildFollowUps(db, input, nowMs) : await buildProject(db, input, nowMs);
   const same = pending.find((p) => p.kind === built.kind && p.targetId === built.targetId && JSON.stringify(p.payload) === JSON.stringify(built.payload));
   if (same) return { proposalId: same.id, title: same.title, reused: true };                       // the same change is already waiting: show that one, do not make a second
   if (pending.length >= MAX_PENDING) throw new T.ToolError('There are already several proposals waiting for a decision. Approve or reject them first.');
@@ -178,7 +210,23 @@ async function applyProject(db, actor, p, nowMs) {
   return { status: okCount === results.length ? 'applied' : okCount ? 'partial' : 'failed', message: okCount === results.length ? 'The changes were saved.' : 'Some changes could not be saved.', results };
 }
 
-async function decide({ db }, actor, uid, data, { nowMs = Date.now() } = {}, settings) {
+// The approved emails, one lead at a time through the same server rules as the Email button (who may be emailed is decided again for each one: a lead who wrote in the meantime is skipped, and a second
+// approval can never email anyone twice, because each send is recorded on the conversation).
+async function applyFollowUps(db, mailer, actor, p, nowMs) {
+  if (!mailer || !mailer.enabled || !mailer.sender) throw refused('Email sending is not switched on yet, so nothing was sent.');
+  const results = [];
+  for (const phone of p.payload.phones) {
+    const conv = await db.doc('conversations/' + phone).get(), name = S.one(((conv.exists && conv.data().name) || 'A lead'), 60);
+    try {
+      await FU.send({ db, mailer }, actor, { phone }, { nowMs });                                      // no words passed in: the send builds the same fixed email the preview showed
+      results.push({ label: name, ok: true });
+    } catch (e) { results.push({ label: name, ok: false, message: e instanceof HttpsError ? e.message : 'It could not be sent.' }); }
+  }
+  const ok = results.filter((r) => r.ok).length, total = results.length;
+  return { status: ok === total ? 'applied' : ok ? 'partial' : 'failed', message: ok === total ? `${ok} email${ok === 1 ? ' was' : 's were'} sent.` : ok ? `${ok} of ${total} emails were sent. The others were skipped (see the list).` : 'No email was sent.', results };
+}
+
+async function decide({ db, mailer }, actor, uid, data, { nowMs = Date.now() } = {}, settings) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw bad('Missing details.');
   for (const k of Object.keys(data)) if (!['proposalId', 'decision'].includes(k)) throw bad(`Unknown field: ${k}`);
   if (typeof data.proposalId !== 'string' || !PROPOSAL_ID.test(data.proposalId)) throw bad('Missing proposal.');
@@ -187,6 +235,7 @@ async function decide({ db }, actor, uid, data, { nowMs = Date.now() } = {}, set
   const pre = await ref.get();
   if (!pre.exists) throw new HttpsError('not-found', 'This proposal no longer exists.');
   if (data.decision === 'approve' && pre.data().status === 'pending' && !available(settings)[pre.data().kind]) throw refused('AI actions are switched off, so nothing can be applied.');
+  if (data.decision === 'approve' && pre.data().status === 'pending' && pre.data().kind === 'followUpEmails' && (!mailer || !mailer.enabled || !mailer.sender)) throw refused('Email sending is not switched on yet, so nothing was sent. The proposal is still waiting.');
   const claimed = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new HttpsError('not-found', 'This proposal no longer exists.');
@@ -203,7 +252,7 @@ async function decide({ db }, actor, uid, data, { nowMs = Date.now() } = {}, set
     return { status: claimed.p.status, message: { expired: 'This proposal expired. Ask again.', rejected: 'Rejected. Nothing was changed.', applying: 'It is being applied. Check again in a moment.' }[claimed.p.status] || (claimed.p.result && claimed.p.result.message) || '', results: (claimed.p.result && claimed.p.result.results) || [] };
   }
   let result;
-  try { result = claimed.p.kind === 'customerNote' ? await applyNote(db, claimed.p, nowMs) : await applyProject(db, actor, claimed.p, nowMs); }
+  try { result = claimed.p.kind === 'customerNote' ? await applyNote(db, claimed.p, nowMs) : claimed.p.kind === 'followUpEmails' ? await applyFollowUps(db, mailer, actor, claimed.p, nowMs) : await applyProject(db, actor, claimed.p, nowMs); }
   catch (e) { result = e instanceof StaleError ? { status: 'stale', message: e.message, results: [] } : { status: 'failed', message: messageOf(e), results: [] }; }
   await ref.update({ status: result.status, result: { message: result.message, results: result.results }, finishedAt: Timestamp.fromMillis(nowMs) });
   await audit(db, { event: result.status, proposalId: claimed.p.id, kind: claimed.p.kind, targetId: claimed.p.targetId, by: actor.id, nowMs });
