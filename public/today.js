@@ -120,6 +120,7 @@ window.TODAY = (() => {
   }
   const reminder = (data) => call('saveReminder')(data);
   const snoozeQuote = (id, days) => call('snoozeQuote')({ id, days });
+  const dismissQuote = (id) => call('snoozeQuote')({ id, dismiss: true });
   const dismissReply = (phone, undo) => call('dismissReply')(undo ? { phone, undo: true } : { phone });
   function snoozeChoices(c) {
     const today = M.dateKey(Date.now()), row = el('div', 'td-snooze'); row.append(el('span', 'td-snooze-l', 'Snooze until'));
@@ -145,7 +146,7 @@ window.TODAY = (() => {
       } else row.append(btn('Open chat', 'btn-primary', open, null));              // WhatsApp refused the reminder: message the customer yourself
     } else if (c.kind === 'quote') {
       row.append(btn('Open quote', 'btn-primary', open, null), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
-        btn('Snooze', 'btn-ghost', () => { T.snoozeFor = T.snoozeFor === c.key ? null : c.key; schedule(); }, null));
+        btn('Dismiss', 'btn-ghost', () => act('q' + c.quoteId, () => dismissQuote(c.quoteId), `${c.ref || 'Quote'} dismissed. It comes back only if you send the quote again.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId));
     } else if (c.kind === 'reminder') {
       row.append(btn('Done', 'btn-primary', () => act('r' + c.reminderId, () => reminder({ action: 'done', id: c.reminderId }), 'Reminder done.', () => reminder({ action: 'undo', id: c.reminderId })), 'r' + c.reminderId),
         btn('Snooze', 'btn-ghost', () => { T.snoozeFor = T.snoozeFor === c.key ? null : c.key; schedule(); }, null));

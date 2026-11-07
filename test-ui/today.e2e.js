@@ -168,6 +168,15 @@ const web = http.createServer((req, res) => {
   await page.locator('#today-toast .linkbtn').click(); await until(async () => (await keys()).includes(QK), 'Undo brings it back');
   assert.equal((await db.doc('todayMarks/quote_q_' + 'ab'.repeat(12)).get()).exists, false);
   ok('"Followed up" hides a quote for 5 days (tied to the date it was sent) and Undo brings it back');
+  // 8a. a quote card has Dismiss, not Snooze: hidden for good (for this send of the quote), Undo brings it back
+  assert.equal(await card(QK).locator('button:has-text("Snooze")').count(), 0, 'no Snooze on a quote card'); assert.equal(await card(QK).locator('button:has-text("Dismiss")').count(), 1);
+  await card(QK).locator('button:has-text("Dismiss")').click();
+  await until(async () => !(await keys()).includes(QK), 'the dismissed quote leaves the list');
+  const dm = (await db.doc('todayMarks/quote_q_' + 'ab'.repeat(12)).get()).data(); assert.equal(dm.dismissed, true); assert.equal(dm.basis, now - 7 * DAY); assert.ok(dm.snoozeUntil.toMillis() > Date.now() + 365 * DAY);
+  assert.match(await page.locator('#today-toast').innerText(), /dismissed\. It comes back only if you send the quote again/);
+  await page.locator('#today-toast .linkbtn').click(); await until(async () => (await keys()).includes(QK), 'Undo brings the dismissed quote back');
+  assert.equal((await db.doc('todayMarks/quote_q_' + 'ab'.repeat(12)).get()).exists, false);
+  ok('a quote card has Dismiss instead of Snooze: it hides that quote\'s follow-up for good (tied to the date it was sent) and Undo brings it back');
 
   // ------------------------------------------------------------ 8b. "Waiting for your reply" can be dismissed (they only said "Ok perfect"): hidden until they write again
   const MAURA = '353871110111', MK = 'c|' + MAURA;

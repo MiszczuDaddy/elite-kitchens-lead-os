@@ -114,6 +114,27 @@ test('QUOTE SNOOZE: only a sent, unanswered quote; strict input; extra fields re
   assert.equal(await mark(), null);
 });
 
+test('QUOTE DISMISS: hides the follow-up for good but only for THIS send of the quote (sending it again brings it back); the sent time comes from the server; undo removes it; strict input', async () => {
+  await sentQuote();
+  const dismiss = (extra = {}, nowMs = NOW) => T.snoozeQuote({ db }, actor, { id: Q, dismiss: true, ...extra }, { nowMs });
+  assert.equal((await dismiss()).ok, true);
+  const m = await mark(); assert.deepEqual([m.kind, m.quoteId, m.phone, m.ref, m.by, m.basis, m.dismissed], ['quote', Q, P, 'EK-0112', 'thomas@example.com', NOW - 8 * DAY, true]);
+  assert.equal(m.snoozeUntil.toMillis(), Date.UTC(2100, 0, 1));
+  const marks = { [M.quoteKey(Q)]: { basis: m.basis, snoozeUntil: m.snoozeUntil, at: m.at } };
+  const quotes = () => db.doc('quotes/' + Q).get().then((d) => [{ id: Q, ...d.data() }]);
+  assert.equal(M.build({ quotes: await quotes(), marks: {}, now: NOW }).cards.length, 1, 'before: listed');
+  assert.equal(M.build({ quotes: await quotes(), marks, now: NOW }).cards.length, 0, 'dismissed: hidden');
+  assert.equal(M.build({ quotes: [{ ...(await quotes())[0], sentAt: ts(NOW - 10 * DAY) }], marks, now: NOW }).cards.length, 1, 'sent AGAIN (a different sent time): back');
+  assert.equal(M.build({ quotes: await quotes(), marks, now: NOW + 5 * DAY }).cards.length, 0, 'still hidden days later');
+  assert.equal(M.build({ quotes: await quotes(), marks, now: NOW }).doneToday.filter((d) => d.kind === 'quote').length, 1, 'and it can be undone from "done today"');
+  assert.deepEqual(await snooze(0), { ok: true, undone: true }); assert.equal(await mark(), null, 'undo removes it');
+  // strict input: dismiss is exactly true, takes no days, and only for a sent, unanswered quote
+  for (const extra of [{ dismiss: 'yes' }, { dismiss: 1 }, { dismiss: false }, { days: 5 }, { days: 0 }, { extra: 1 }]) await rejects(dismiss(extra), 'invalid-argument');
+  assert.equal(await mark(), null);
+  for (const status of ['draft', 'accepted', 'declined']) { await sentQuote({ status }); await rejects(dismiss(), 'failed-precondition', /sent and not answered/); }
+  await db.doc('quotes/' + Q).delete(); await rejects(dismiss(), 'not-found'); assert.equal(await mark(), null);
+});
+
 // ================================================================ reply-alert dismiss ===================================
 const dismissR = (data, nowMs = NOW) => T.dismissReply({ db }, actor, data, { nowMs });
 const replyMark = async () => { const s = await db.doc('todayMarks/reply_' + P).get(); return s.exists ? s.data() : null; };
