@@ -105,6 +105,7 @@ window.PIPE = (() => {
     main.append(top);
     const sub = [r.location, r.projectType].filter(Boolean).join(' · ');
     if (sub) main.append(el('div', 'prow-sub', sub));
+    if (r.contactTime && r.status === 'inbox') { const t = el('div', 'prow-time', 'Best time: ' + r.contactTime); t.title = 'The time this lead asked to be contacted (from the lead form)'; main.append(t); }          // New lead cards only: once they are booked or quoted the time no longer matters
     const meta = el('div', 'prow-meta');
     if (r.quoteValue) meta.append(el('span', 'pv', CRM.money(r.quoteValue)));
     else if (r.status === 'quoted') meta.append(el('span', 'pv none', 'No value yet'));

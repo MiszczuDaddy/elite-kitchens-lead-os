@@ -463,6 +463,7 @@ case "${1:-}" in
     echo "leadIntake gives a NEW lead the star when its lead-form answer says asap; updateContact keeps the star in step when someone edits the Notes. NOT deployed: the WhatsApp webhook. Nothing is sent to any customer."
     confirm "Deploy the asap star to the LIVE project?"
     install; save_revisions $ASAP_FUNCS; deploy_functions $ASAP_FUNCS
+    if [ -f functions/lib/contactTime.js ]; then echo "The same two functions also keep each lead's \"best time to contact\" (shown on the Pipeline's New lead card). For the leads you already have, run node scripts/mark-contact-times.js (shows what it would change), then the same with --apply, before $0 live."; fi
     echo "Done. Next: node scripts/mark-asap-leads.js (shows what it would change), then the same with --apply for the existing leads, then $0 live (the screen)."
     echo "To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:leadIntake,functions:updateContact --project $PROJECT"
     ;;
