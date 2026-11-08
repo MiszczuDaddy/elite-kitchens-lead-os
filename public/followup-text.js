@@ -32,5 +32,22 @@
     ].join('\n');
   }
 
-  return { SUBJECT, LIMIT, CONTACT, firstNameOf, bodyFor };
+  // The follow-up about a QUOTE that was never answered (7 Nov 2026): did they get it, any questions. Nothing about price, nothing promised about the work.
+  const quoteSubject = (ref) => (ref ? `Your Elite Kitchens quote ${ref}` : 'Your Elite Kitchens quote');
+  function quoteBodyFor({ first, ref, contact } = {}) {
+    const c = { ...CONTACT, ...(contact || {}) };
+    return [
+      `Hi ${first || 'there'},`,
+      '',
+      `I just wanted to check that you received your quote${ref ? ' (' + ref + ')' : ''}, and to see if you have any questions about it.`,
+      '',
+      'If you would like to change anything or talk it through, just reply to this email and we\'ll be happy to help.',
+      '',
+      'Kind regards,',
+      'Elite Kitchens',
+      [c.phone, c.email, c.web].filter(Boolean).join(' | '),
+    ].join('\n');
+  }
+
+  return { SUBJECT, LIMIT, CONTACT, firstNameOf, bodyFor, quoteSubject, quoteBodyFor };
 });

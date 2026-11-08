@@ -91,4 +91,4 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
   }
 }
 
-module.exports = { send, refusal, neverWrote, MIN_AGE_MS, COOLDOWN_MS, MAX_EMAILS };
+module.exports = { send, refusal, neverWrote, MIN_AGE_MS, COOLDOWN_MS, MAX_EMAILS, GMAIL_TEXT, CLAIM_MS };

@@ -5,7 +5,9 @@ window.FOLLOWUP = (() => {
   const DAY = 86400000, COOLDOWN = 14 * DAY, MAX_BATCH = 30, TX = window.FollowUpText;
   const showDialog = (d) => { if (typeof d.showModal === 'function') { if (!d.open) d.showModal(); } else d.setAttribute('open', ''); };
   const hideDialog = (d) => { if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); };
-  const F = { rows: [], one: null, busy: false };
+  const F = { rows: [], one: null, busy: false, quote: null };
+  const say = (text) => (window.TODAY && typeof TODAY.toast === 'function' ? TODAY.toast(text) : toast(text));          // the quote buttons are on Today: its own message line is the one on screen
+  const HINT_LEAD = 'It goes out from Elite Kitchens by email, and their reply comes to your normal inbox. A lead is emailed at most twice, 14 days apart.', HINT_QUOTE = 'It goes out from Elite Kitchens by email, and their reply comes to your normal inbox. Each quote is followed up by email once. The quote comes back on Today in 7 days if there is still no answer.';
 
   const emailOf = (c) => String(((S.dirMap && S.dirMap.get(c.id)) || {}).email || '').trim();
   const firstOf = (c) => TX.firstNameOf(c.name);
@@ -28,7 +30,7 @@ window.FOLLOWUP = (() => {
   }
 
   function openFor(rows) {
-    F.rows = rows; F.one = rows.length === 1 ? rows[0] : null; $('fu-err').textContent = '';
+    F.rows = rows; F.one = rows.length === 1 ? rows[0] : null; F.quote = null; $('fu-err').textContent = ''; $('fu-hint').textContent = HINT_LEAD;
     const dlg = $('fu-dlg'), batch = rows.length > 1;
     $('fu-title').textContent = batch ? `Email ${rows.length} leads who never replied` : 'Email ' + (rows[0].name || 'this lead');
     $('fu-to').textContent = batch ? 'Each email starts with that lead\'s first name ({first}). Read it, change it if you like, then press Send.' : 'To: ' + emailOf(rows[0]);
@@ -45,8 +47,30 @@ window.FOLLOWUP = (() => {
   // the row now says it was emailed, at once (the server's record arrives a moment later; an older lead outside the live list has no live copy to update)
   const markSent = (c) => { c.followUp = { ...(c.followUp || {}), emailAt: { toMillis: () => Date.now() }, emailCount: ((c.followUp || {}).emailCount || 0) + 1 }; renderList(); };
 
+  // A quote that was sent and never answered: the card on Today. The customer's address is read when the button is pressed (it is not on the card).
+  async function openQuote(c) {
+    if (F.busy) return;
+    let email = '', name = c.name || '';
+    try { const k = await db.collection('contacts').doc(c.phone).get(); if (k.exists) { email = String(k.data().email || '').trim(); name = name || String(k.data().name || ''); } }
+    catch (e) { say('Could not look up their email address. Try again.'); return; }
+    if (!email) { say((name || 'This customer') + ' has no email address. Add one in their Details first.'); return; }
+    F.rows = []; F.one = null; F.quote = { quoteId: c.quoteId, name, first: TX.firstNameOf(name) }; $('fu-err').textContent = ''; $('fu-hint').textContent = HINT_QUOTE;
+    $('fu-title').textContent = 'Email ' + (name || 'this customer') + (c.ref ? ' about quote ' + c.ref : ' about their quote'); $('fu-to').textContent = 'To: ' + email;
+    $('fu-subject').value = TX.quoteSubject(c.ref); $('fu-body').value = TX.quoteBodyFor({ first: F.quote.first, ref: c.ref });
+    $('fu-batch').hidden = true; $('fu-send').disabled = false; $('fu-send').textContent = 'Send email'; $('fu-cancel').textContent = 'Cancel';
+    showDialog($('fu-dlg')); $('fu-body').focus();
+  }
+  async function sendQuote() {
+    F.busy = true; $('fu-send').disabled = true; $('fu-send').textContent = 'Sending…'; $('fu-err').textContent = '';
+    const q = F.quote;
+    try { await call('sendQuoteFollowUp')({ quoteId: q.quoteId, subject: $('fu-subject').value, body: $('fu-body').value }); }
+    catch (e) { F.busy = false; $('fu-err').textContent = errText(e); $('fu-send').disabled = false; $('fu-send').textContent = 'Send email'; return; }
+    F.busy = false; hideDialog($('fu-dlg')); say('Follow-up email sent to ' + (q.name || 'the customer') + '. The quote comes back on Today in 7 days if there is still no answer.');
+  }
+
   async function send() {
-    if (F.busy) return; F.busy = true; $('fu-send').disabled = true; $('fu-err').textContent = '';
+    if (F.busy) return; if (F.quote) return sendQuote();
+    F.busy = true; $('fu-send').disabled = true; $('fu-err').textContent = '';
     const subject = $('fu-subject').value, template = $('fu-body').value, rows = F.rows.slice(), fn = call('sendFollowUpEmail');
     let sent = 0, failed = null;
     for (const [i, c] of rows.entries()) {
@@ -71,5 +95,5 @@ window.FOLLOWUP = (() => {
     $('nr-email-all').onclick = openAll;
   }
   init();
-  return { canEmail, emailedText, emailOf, render, openOne, openAll };
+  return { canEmail, emailedText, emailOf, render, openOne, openAll, openQuote };
 })();

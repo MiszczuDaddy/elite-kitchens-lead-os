@@ -136,8 +136,8 @@
       if (days < QUOTE_AMBER_DAYS) continue;
       const mk = (marks || {})[quoteKey(q.id)];
       if (mk && mk.basis === sent && ms(mk.snoozeUntil) > now) continue;       // snoozed: only for THIS send of the quote
-      const conv = convById.get(String(q.phone)) || {};
-      out.push({ key: quoteKey(q.id), kind: 'quote', quoteId: q.id, phone: String(q.phone || ''), name: q.customerName || conv.name || '', ref: q.ref || '', price: q.summary && q.summary.dearest ? q.summary.dearest.incVat : null,
+      const conv = convById.get(String(q.phone)) || {}, qm = (conv.quoteMail && conv.quoteMail[q.id]) || null, emailedAt = qm && Number(qm.basis) === sent ? ms(qm.at) : 0;      // emailed about THIS sending of the quote
+      out.push({ key: quoteKey(q.id), kind: 'quote', quoteId: q.id, emailedAt, phone: String(q.phone || ''), name: q.customerName || conv.name || '', ref: q.ref || '', price: q.summary && q.summary.dearest ? q.summary.dearest.incVat : null,
         reasons: [{ type: 'quote', text: `Sent ${days} days ago, no answer${q.validUntil && q.validUntil < today ? ' (expired)' : ''}`, since: sent, urgency: days >= QUOTE_RED_DAYS ? 2 : 1 }], urgency: days >= QUOTE_RED_DAYS ? 2 : 1, since: sent, primary: 'quote' });
     }
     return out;

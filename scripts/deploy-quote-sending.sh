@@ -40,7 +40,7 @@
 #   ./scripts/deploy-quote-sending.sh today      Phase 11 (docs/PHASE11_TODAY.md): the 2 functions behind the Today tab (saveReminder, snoozeQuote) and deleteCustomer (it now also erases reminders). Run it BEFORE "live". Does NOT deploy the webhook.
 #   ./scripts/deploy-quote-sending.sh bookings   Phase 12 (docs/PHASE12_BOOKINGS.md): the evening-before visit reminder (bookingReminderSweep, resolveBookingNotice), the Installation visit (appointment, project and calendar functions) and deleteCustomer. Run it BEFORE "live". The evening reminder stays OFF.
 #   ./scripts/deploy-quote-sending.sh reminders on|off   switch the automatic evening-before reminder ON or OFF (writes BOOKING_REMINDERS to the settings file and redeploys bookingReminderSweep). Needs the reminder template (elite_kitchens_consultation_reminder) approved by Meta first.
-#   ./scripts/deploy-quote-sending.sh followup   Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md): ONE new staff function (sendFollowUpEmail). Needs email sending on (it is for the quotes). Run it BEFORE "live". Sends nothing by itself.
+#   ./scripts/deploy-quote-sending.sh followup   Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md): TWO new staff functions (sendFollowUpEmail for leads, sendQuoteFollowUp for quotes nobody answered). Needs email sending on (it is for the quotes). Run it BEFORE "live". Sends nothing by itself.
 #   ./scripts/deploy-quote-sending.sh assistantmail  The Assistant's "email all leads who never replied" (docs/FOLLOW_UP_EMAIL.md): aiChat, aiStatus, setAiSettings, aiDecide (all exist already). OFF until the owner ticks it in Assistant > Settings; then it emails only after you press Approve. Run it after "followup" and BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
@@ -87,7 +87,7 @@ SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
 TODAY_NEW="saveReminder snoozeQuote dismissReply"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
 WELCOME_FUNCS="leadIntake receptionistOnMessage receptionistSweep setAiSettings aiStatus aiSuggestReply"                # the welcome switch: the intake sends the chosen welcome, the receptionist knows both, the settings save and show the choice (all exist already)
 ASAP_FUNCS="leadIntake updateContact"                                                                                      # the ⭐ "wants it as soon as possible": a new lead gets it from its form answer, editing the Notes keeps it in step (both exist already)
-FOLLOWUP_FUNCS="sendFollowUpEmail"                                                                                # follow-up emails to leads who never replied: one new staff function (made public: it checks the signed-in staff account itself)
+FOLLOWUP_FUNCS="sendFollowUpEmail sendQuoteFollowUp"                                                              # follow-up emails: to leads who never replied, and about quotes nobody answered (new staff functions, made public: each checks the signed-in staff account itself)
 ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                                                          # the Assistant's follow-up emails: it prepares them (aiChat), shows the switch (aiStatus, setAiSettings) and sends after Approve (aiDecide); all exist already
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
@@ -435,13 +435,15 @@ case "${1:-}" in
     [ -f functions/lib/followUp.js ] || { echo "This checkout has no follow-up email code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
     check_settings; check_access; check_routing $FOLLOWUP_FUNCS
     echo "Functions: $FOLLOWUP_FUNCS"
-    echo "New: sendFollowUpEmail (one follow-up email to a lead who never replied, written on screen and sent only when you press Send; staff only). It uses the same email sending as the quotes (MAIL_SEND). No existing function changes. NOT deployed: the WhatsApp webhook."
+    echo "New: sendFollowUpEmail (one follow-up email to a lead who never replied) and sendQuoteFollowUp (one follow-up email about a quote nobody answered), each written on screen and sent only when you press Send; staff only. It uses the same email sending as the quotes (MAIL_SEND). No existing function changes. NOT deployed: the WhatsApp webhook."
     confirm "Deploy the follow-up email backend to the LIVE project?"
     install; deploy_functions $FOLLOWUP_FUNCS
     echo "==> making the new staff function reachable (it checks the signed-in staff account itself)"
-    gcloud run services add-iam-policy-binding "$(svc sendFollowUpEmail)" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: sendFollowUpEmail"
+    for f in $FOLLOWUP_FUNCS; do
+      gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+    done
     check_reachable "$FOLLOWUP_FUNCS"
-    echo "Done. Next: $0 live (the screen). To go back: firebase functions:delete sendFollowUpEmail --region $REGION --project $PROJECT and roll the screen back in Firebase console > Hosting."
+    echo "Done. Next: $0 live (the screen). To go back: firebase functions:delete $FOLLOWUP_FUNCS --region $REGION --project $PROJECT and roll the screen back in Firebase console > Hosting."
     ;;
   assistantmail)
     [ -f functions/lib/followUpText.js ] || { echo "This checkout has no follow-up email code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
@@ -587,6 +589,7 @@ case "${1:-}" in
     if [ -f functions/lib/bookingNotices.js ] && [ -z "$(serving_revision resolvebookingnotice)" ]; then echo "Deploy the bookings backend first: $0 bookings"; exit 1; fi        # Phase 12: the screen calls resolveBookingNotice
     if [ -f functions/lib/today.js ] && [ -z "$(serving_revision savereminder)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # Phase 11: the screen calls saveReminder and snoozeQuote
     if [ -f functions/lib/followUp.js ] && [ -z "$(serving_revision sendfollowupemail)" ]; then echo "Deploy the follow-up email backend first: $0 followup"; exit 1; fi        # the Email button calls sendFollowUpEmail
+    if [ -f functions/lib/quoteFollowUp.js ] && [ -z "$(serving_revision sendquotefollowup)" ]; then echo "Deploy the follow-up email backend first: $0 followup"; exit 1; fi        # the Email button on a Today quote card calls sendQuoteFollowUp
     if grep -q dismissReply functions/index.js && [ -z "$(serving_revision dismissreply)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # the Dismiss button on a reply alert calls dismissReply
     if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact
     if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions

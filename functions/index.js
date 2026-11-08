@@ -208,6 +208,7 @@ function followUpMailer() {
   return { enabled, sender, replyTo: main || sender, fromName: MAIL_FROM_NAME.value().trim() || 'Elite Kitchens', gmail: followUpClient };
 }
 exports.sendFollowUpEmail = onCall({}, (req) => h.sendFollowUpEmail(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));
+exports.sendQuoteFollowUp = onCall({}, (req) => h.sendQuoteFollowUp(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));          // the same mailbox as the lead follow-ups
 const deliveryDeps = () => {
   const db = getFirestore(), bucket = getStorage().bucket(bucketName());
   const wa = createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome });

@@ -145,7 +145,7 @@ window.TODAY = (() => {
         row.append(btn('Open chat', 'btn-primary', open, null), btn('It arrived', 'btn-ghost', say('arrived'), 'n' + c.apptId), btn('It did not arrive', 'btn-ghost', say('notArrived'), 'n' + c.apptId));
       } else row.append(btn('Open chat', 'btn-primary', open, null));              // WhatsApp refused the reminder: message the customer yourself
     } else if (c.kind === 'quote') {
-      row.append(btn('Open quote', 'btn-primary', open, null), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
+      row.append(btn('Open quote', 'btn-primary', open, null), ...(c.emailedAt || !window.FOLLOWUP ? [] : [btn('Email', 'btn-ghost', () => FOLLOWUP.openQuote(c), null)]), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
         btn('Dismiss', 'btn-ghost', () => act('q' + c.quoteId, () => dismissQuote(c.quoteId), `${c.ref || 'Quote'} dismissed. It comes back only if you send the quote again.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId));
     } else if (c.kind === 'reminder') {
       row.append(btn('Done', 'btn-primary', () => act('r' + c.reminderId, () => reminder({ action: 'done', id: c.reminderId }), 'Reminder done.', () => reminder({ action: 'undo', id: c.reminderId })), 'r' + c.reminderId),
@@ -166,7 +166,7 @@ window.TODAY = (() => {
     const tags = el('span', 'td-tags'); for (const t of new Set(c.reasons.map((r) => r.type))) tags.append(el('span', 'td-tag t-' + t, UTYPE[t])); top.append(tags);
     main.append(top);
     if (c.kind === 'reminder' && c.name) main.append(el('div', 'td-meta', 'About ' + c.name));
-    if (c.kind === 'quote') main.append(el('div', 'td-meta', [c.ref ? 'Quote ' + c.ref : '', c.name, c.price ? '€' + Number(c.price).toLocaleString('en-IE') : ''].filter(Boolean).join(' · ')));
+    if (c.kind === 'quote') main.append(el('div', 'td-meta', [c.ref ? 'Quote ' + c.ref : '', c.name, c.price ? '€' + Number(c.price).toLocaleString('en-IE') : '', c.emailedAt ? 'emailed ' + new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' }).format(new Date(c.emailedAt)) : ''].filter(Boolean).join(' · ')));
     if (c.kind === 'lead') main.append(el('div', 'td-meta', ['Number as typed: ' + (c.phoneTyped || 'none'), c.email, c.location].filter(Boolean).join(' · ')));
     for (const r of c.reasons) main.append(reasonLine(c, r, now));
     if (c.kind === 'customer') { if (c.facts) main.append(el('div', 'td-meta', c.facts)); if (c.last && c.last.text) main.append(el('div', 'td-meta td-last', (c.last.mine ? 'You: ' : 'Customer: ') + c.last.text)); }
@@ -263,5 +263,5 @@ window.TODAY = (() => {
   $('remind-btn').onclick = () => { const c = S.selected && S.convs.find((x) => x.id === S.selected); openReminder({ phone: S.selected, name: c ? c.name : '' }); };
   $('today-back').onclick = () => { history.replaceState(null, '', location.pathname + location.search); routeFromHash(); };
 
-  return Object.assign(T, { start, stop, handles, show, hide, render, schedule, openReminder });
+  return Object.assign(T, { start, stop, handles, show, hide, render, schedule, openReminder, toast });
 })();

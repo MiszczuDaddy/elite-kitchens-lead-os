@@ -430,7 +430,9 @@ async function resolveBookingNotice(auth, data, deps) {
 }
 // ---- Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md). Staff only; one email per press, the text shown first. Needs the mailer from index.js (the same Gmail sign-in as quote emails). ----
 const followUpLib = require('./followUp');
+const quoteFollowUpLib = require('./quoteFollowUp');
 const sendFollowUpEmail = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return followUpLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
+const sendQuoteFollowUp = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return quoteFollowUpLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
 const todayLib = require('./today');
 const saveReminder = staffAction(todayLib.saveReminder);
 const snoozeQuote = staffAction(todayLib.snoozeQuote);
@@ -460,7 +462,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, sendQuoteFollowUp, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,
