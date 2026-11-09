@@ -473,8 +473,8 @@ test('read-only by construction: the tools file has no way to write, and the mod
   const src = fs.readFileSync(path.join(__dirname, '../lib/aiTools.js'), 'utf8').replace(/\/\/.*$/gm, '');
   assert.equal(/\.(set|update|delete|add|create|batch|runTransaction|commit|recursiveDelete|bulkWriter)\s*\(/.test(src), false, 'aiTools.js must not write');
   assert.equal(/FieldValue|firebase-admin\/firestore|getStorage|bucket|wa\.|sendText|fetch\(/.test(src), false, 'aiTools.js must not send or store anything');
-  assert.ok(T.TOOLS.every((t) => /^(search|get|list|pipeline|customer)_/.test(t.name)), T.TOOLS.map((t) => t.name).join());
-  assert.equal(T.TOOLS.length, 10);
+  assert.ok(T.TOOLS.every((t) => /^(search|get|list|pipeline|customer|find)_/.test(t.name)), T.TOOLS.map((t) => t.name).join());
+  assert.equal(T.TOOLS.length, 11);
   for (const t of T.TOOLS) assert.equal(t.input_schema.additionalProperties, false);
 });
 

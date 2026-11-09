@@ -26,4 +26,4 @@ function fromNotes(notes) {
   }
   return found;
 }
-module.exports = { fromNotes, pretty, MAX };
+module.exports = { fromNotes, pretty, MAX, LABEL };

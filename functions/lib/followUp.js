@@ -14,18 +14,10 @@ const DAY = 24 * 3600e3, MIN_AGE_MS = DAY, COOLDOWN_MS = 14 * DAY, MAX_EMAILS = 
 const bad = (m) => new HttpsError('invalid-argument', m);
 const refuse = (m) => new HttpsError('failed-precondition', m);
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : 0);
-const STAGES = ['inbox', 'booked', 'quoted', 'won', 'closed'];
-const stageOf = (c) => (c && STAGES.includes(c.inboxStatus) ? c.inboxStatus : 'inbox');
+const { neverWrote, stageOf } = require('./noReplyRule');                                  // the one rule, shared with the assistant's counting
 const when = (t) => new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' }).format(new Date(t));
 
-// The same rule as the "No reply" tab (public/noreply-model.js; a test keeps them in step).
-function neverWrote(c) {
-  if (!c || stageOf(c) !== 'inbox') return false;
-  if (c.lastInboundAt || c.lastMessageDirection === 'in') return false;
-  if (typeof c.unreadCount === 'number' && c.unreadCount > 0) return false;
-  if (c.doNotContact && c.doNotContact.on === true) return false;
-  return true;
-}
+// "Never wrote" is the same rule as the "No reply" tab (public/noreply-model.js; a test keeps them in step): lib/noReplyRule.js.
 
 // Why this lead may not be emailed now, in plain words; null when they may.
 function refusal(c, nowMs) {
