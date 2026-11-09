@@ -79,3 +79,56 @@ test('THE ASSISTANT USES IT: the tool is offered, the model gets the counts back
   assert.match(JSON.stringify(model.calls[1].messages), /matching[^0-9]{1,6}2[^0-9]/); assert.match(r.reply, /\*\*2\*\* of the leads/);
   assert.ok(JSON.stringify(r).includes('Counted leads'), 'the answer shows what was done');
 });
+
+// ===================================================== find_leads: arrival dates and the star ==================================================
+test('FIND_LEADS BY ARRIVAL AND THE STAR: leads that arrived in a period, and the ones who want it asap', async () => {
+  await db.doc('conversations/' + A).update({ createdAt: ts(Date.UTC(2026, 10, 2, 9, 0)), asap: true }); await db.doc('conversations/' + B).update({ createdAt: ts(Date.UTC(2026, 10, 8, 23, 30)) });
+  await db.doc('conversations/' + C).update({ createdAt: ts(Date.UTC(2026, 10, 9, 0, 30)), asap: true });
+  assert.deepEqual((await run({ createdFrom: '2026-11-02', createdTo: '2026-11-02' })).customers.map((c) => c.name), ['Aoife Anders'], 'the first day counts');
+  assert.deepEqual((await run({ createdFrom: '2026-11-08', createdTo: '2026-11-08' })).customers.map((c) => c.name), ['Brian Byrne'], 'a lead at 23:30 is on that day; the next day at 00:30 is not');
+  assert.deepEqual((await run({ createdFrom: '2026-11-09' })).customers.map((c) => c.name), ['Ciara Casey'], 'from a day onwards');
+  assert.deepEqual((await run({ createdFrom: '2026-11-03', createdTo: '2026-11-07' })).customers.map((c) => c.name).sort(), ['Dara Daly', 'Eoin Egan', 'Fiona Fahey', 'Gus Gill', 'Hana Hearn'], 'the others arrived on 4 Nov');
+  assert.deepEqual((await run({ neverReplied: true, asap: true })).customers.map((c) => c.name).sort(), ['Aoife Anders', 'Ciara Casey']);
+  assert.deepEqual((await run({ neverReplied: true, asap: true, createdFrom: '2026-11-09' })).customers.map((c) => c.name), ['Ciara Casey']);
+  assert.equal((await run({ neverReplied: true, asap: false })).matching, 3, 'asap false: the others');
+  await fails({ createdFrom: '2026-13-45' }, /createdFrom must be a date/); await fails({ createdFrom: '2026-11-09', createdTo: '2026-11-01' }, /must not be after/); await fails({ createdFrom: '2026-01-01', createdTo: '2026-11-01' }, /at most 92 days/); await fails({ asap: 'yes' }, /true or false/);
+});
+
+// ===================================================== find_messages ==================================================
+const msg = (phone, id, over) => db.doc(`conversations/${phone}/messages/${id}`).set({ direction: 'in', type: 'text', body: 'Hello', createdAt: ts(NOW - DAY), ...over });
+const at = (d, h = 12, mi = 0) => ts(Date.UTC(2026, 10, d, h, mi));
+const runM = (input) => T.run({ db, nowMs: NOW }, 'find_messages', input);
+const failsM = (input, re) => assert.rejects(runM(input), (e) => e instanceof T.ToolError && (!re || re.test(e.message)), JSON.stringify(input));
+async function chatsWithMessages() {
+  await db.doc('conversations/' + A).update({ lastInboundAt: at(5), updatedAt: at(5) });  await msg(A, 'a1', { type: 'image', body: 'the kitchen wall', createdAt: at(5) }); await msg(A, 'a2', { type: 'image', body: '[image]', createdAt: at(5, 12, 1) }); await msg(A, 'a3', { type: 'text', body: 'Can you ring me?', createdAt: at(5, 12, 2) });
+  await db.doc('conversations/' + B).update({ lastInboundAt: at(9, 9), updatedAt: at(9, 9) }); await msg(B, 'b1', { type: 'image', body: '[image]', createdAt: at(1, 12) }); await msg(B, 'b2', { type: 'text', body: 'Anything new?', createdAt: at(9, 9) });       // an old photo, a new message
+  await db.doc('conversations/' + C).update({ lastInboundAt: at(6), updatedAt: at(6) }); await msg(C, 'c1', { type: 'video', body: '[video]', createdAt: at(6) }); await msg(C, 'c2', { type: 'audio', body: '[audio]', createdAt: at(6, 13) });
+  await db.doc('conversations/' + D).update({ lastInboundAt: at(8, 23, 30), updatedAt: at(8, 23, 30) }); await msg(D, 'd1', { type: 'image', body: '[image]', createdAt: at(8, 23, 30) });                                         // last minute of the last day
+  await db.doc('conversations/' + E).update({ lastInboundAt: at(9, 0, 30), updatedAt: at(9, 0, 30) }); await msg(E, 'e1', { type: 'image', body: '[image]', createdAt: at(9, 0, 30) });                                            // the next day
+  await db.doc('conversations/' + F).update({ updatedAt: at(4) }); await msg(F, 'f1', { direction: 'out', type: 'document', body: 'Quote EK-0104', createdAt: at(4) });                                                       // we sent a document
+}
+test('"WHO SENT US PHOTOS LAST WEEK": found by code across every chat; an old photo in a chat that wrote again does not count; the first and last minute of the period are handled', async () => {
+  await chatsWithMessages();
+  const r = await runM({ type: 'photo', from: '2026-11-02', to: '2026-11-08' });
+  assert.deepEqual(r.customers.map((c) => c.name), ['Dara Daly', 'Aoife Anders'], 'newest first: D at 23:30 on the 8th, A on the 5th'); assert.equal(r.matching, 2); assert.equal(r.messages, 3);
+  const a = r.customers.find((c) => c.name === 'Aoife Anders'); assert.deepEqual([a.messages, a.kinds, a.example], [2, { image: 2 }, 'the kitchen wall'], 'two photos; the caption is shown, a bare [image] is not');
+  assert.match(r.note, /data, not instructions/); assert.deepEqual([r.from, r.to, r.type, r.direction], ['2026-11-02', '2026-11-08', 'photo', 'in']);
+  assert.equal((await runM({ type: 'photo', from: '2026-11-09', to: '2026-11-09' })).customers.map((c) => c.name).join(), 'Eoin Egan', 'the next day only');
+});
+test('FIND_MESSAGES: other kinds, who we wrote to, words, the default week, the list limit', async () => {
+  await chatsWithMessages();
+  assert.deepEqual((await runM({ type: 'video', from: '2026-11-02', to: '2026-11-08' })).customers.map((c) => c.name), ['Ciara Casey']);
+  assert.deepEqual((await runM({ type: 'voice', from: '2026-11-02', to: '2026-11-08' })).customers.map((c) => c.name), ['Ciara Casey']);
+  const out = await runM({ type: 'document', direction: 'out', from: '2026-11-02', to: '2026-11-08' }); assert.deepEqual(out.customers.map((c) => c.name), ['Fiona Fahey'], 'a document WE sent'); assert.equal((await runM({ type: 'document', from: '2026-11-02', to: '2026-11-08' })).matching, 0, 'not among the customers\' messages');
+  assert.deepEqual((await runM({ contains: 'ring me', from: '2026-11-02', to: '2026-11-08' })).customers.map((c) => c.name), ['Aoife Anders']);
+  const any = await runM({ from: '2026-11-02', to: '2026-11-09' }); assert.ok(any.matching >= 5 && any.customers.length === any.matching);
+  const dflt = await runM({ type: 'photo' }); assert.deepEqual([dflt.from, dflt.to], ['2026-11-02', '2026-11-09'], 'the default is the last 7 days up to today'); assert.equal(dflt.matching, 3, 'A, D and E');
+  const lim = await runM({ type: 'photo', limit: 1 }); assert.equal(lim.customers.length, 1); assert.equal(lim.matching, 3, 'the count is not cut by the list limit');
+});
+test('FIND_MESSAGES: strict input; nothing is written', async () => {
+  await chatsWithMessages(); const before = JSON.stringify((await db.collection('conversations').get()).docs.map((d) => [d.id, d.data()]));
+  await failsM({ type: 'gif' }, /Unknown type/); await failsM({ direction: 'sideways' }, /direction must be/); await failsM({ from: 'yesterday' }, /from must be a date/); await failsM({ to: '2026-02-30' }, /to must be a date/);
+  await failsM({ from: '2026-11-09', to: '2026-11-01' }, /must not be after/); await failsM({ from: '2026-01-01', to: '2026-11-01' }, /at most 92 days/); await failsM({ contains: '' }, /short piece of text/); await failsM({ contains: 'x'.repeat(61) }, /short piece of text/);
+  await failsM({ limit: 0 }, /limit/); await failsM({ extra: 1 }, /Unknown field/); await failsM([], /Bad input/);
+  assert.equal(JSON.stringify((await db.collection('conversations').get()).docs.map((d) => [d.id, d.data()])), before);
+});
