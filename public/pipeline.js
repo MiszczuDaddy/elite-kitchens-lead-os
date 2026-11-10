@@ -14,6 +14,7 @@ window.PIPE = (() => {
   };
   const desktop = () => window.matchMedia('(min-width: 900px)').matches;   // drag only where there is room and a mouse; phones use tap + menu
   const STAGES = CRM.STAGES;
+  const BOARD = STAGES.filter((s) => s !== 'closed');          // the board and the phone tabs show the live stages only: a Closed lead is taken off the board (it stays in Inbox > All and in search, and Closed is still in each card's Move menu)
 
   // ---------- data ----------
   function listen() {
@@ -151,9 +152,9 @@ window.PIPE = (() => {
     const shown = CRM.filterRows(all, { query: P.query, source: P.source, added: addedRange() });
     const lanes = CRM.lanes(shown);
     if (!all.length) board.replaceChildren(el('p', 'pipe-empty', 'No customers yet. New leads and WhatsApp customers will appear here.'));
-    else board.replaceChildren(...STAGES.map((s) => laneNode(lanes[s])));
+    else board.replaceChildren(...BOARD.map((s) => laneNode(lanes[s])));
     // phone: one stage at a time, picked from these chips
-    $('pipe-stages').replaceChildren(...STAGES.map((s) => {
+    $('pipe-stages').replaceChildren(...BOARD.map((s) => {
       const b = el('button', null, CRM.LABELS[s]); b.type = 'button'; b.dataset.stage = s; b.setAttribute('aria-pressed', String(s === P.stage));
       b.append(el('span', 'stage-n', String(lanes[s].rows.length)));
       return b;
@@ -182,6 +183,7 @@ window.PIPE = (() => {
     for (const s of STAGES) {
       const b = el('button', null, CRM.LABELS[s]); b.type = 'button'; b.dataset.stage = s; b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', String(s === r.status));
       if (s === r.status) { b.disabled = true; b.append(el('span', 'tick-mark', '✓')); }
+      if (s === 'closed') b.title = 'Takes this customer off the board. Find them again in Inbox > All, or by searching.';
       b.onclick = () => { closeMenu(true); move(r.id, s); };
       node.append(b);
     }

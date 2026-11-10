@@ -83,12 +83,12 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
 
   // ---- colours: small dots only; columns and cards stay uncoloured until a card is dragged over a column ----
   const dot = (s) => lane(s).locator('.lane-title').evaluate((e) => getComputedStyle(e, '::before').backgroundColor);
-  const dots = await Promise.all(['inbox', 'booked', 'quoted', 'won', 'closed'].map(dot));
-  assert.equal(new Set(dots).size, 5, 'five different dot colours: ' + dots);
+  const dots = await Promise.all(['inbox', 'booked', 'quoted', 'won'].map(dot));
+  assert.equal(new Set(dots).size, 4, 'four different dot colours: ' + dots);
   const alpha = (c) => { const m = /rgba?\(([^)]+)\)/.exec(c); const p = m[1].split(',').map((x) => parseFloat(x)); return p.length > 3 ? p[3] : 1; };
   const laneTints = () => page.evaluate(() => [...document.querySelectorAll('.lane')].map((l) => getComputedStyle(l, '::before').backgroundColor));
   const rest = await laneTints();
-  assert.equal(new Set(rest).size, 5, 'five different column tints: ' + rest);
+  assert.equal(new Set(rest).size, 4, 'four different column tints: ' + rest);
   for (const c of rest) assert.ok(alpha(c) >= 0.03 && alpha(c) <= 0.07, 'tint strength ' + alpha(c));          // very pale, 3-7%
   const box = await lane('quoted').boundingBox(); assert.ok(box.height >= 300, 'column tint covers a useful area: ' + box.height);
   assert.equal(await row(ph.quoted).evaluate((e) => getComputedStyle(e).backgroundColor), 'rgba(0, 0, 0, 0)');
@@ -98,13 +98,13 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await page.fill('#pipe-search', 'zzzz-no-match');                                                               // every column empty: still identifiable by tint
   assert.equal(await page.locator('.prow').count(), 0);
   assert.deepEqual(await laneTints(), rest);
-  for (const sg of ['inbox', 'booked', 'quoted', 'won', 'closed']) assert.ok((await lane(sg).boundingBox()).height >= 300);
+  for (const sg of ['inbox', 'booked', 'quoted', 'won']) assert.ok((await lane(sg).boundingBox()).height >= 300);
   await page.screenshot({ path: path.join(SHOTS, 'pipeline-empty-columns.png') });
   await page.fill('#pipe-search', '');
   await page.waitForSelector('.prow');
-  ok('empty columns keep their tint and size, so the five stages are still obvious');
-  assert.equal(await page.locator('.prow[draggable=true]').count(), 7);
-  assert.ok(await page.locator('.prow-menu').count() >= 7);
+  ok('empty columns keep their tint and size, so the four stages are still obvious');
+  assert.equal(await page.locator('.prow[draggable=true]').count(), 6);               // the Closed customer is not on the board
+  assert.ok(await page.locator('.prow-menu').count() >= 6);
   ok('every card is draggable on desktop and keeps its three-dot menu');
 
   // ---- drag feedback: dragged card fades, only the destination column is tinted ----
@@ -154,28 +154,28 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   // ---- a failed save puts the card back with a clear message ----
   await page.route('**/setConversationStatus', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INTERNAL', message: 'boom' } }) }));
   requests.length = 0;
-  const closedBefore = await conv(ph.closed);
-  await drag(ph.closed, 'booked');
+  const wonBefore = await conv(ph.won);
+  await drag(ph.won, 'booked');
   await page.waitForSelector('#pipe-toast:not([hidden])');
-  assert.match(await page.textContent('#pipe-toast'), /Could not move Cathal Closed to Booked\. They are back in Closed/);
-  await inLane('closed', ph.closed).waitFor();
-  assert.equal(await page.locator(`.lane[data-stage="booked"] .prow[data-phone="${ph.closed}"]`).count(), 0);
-  assert.equal((await conv(ph.closed)).inboxStatus, 'closed'); assert.deepEqual((await conv(ph.closed)).stageDates, closedBefore.stageDates);
-  assert.equal(await row(ph.closed).evaluate((e) => e.classList.contains('pending')), false);
+  assert.match(await page.textContent('#pipe-toast'), /Could not move Wendy Won to Booked\. They are back in Won/);
+  await inLane('won', ph.won).waitFor();
+  assert.equal(await page.locator(`.lane[data-stage="booked"] .prow[data-phone="${ph.won}"]`).count(), 0);
+  assert.equal((await conv(ph.won)).inboxStatus, 'won'); assert.deepEqual((await conv(ph.won)).stageDates, wonBefore.stageDates);
+  assert.equal(await row(ph.won).evaluate((e) => e.classList.contains('pending')), false);
   ok('if the save fails the card returns to its original column, an error explains it, and nothing was changed in the database');
   await page.unroute('**/setConversationStatus');
 
   // ---- a second drag while the first is still saving cannot cause a duplicate or inconsistent update ----
   await page.route('**/setConversationStatus', async (r) => { await sleep(900); await r.continue(); });
   requests.length = 0;
-  await drag(ph.won, 'closed');
-  await inLane('closed', ph.won).waitFor();                                        // shown in its new column straight away, dimmed
+  await drag(ph.won, 'quoted');
+  await inLane('quoted', ph.won).waitFor();                                        // shown in its new column straight away, dimmed
   assert.ok(await row(ph.won).evaluate((e) => e.classList.contains('pending')));
   await drag(ph.won, 'booked');                                                    // try to move it again mid-save
   await page.waitForFunction(() => !document.querySelector('.prow.pending'));
   assert.equal(requests.length, 1);
-  await settled(ph.won, 'closed');
-  await inLane('closed', ph.won).waitFor();
+  await settled(ph.won, 'quoted');
+  await inLane('quoted', ph.won).waitFor();
   assert.equal(await page.locator(`.prow[data-phone="${ph.won}"]`).count(), 1);
   ok('while a card is saving it is dimmed and cannot be moved again: one request, one card, consistent final state');
   await page.unroute('**/setConversationStatus');
@@ -189,9 +189,9 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await tp.click('#nav-pipeline');
   await tp.waitForSelector('.lane .prow');
   assert.equal(await tp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-  assert.equal(await tp.locator('.lane').count(), 5);
+  assert.equal(await tp.locator('.lane').count(), 4);
   await tp.screenshot({ path: path.join(SHOTS, 'pipeline-tablet.png') });
-  ok('tablet width: five tinted columns, no page-level sideways scroll');
+  ok('tablet width: four tinted columns, no page-level sideways scroll');
   await tctx.close();
 
   // ---- phone: no drag-and-drop dependency, tap + menu is the way ----
@@ -203,9 +203,9 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await mp.tap('#to-pipeline');
   await mp.waitForSelector('.lane.lane-on .prow');
   assert.equal(await mp.locator('.prow[draggable=true]').count(), 0);
-  assert.equal(await mp.locator('#pipe-stages button').count(), 5);
+  assert.equal(await mp.locator('#pipe-stages button').count(), 4);
   const chipDots = await mp.locator('#pipe-stages button').evaluateAll((bs) => bs.map((b) => getComputedStyle(b, '::before').backgroundColor));
-  assert.equal(new Set(chipDots).size, 5);
+  assert.equal(new Set(chipDots).size, 4);
   assert.equal(await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.querySelector('.pipe-scroll').scrollWidth <= document.querySelector('.pipe-scroll').clientWidth), true);
   assert.ok(alpha(await mp.locator('.lane.lane-on').evaluate((e) => getComputedStyle(e, '::before').backgroundColor)) >= 0.03);
   await mp.screenshot({ path: path.join(SHOTS, 'pipeline-phone-colours.png') });

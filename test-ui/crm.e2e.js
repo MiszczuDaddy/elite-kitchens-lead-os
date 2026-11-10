@@ -74,9 +74,10 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await page.waitForSelector('.lane[data-stage="inbox"] .prow');
   assert.equal(await page.getAttribute('#app', 'data-view'), 'pipeline');
   assert.equal(await page.locator('#nav-pipeline').getAttribute('aria-current'), 'page');
-  assert.deepEqual([await count('inbox'), await count('booked'), await count('quoted'), await count('won'), await count('closed')], [1, 1, 2, 2, 1]);   // legacy + meta not yet arrived
+  assert.deepEqual([await count('inbox'), await count('booked'), await count('quoted'), await count('won')], [1, 1, 2, 2]);   // legacy + meta not yet arrived
+  assert.equal(await lane('closed').count(), 0, 'there is no Closed column'); assert.equal(await row(ph.closed).count(), 0, 'a Closed customer is not on the board');
   assert.match(await lane('inbox').innerText(), /New lead/);
-  ok('the Pipeline screen groups customers into New lead / Booked / Quoted / Won / Closed (the old no-status customer is in New lead)');
+  ok('the Pipeline screen groups customers into New lead / Booked / Quoted / Won, with no Closed column (the old no-status customer is in New lead)');
   assert.match(await lane('quoted').locator('.lane-sum').innerText(), /€14,500/);
   assert.match(await lane('won').locator('.lane-sum').innerText(), /€36,000/);
   assert.match(await row(ph.noval).innerText(), /No value yet/);
@@ -104,7 +105,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await page.fill('#pipe-search', '085 000 0003'); assert.equal(await count('quoted'), 1);                 // Irish-format number finds 353850000003
   await page.fill('#pipe-search', '');
   await page.selectOption('#pipe-source', 'Referral');
-  assert.deepEqual([await count('quoted'), await count('won'), await count('closed')], [1, 0, 1]);
+  assert.deepEqual([await count('quoted'), await count('won')], [1, 0]);
   assert.match(await page.textContent('#ov-title'), /Referral/);
   await page.selectOption('#pipe-source', '');
   await page.selectOption('#pipe-added', 'custom');
@@ -112,7 +113,7 @@ const ph = { legacy: '353850000001', booked: '353850000002', quoted: '3538500000
   await page.fill('#pipe-from', day(30)); await page.fill('#pipe-to', day(25));
   assert.equal(await page.locator('.prow').count(), 0);
   await page.fill('#pipe-from', day(30)); await page.fill('#pipe-to', day(0));
-  assert.equal(await page.locator('.prow').count(), 7);
+  assert.equal(await page.locator('.prow').count(), 6);                                   // seven customers, one of them Closed and off the board
   await page.selectOption('#pipe-added', 'all');
   ok('search (name, Irish phone), lead source and date-range filters narrow the board; the overview follows the source');
 
