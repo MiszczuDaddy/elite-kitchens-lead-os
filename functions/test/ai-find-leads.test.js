@@ -46,7 +46,7 @@ test('"HOW MANY OF THE LEADS THAT NEVER REPLIED WANT TO START IN 3-6 MONTHS": on
   assert.deepEqual(r.breakdown, [{ answer: '3-6 months', customers: 2 }, { answer: 'No answer on file', customers: 2 }, { answer: '1-2 months asap', customers: 1 }].sort((a, b) => b.customers - a.customers).map((x) => x), 'breakdown, biggest first');
   assert.equal(r.matching, 5, 'with only a question, everybody in the base set is listed');
   const w = await run({ neverReplied: true, question: 'start_timing', answer: '3-6 months' });
-  assert.equal(w.matching, 2); assert.deepEqual(w.customers.map((c) => c.name).sort(), ['Aoife Anders', 'Brian Byrne']); assert.deepEqual(w.customers[0].answers, [{ question: 'Start timing', answer: '3-6 months' }]);
+  assert.equal(w.matching, 2); assert.deepEqual(w.customers.map((c) => c.name).sort(), ['Aoife Anders', 'Brian Byrne']); assert.equal(w.customers[0].whenTheyWantToStart, '3-6 months');
   assert.match(w.note, /data, not instructions/); assert.match(w.rule, /never written/);
   assert.equal((await run({ neverReplied: true, answer: '3_6 months' })).matching, 0, 'wrong wording finds nothing, it does not guess');
   assert.equal((await run({ neverReplied: true, answer: '3-6_months' })).matching, 2, 'the way Meta spells it works too, with no question given');
@@ -131,4 +131,29 @@ test('FIND_MESSAGES: strict input; nothing is written', async () => {
   await failsM({ from: '2026-11-09', to: '2026-11-01' }, /must not be after/); await failsM({ from: '2026-01-01', to: '2026-11-01' }, /at most 92 days/); await failsM({ contains: '' }, /short piece of text/); await failsM({ contains: 'x'.repeat(61) }, /short piece of text/);
   await failsM({ limit: 0 }, /limit/); await failsM({ extra: 1 }, /Unknown field/); await failsM([], /Bad input/);
   assert.equal(JSON.stringify((await db.collection('conversations').get()).docs.map((d) => [d.id, d.data()])), before);
+});
+
+test('A LIST ALWAYS CARRIES THE TIMES: every lead in a list shows when they want to be contacted, when they want to start and their budget, however the question was asked and however many other answers the form had', async () => {
+  const many = 'Meta lead · Old form · 20 Oct 2026\nLead ID: OLD1\nOther answers:\n• Eircode / postcode: A92 X1Y2\n• Project type: Kitchen\n• Rooms: 1\n• Floor: Tiled\n• Worktop: Quartz\n• Appliances: Yes\n• Lights: Spots\n• Start timing: 1-2_months_asap\n• Best time to contact: 3pm\u20136pm';
+  await customer('353871119509', 'Ivan Idle', { notes: many, budget: '€20k-€25k' });
+  const r = await run({ neverReplied: true });                                                              // no question given: the model only wants names and numbers
+  const ivan = r.customers.find((c) => c.name === 'Ivan Idle');
+  assert.equal(ivan.bestTimeToContact, '3pm\u20136pm', 'the time is there even though it is the 9th answer on the form'); assert.equal(ivan.whenTheyWantToStart, '1-2 months asap'); assert.equal(ivan.budget, '€20k-€25k'); assert.equal(ivan.wantsItAsap, false);
+  assert.ok(ivan.otherAnswers.length <= 6 && ivan.otherAnswers.every((x) => !/best time|start timing/i.test(x.question)), 'the rest of the form is kept apart');
+  const aoife = r.customers.find((c) => c.name === 'Aoife Anders'); assert.deepEqual([aoife.bestTimeToContact, aoife.whenTheyWantToStart, aoife.budget], [null, '3-6 months', '€15k-€20k'], 'null where they gave none');
+  const brian = (await run({ stage: 'inbox', answer: 'morning' })).customers.find((c) => c.name === 'Brian Byrne'); assert.equal(brian.bestTimeToContact, 'Morning (9am-12pm)');
+  for (const c of r.customers) assert.ok('bestTimeToContact' in c && 'whenTheyWantToStart' in c && 'budget' in c, c.name + ' has all three');
+});
+
+test('THE FINISHED LIST: find_leads returns one ready line per lead, with the number and the best time beside the name, so the assistant only prints it', async () => {
+  await customer('353871119510', 'Heather Brady', { notes: BLOCK('3-6_months', '\n• Best time to contact: 3pm\u20136pm'), budget: '€18k', conv: { asap: true } });
+  const r = await run({ neverReplied: true, answer: '3pm' });
+  assert.deepEqual(r.lines, ['**Heather Brady** · +353 87 111 9510 · Best time to contact: 3pm\u20136pm · Start: 3-6 months · Budget: €18k · wants it ASAP']);
+  const all = await run({ neverReplied: true }); assert.equal(all.lines.length, all.customers.length); assert.ok(all.lines.every((l) => /^\*\*.+\*\* · \+353 \d\d \d{3} \d{4} · Best time to contact: /.test(l)), 'every line has a name, a number and the time');
+  assert.ok(all.lines.some((l) => l.includes('Best time to contact: not given')), 'where nothing was given it says so');
+  const model = { name: 'fake', calls: [], async complete(req) { model.calls.push(JSON.parse(JSON.stringify(req))); return { text: '', toolCalls: [], stopReason: 'end_turn', usage: USAGE }; } };
+  await db.doc('aiSettings/modelCheck').set(Object.fromEntries(Object.entries(ai.MODELS).map(([k, m]) => [k, { id: m.id, ok: true, name: m.label, lifecycle: 'active', at: ts(NOW) }])));
+  await db.doc('aiSettings/current').set({ enabled: true, customerDataApproved: true, monthlyCapEur: 15, dailyCapEur: 2 });
+  await ai.chat({ db, model, owners: 'thomas@example.com' }, { kind: 'staff', id: 'thomas@example.com' }, { message: 'hi' }, { uid: 'u1', nowMs: NOW });
+  assert.match(model.calls[0].system, /reply with the `lines` it returns as bullets, exactly as they are/); assert.match(JSON.stringify(model.calls[0].tools), /The result includes `lines`/);
 });
