@@ -12,7 +12,7 @@
   // Only a New lead counts: once a lead is Booked, Quoted, Won or Closed, they have been in touch (or you have decided about them). A customer who asked not to be contacted did write.
   function neverWrote(c) {
     if (!c || stageOf(c) !== 'inbox') return false;
-    if (c.lastInboundAt || c.lastMessageDirection === 'in') return false;
+    if (c.lastInboundAt || c.emailInboundAt || c.lastMessageDirection === 'in') return false;          // a reply by email counts as writing to us
     if (typeof c.unreadCount === 'number' && c.unreadCount > 0) return false;
     if (c.doNotContact && c.doNotContact.on === true) return false;
     return true;

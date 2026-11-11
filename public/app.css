@@ -1346,3 +1346,13 @@ div.td-open { cursor: default; }
 .nr-bar-t { color: var(--muted); font-size: 12.5px; }
 .fu-batch { max-height: 140px; overflow-y: auto; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--muted); }
 #fu-body { min-height: 230px; }
+
+/* the email inbox (docs/EMAIL_INBOX.md): an email inside the chat, and the reply box */
+.m.em { max-width: min(78%, 560px); }
+.m.em .em-head { font-size: 12px; font-weight: 650; opacity: .8; margin-bottom: 4px; overflow-wrap: anywhere; }
+.m.em .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.m.em .em-att { display: block; font-size: 12px; margin-top: 6px; overflow-wrap: anywhere; }
+.em-last { background: #f4f1ea; border-radius: 6px; padding: 8px 10px; margin: 0 0 10px; max-height: 150px; overflow: auto; }
+.em-last-h { font-size: 12px; font-weight: 650; color: var(--muted); margin-bottom: 3px; overflow-wrap: anywhere; } .em-last-b { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#em-dlg .dlg-actions .em-check { margin-right: auto; }
+@media (max-width: 899px) { .m.em { max-width: 92%; } }

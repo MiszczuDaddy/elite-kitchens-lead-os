@@ -431,7 +431,18 @@ async function resolveBookingNotice(auth, data, deps) {
 // ---- Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md). Staff only; one email per press, the text shown first. Needs the mailer from index.js (the same Gmail sign-in as quote emails). ----
 const followUpLib = require('./followUp');
 const quoteFollowUpLib = require('./quoteFollowUp');
+const emailReplyLib = require('./emailReply');
+const emailInboundLib = require('./emailInbound');
 const sendFollowUpEmail = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return followUpLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
+const sendEmailReply = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return emailReplyLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
+// "Check for new email now": the same sweep as the five-minute one, started by a person (the screen shows what it found).
+const checkEmail = async (auth, data, deps) => {
+  assertStaff(auth, deps.cfg);
+  if (data != null && (typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length)) throw new HttpsError('invalid-argument', 'Nothing to send here.');
+  if (!deps.inbox || !deps.inbox.enabled) throw new HttpsError('failed-precondition', 'Email checking is not switched on yet.');
+  const r = await emailInboundLib.sweep({ db: deps.db, reader: deps.inbox.reader, mailbox: deps.inbox.mailbox });
+  return { ok: r.ok, stored: r.stored, matched: r.matched, ...(r.error ? { error: r.error } : {}) };
+};
 const sendQuoteFollowUp = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return quoteFollowUpLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
 const todayLib = require('./today');
 const saveReminder = staffAction(todayLib.saveReminder);
@@ -462,7 +473,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, sendQuoteFollowUp, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, sendQuoteFollowUp, sendEmailReply, checkEmail, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

@@ -342,6 +342,7 @@
         </button>
         <input id="file" type="file" hidden accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
         <button id="recep-btn" type="button" class="btn btn-ghost btn-sm reply-btn recep-btn" hidden>Receptionist: off</button>
+        <button id="email-btn" type="button" class="btn btn-ghost btn-sm reply-btn email-btn" hidden title="Write to them by email, in the same conversation as their emails">Email</button>
         <button id="reply-btn" type="button" class="btn btn-ghost btn-sm reply-btn" hidden title="An AI draft you can edit. Nothing is sent until you press Send.">Suggest reply</button>
         <textarea id="text" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>
         <button id="send" class="btn btn-primary" type="submit">Send</button>
@@ -588,6 +589,17 @@
   <div class="dlg-actions"><button type="button" id="fu-cancel" class="btn btn-ghost">Cancel</button><button type="button" id="fu-send" class="btn btn-primary">Send email</button></div>
 </dialog>
 
+<dialog id="em-dlg" class="dlg dlg-wide">
+  <h2 id="em-title">Email</h2>
+  <p id="em-to" class="hint"></p>
+  <div id="em-last" class="em-last" hidden></div>
+  <label>Subject<input id="em-subject" type="text" maxlength="200" autocomplete="off"></label>
+  <label>Message<textarea id="em-body" rows="9" maxlength="5000"></textarea></label>
+  <p class="hint">It goes out from the business email address, in the same email conversation, and their reply comes back into this chat.</p>
+  <div id="em-err" class="dlg-err" role="alert"></div>
+  <div class="dlg-actions"><button type="button" id="em-check" class="btn btn-link em-check">Check for new email</button><button type="button" id="em-cancel" class="btn btn-ghost">Cancel</button><button type="button" id="em-send" class="btn btn-primary">Send email</button></div>
+</dialog>
+
 <dialog id="notif-dlg" class="dlg dlg-wide">
   <h2>Notifications</h2>
   <p id="notif-state" class="notif-state"></p>
@@ -821,6 +833,7 @@
 <script src="/followup-text.js"></script>
 <script src="/app.js"></script>
 <script src="/followup.js"></script>
+<script src="/email.js"></script>
 <script src="/pipeline.js"></script>
 <script src="/booking-rules.js"></script>
 <script src="/appointments.js"></script>

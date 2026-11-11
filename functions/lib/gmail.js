@@ -1,6 +1,7 @@
 // Phase 6.1 M4: a minimal Gmail client (REST, no extra packages) and KEYLESS sign-in (docs/PHASE6_1_PLAN.md, "Email").
 // Sends mail as the business mailbox (info@elitekitchens.ie) through the Gmail API with Google Workspace domain-wide delegation,
-// limited to the "gmail.send" scope: it can send, and cannot read anything. No key file, password or token is stored anywhere:
+// limited to the "gmail.send" scope: it can send, and cannot read anything. (10 Nov 2026: reading customers' replies is a SEPARATE sign-in with the "gmail.readonly" scope, used only by the
+// email inbox, see createGmailReader below and docs/EMAIL_INBOX.md; sending never gets it.) No key file, password or token is stored anywhere:
 //   1. the function's own runtime identity (metadata server) gets a short-lived token;
 //   2. it asks the IAM Credentials API to SIGN a one-hour request on behalf of the dedicated mailer service account, naming the
 //      mailbox to act for (the service account has no keys: Google signs with its own);
@@ -11,6 +12,7 @@
 const crypto = require('crypto');
 
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const API_BASE = 'https://gmail.googleapis.com';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const IAM_BASE = 'https://iamcredentials.googleapis.com';
@@ -47,7 +49,7 @@ async function request(fetchImpl, url, { method = 'GET', headers = {}, body, for
 }
 
 // A short-lived Gmail token for `sender`, via the mailer service account. Every failure here is DEFINITE: nothing was sent.
-function delegatedTokenProvider({ serviceAccount, sender, fetchImpl = fetch, metadataBase = METADATA_BASE, iamBase = IAM_BASE, tokenUrl = TOKEN_URL, now = Date.now }) {
+function delegatedTokenProvider({ serviceAccount, sender, scope = GMAIL_SCOPE, fetchImpl = fetch, metadataBase = METADATA_BASE, iamBase = IAM_BASE, tokenUrl = TOKEN_URL, now = Date.now }) {
   let cached = null;
   async function get(timeoutMs = 8000) {
     if (cached && cached.exp - now() > 5 * 60 * 1000) return cached.token;
@@ -59,7 +61,7 @@ function delegatedTokenProvider({ serviceAccount, sender, fetchImpl = fetch, met
       return r.json;
     });
     const iat = Math.floor(now() / 1000);
-    const claims = { iss: serviceAccount, sub: sender, scope: GMAIL_SCOPE, aud: tokenUrl, iat, exp: iat + 3600 };
+    const claims = { iss: serviceAccount, sub: sender, scope, aud: tokenUrl, iat, exp: iat + 3600 };
     const signed = await step('token_sign', async () => {
       const r = await request(fetchImpl, `${iamBase}/v1/projects/-/serviceAccounts/${encodeURIComponent(serviceAccount)}:signJwt`,
         { method: 'POST', headers: { authorization: `Bearer ${meta.access_token}` }, body: { payload: JSON.stringify(claims) }, timeoutMs });
@@ -88,13 +90,41 @@ function classify(status) {
 // cfg.tokens: a token provider. Sends one prepared message (base64url "raw") as the signed-in mailbox.
 function createGmailClient({ apiBase = API_BASE, fetchImpl = fetch, tokens }) {
   return {
-    async sendRaw(raw, { timeoutMs = 20000 } = {}) {
+    // threadId (optional): put the message in that Gmail conversation (a reply to a customer's email).
+    async sendRaw(raw, { timeoutMs = 20000, threadId } = {}) {
       const token = await tokens.get(timeoutMs);
-      const r = await request(fetchImpl, `${apiBase}/gmail/v1/users/me/messages/send`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { raw }, timeoutMs });
+      const r = await request(fetchImpl, `${apiBase}/gmail/v1/users/me/messages/send`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { raw, ...(threadId ? { threadId } : {}) }, timeoutMs });
       if (r.status === 401 && tokens.clear) tokens.clear();                                        // a stale token: the next attempt signs in again
       if (r.ok && r.json && r.json.id) return { id: r.json.id, threadId: r.json.threadId || null };
       if (r.ok) throw new GmailError('no_message_id', r.status, false);
       throw classify(r.status);
+    },
+  };
+}
+
+// Reading, for the email inbox only (docs/EMAIL_INBOX.md): the newest inbox messages as ids, and one message at a time (the headers only, or all of it). A read-only sign-in: it cannot send, change or delete anything.
+function createGmailReader({ apiBase = API_BASE, fetchImpl = fetch, tokens }) {
+  const call = async (path, timeoutMs) => {
+    const token = await tokens.get(timeoutMs);
+    const r = await request(fetchImpl, `${apiBase}/gmail/v1/users/me/${path}`, { headers: { authorization: `Bearer ${token}` }, timeoutMs });
+    if (r.status === 401 && tokens.clear) tokens.clear();
+    if (!r.ok || !r.json) throw classify(r.status || 500);
+    return r.json;
+  };
+  return {
+    // The inbox messages that arrived after `afterSec` (epoch seconds), newest first, one page at a time: { ids, next }.
+    async list({ afterSec, pageToken, max = 50, timeoutMs = 15000 } = {}) {
+      const q = new URLSearchParams({ labelIds: 'INBOX', maxResults: String(Math.min(100, Math.max(1, max))) });
+      if (afterSec) q.set('q', 'after:' + Math.floor(afterSec));
+      if (pageToken) q.set('pageToken', pageToken);
+      const j = await call('messages?' + q.toString(), timeoutMs);
+      return { ids: (j.messages || []).map((m) => m.id).filter(Boolean), next: j.nextPageToken || null };
+    },
+    // One message: format 'metadata' (only the headers named) or 'full' (the text and the list of attachments).
+    async get(id, { full = false, headers = ['From', 'To', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References'], timeoutMs = 15000 } = {}) {
+      if (!/^[0-9a-f]{6,32}$/i.test(String(id))) throw new GmailError('bad_request', 400, true);
+      const q = full ? 'format=full' : 'format=metadata&' + headers.map((h) => 'metadataHeaders=' + encodeURIComponent(h)).join('&');
+      return call(`messages/${id}?${q}`, timeoutMs);
     },
   };
 }
@@ -161,13 +191,18 @@ function buildMessage({ from, fromName, to, replyTo, subject, text, attachment, 
   return head + CRLF + CRLF + body;
 }
 // Phase 10: a plain-text message with no attachment (the owner's fault alerts). The same header rules as above.
-function buildTextMessage({ from, fromName, to, replyTo, subject, text, date = new Date() }) {
+// inReplyTo / references (optional): the Message-ID of the email being answered, so the customer's mail program and Gmail keep it in the same conversation.
+const msgId = (v) => { v = clean(v, 'a message id').trim(); if (!/^<[^<>\s]{1,200}>$/.test(v)) throw new Error('a message id does not look right'); return v; };
+function buildTextMessage({ from, fromName, to, replyTo, subject, text, inReplyTo, references, date = new Date() }) {
+  const thread = [];
+  if (inReplyTo) thread.push(`In-Reply-To: ${msgId(inReplyTo)}`);
+  if (references && references.length) thread.push(`References: ${references.slice(-10).map(msgId).join(' ')}`);
   const head = [
-    `From: ${mailbox(fromName, from)}`, `To: ${addr(to)}`, `Reply-To: ${addr(replyTo || from)}`, `Subject: ${headerText(subject)}`,
+    `From: ${mailbox(fromName, from)}`, `To: ${addr(to)}`, `Reply-To: ${addr(replyTo || from)}`, `Subject: ${headerText(subject)}`, ...thread,
     `Date: ${date.toUTCString()}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: quoted-printable',
   ].join(CRLF);
   return head + CRLF + CRLF + quotedPrintable(text);
 }
 const toRaw = (message) => Buffer.from(message, 'utf8').toString('base64url');
 
-module.exports = { GMAIL_SCOPE, EMAIL_RE, GmailError, delegatedTokenProvider, createGmailClient, buildMessage, buildTextMessage, toRaw, quotedPrintable, headerText };
+module.exports = { GMAIL_SCOPE, GMAIL_READ_SCOPE, EMAIL_RE, GmailError, delegatedTokenProvider, createGmailClient, createGmailReader, buildMessage, buildTextMessage, toRaw, quotedPrintable, headerText };

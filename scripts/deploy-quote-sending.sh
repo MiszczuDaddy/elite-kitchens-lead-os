@@ -42,6 +42,7 @@
 #   ./scripts/deploy-quote-sending.sh reminders on|off   switch the automatic evening-before reminder ON or OFF (writes BOOKING_REMINDERS to the settings file and redeploys bookingReminderSweep). Needs the reminder template (elite_kitchens_consultation_reminder) approved by Meta first.
 #   ./scripts/deploy-quote-sending.sh followup   Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md): TWO new staff functions (sendFollowUpEmail for leads, sendQuoteFollowUp for quotes nobody answered). Needs email sending on (it is for the quotes). Run it BEFORE "live". Sends nothing by itself.
 #   ./scripts/deploy-quote-sending.sh assistantmail  The Assistant's "email all leads who never replied" (docs/FOLLOW_UP_EMAIL.md): aiChat, aiStatus, setAiSettings, aiDecide (all exist already). OFF until the owner ticks it in Assistant > Settings; then it emails only after you press Approve. Run it after "followup" and BEFORE "live".
+#   ./scripts/deploy-quote-sending.sh emailin [on|off]  The email inbox (docs/EMAIL_INBOX.md): customers' email replies come into their chat and "Email" answers them. No argument: deploys emailSweep, sendEmailReply, checkEmail (and the 3 functions that now count an email reply as "they wrote"); reading stays OFF. "on" switches reading ON after the one Google Workspace approval (gmail.readonly); "off" is the kill switch. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -89,6 +90,8 @@ WELCOME_FUNCS="leadIntake receptionistOnMessage receptionistSweep setAiSettings 
 ASAP_FUNCS="leadIntake updateContact"                                                                                      # the ⭐ "wants it as soon as possible": a new lead gets it from its form answer, editing the Notes keeps it in step (both exist already)
 FOLLOWUP_FUNCS="sendFollowUpEmail sendQuoteFollowUp"                                                              # follow-up emails: to leads who never replied, and about quotes nobody answered (new staff functions, made public: each checks the signed-in staff account itself)
 ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                                                          # the Assistant's follow-up emails: it prepares them (aiChat), shows the switch (aiStatus, setAiSettings) and sends after Approve (aiDecide); all exist already
+EMAILIN_NEW="emailSweep sendEmailReply checkEmail"                                                                      # the email inbox: the five-minute sweep (scheduled), the reply and the manual check (staff only, made public: each checks the signed-in staff account itself)
+EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"                                                      # + the three that decide who "never wrote": an email reply now counts
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
 BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
@@ -102,7 +105,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,55p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,56p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -456,6 +459,42 @@ case "${1:-}" in
     install; save_revisions $ASSISTMAIL_FUNCS; deploy_functions $ASSISTMAIL_FUNCS
     echo "Done. Next: $0 live (the screen), then tick the new box in Assistant > Settings. To go back: untick it there (instant). Full undo: git checkout <the earlier commit> -- functions, then firebase deploy --only $(echo $ASSISTMAIL_FUNCS | sed 's/[^ ]*/functions:&/g; s/ /,/g') --project $PROJECT"
     ;;
+  emailin)
+    [ -f functions/lib/emailInbound.js ] || { echo "This checkout has no email inbox code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    case "${2:-}" in
+      on|off)
+        [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
+        check_routing emailSweep checkEmail
+        [ -n "$(serving_revision emailsweep)" ] || { echo "Deploy the email inbox backend first: $0 emailin"; exit 1; }
+        if [ "$2" = on ]; then
+          echo "Elite OS will read the business mailbox (read-only, every 5 minutes). It looks at WHO wrote; only an email from a customer or lead it already knows is read and kept, in that customer's chat. Nothing else is stored; nothing is sent, deleted or marked as read."
+          echo "This needs ONE approval in Google Workspace first (docs/EMAIL_INBOX.md):"
+          echo "  1. admin.google.com > Security > Access and data control > API controls > Manage domain-wide delegation"
+          echo "  2. Edit the entry for the mailer service account $MAIL_SA (the one already used for sending)"
+          echo "  3. Add the scope  https://www.googleapis.com/auth/gmail.readonly  (keep the gmail.send scope) and save"
+          confirm "Is that approved, and do you want email replies read into Elite OS?"
+        else confirm "Switch reading customers' emails off for the live project?"; fi
+        setting "$ENVF" EMAIL_IN "$2"
+        install; save_revisions emailSweep checkEmail; deploy_functions emailSweep checkEmail
+        echo "Reading customers' emails is $2. Kill switch: $0 emailin off"
+        if [ "$2" = on ]; then echo "Wait up to 5 minutes, or open a customer's chat > Email > Check for new email. If it says Google has not allowed Elite OS to read the mailbox, the Workspace step above is not finished yet."; fi
+        ;;
+      "")
+        check_settings; check_access; check_routing $EMAILIN_FUNCS
+        echo "Functions: $EMAILIN_FUNCS"
+        echo "New: emailSweep (every 5 minutes), sendEmailReply and checkEmail (staff only). Reading customers' emails stays OFF until you run: $0 emailin on (after the Google Workspace approval, see docs/EMAIL_INBOX.md). Existing: sendFollowUpEmail, sendQuoteFollowUp and aiChat now count an email reply as 'they wrote'. NOT deployed: the WhatsApp webhook."
+        confirm "Deploy the email inbox backend to the LIVE project?"
+        install; save_revisions sendFollowUpEmail sendQuoteFollowUp aiChat; deploy_functions $EMAILIN_FUNCS
+        echo "==> making the new staff functions reachable (each checks the signed-in staff account itself)"
+        for f in sendEmailReply checkEmail; do
+          gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+        done
+        check_reachable "sendEmailReply checkEmail"
+        echo "Done. Next: $0 live (the screen), then the Google Workspace approval, then $0 emailin on. To go back: firebase functions:delete $EMAILIN_NEW --region $REGION --project $PROJECT"
+        ;;
+      *) usage ;;
+    esac
+    ;;
   asap)
     [ -f functions/lib/asap.js ] || { echo "This checkout has no asap code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
     check_settings; check_access; check_routing $ASAP_FUNCS
@@ -591,6 +630,7 @@ case "${1:-}" in
     if [ -f functions/lib/today.js ] && [ -z "$(serving_revision savereminder)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # Phase 11: the screen calls saveReminder and snoozeQuote
     if [ -f functions/lib/followUp.js ] && [ -z "$(serving_revision sendfollowupemail)" ]; then echo "Deploy the follow-up email backend first: $0 followup"; exit 1; fi        # the Email button calls sendFollowUpEmail
     if [ -f functions/lib/quoteFollowUp.js ] && [ -z "$(serving_revision sendquotefollowup)" ]; then echo "Deploy the follow-up email backend first: $0 followup"; exit 1; fi        # the Email button on a Today quote card calls sendQuoteFollowUp
+    if [ -f functions/lib/emailInbound.js ] && [ -z "$(serving_revision sendemailreply)" ]; then echo "Deploy the email inbox backend first: $0 emailin"; exit 1; fi        # the Email button calls sendEmailReply and checkEmail
     if grep -q dismissReply functions/index.js && [ -z "$(serving_revision dismissreply)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # the Dismiss button on a reply alert calls dismissReply
     if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact
     if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions

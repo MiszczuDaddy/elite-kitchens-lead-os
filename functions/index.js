@@ -208,6 +208,31 @@ function followUpMailer() {
   return { enabled, sender, replyTo: main || sender, fromName: MAIL_FROM_NAME.value().trim() || 'Elite Kitchens', gmail: followUpClient };
 }
 exports.sendFollowUpEmail = onCall({}, (req) => h.sendFollowUpEmail(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));
+// ---- The email inbox (10 Nov 2026, docs/EMAIL_INBOX.md): customers' replies come into their chat; "Reply by email" answers from the business mailbox. EMAIL_IN is the kill switch (off until switched on).
+// Reading uses its OWN read-only sign-in (gmail.readonly), approved separately in the Workspace admin console; sending never gets it.
+const EMAIL_IN = defineString('EMAIL_IN', { default: 'off' });
+const mailerBase = () => ({ main: MAIL_SENDER.value().trim(), serviceAccount: MAIL_SERVICE_ACCOUNT.value().trim(), testBase: process.env.FUNCTIONS_EMULATOR === 'true' ? process.env.MAIL_API_BASE : undefined });
+let replyClient = null, replyKey = null;
+function replyMailer() {                                                                       // sends AS the business mailbox (the address the customer wrote to), never the follow-up mailbox
+  const { main, serviceAccount, testBase } = mailerBase(), key = [main, serviceAccount, testBase].join('|');
+  const enabled = MAIL_SEND.value().trim().toLowerCase() === 'on' && !!main && (!!serviceAccount || !!testBase);
+  if (key !== replyKey) { replyClient = gmailLib.createGmailClient({ apiBase: testBase || undefined, tokens: testBase ? { get: async () => 'emulator-token', clear: () => {} } : gmailLib.delegatedTokenProvider({ serviceAccount, sender: main }) }); replyKey = key; }
+  return { enabled, sender: main, replyTo: main, fromName: MAIL_FROM_NAME.value().trim() || 'Elite Kitchens', gmail: replyClient };
+}
+let readerClient = null, readerKey = null;
+function inboxReader() {
+  const { main, serviceAccount, testBase } = mailerBase(), key = [main, serviceAccount, testBase].join('|');
+  const enabled = EMAIL_IN.value().trim().toLowerCase() === 'on' && !!main && (!!serviceAccount || !!testBase);
+  if (key !== readerKey) { readerClient = gmailLib.createGmailReader({ apiBase: testBase || undefined, tokens: testBase ? { get: async () => 'emulator-token', clear: () => {} } : gmailLib.delegatedTokenProvider({ serviceAccount, sender: main, scope: gmailLib.GMAIL_READ_SCOPE }) }); readerKey = key; }
+  return { enabled, mailbox: main, reader: readerClient };
+}
+exports.emailSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', timeoutSeconds: 180, retryCount: 0 }, async () => {
+  const inbox = inboxReader(); if (!inbox.enabled) return;
+  try { const r = await require('./lib/emailInbound').sweep({ db: getFirestore(), reader: inbox.reader, mailbox: inbox.mailbox }); console.log(JSON.stringify({ level: 'info', msg: 'email sweep', ...r })); }
+  catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'email sweep failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
+});
+exports.sendEmailReply = onCall({}, (req) => h.sendEmailReply(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: replyMailer() }));
+exports.checkEmail = onCall({ timeoutSeconds: 120 }, (req) => h.checkEmail(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, inbox: inboxReader() }));
 exports.sendQuoteFollowUp = onCall({}, (req) => h.sendQuoteFollowUp(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));          // the same mailbox as the lead follow-ups
 const deliveryDeps = () => {
   const db = getFirestore(), bucket = getStorage().bucket(bucketName());

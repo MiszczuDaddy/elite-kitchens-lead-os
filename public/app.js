@@ -106,6 +106,7 @@ function dayLabel(d) {
 const PLACEHOLDERS = { '[image]': '📷 Photo', '[document]': '📄 Document', '[video]': '🎥 Video', '[audio]': '🎤 Voice message', '[sticker]': 'Sticker' };
 const TYPE_ICON = { image: '📷 ', video: '🎥 ', audio: '🎤 ', document: '📄 ' };
 function previewOf(c) {
+  if (c.lastEmailAt && ms(c.lastEmailAt) >= ms(c.updatedAt)) return '\u2709 ' + (c.lastEmailDir === 'out' ? 'You: ' : '') + (c.lastEmailSubject || 'Email');          // the newest thing in this chat is an email
   let t = String(c.lastMessage || '').replace(/^\[template:[^\]]*\]\s*/, '');
   if (PLACEHOLDERS[t]) t = PLACEHOLDERS[t];
   else if (TYPE_ICON[c.lastMessageType]) t = TYPE_ICON[c.lastMessageType] + t;
@@ -239,6 +240,7 @@ function stopListening() {
   if (window.PROJ) PROJ.stop();
   if (window.ASSIST) ASSIST.stop();
   if (window.REPLY) REPLY.stop();
+  if (window.EMAILBOX) EMAILBOX.onSelect(null);
   if (window.CONSULT) CONSULT.stop();
   if (window.ATTN) ATTN.stop();
   if (window.TODAY) TODAY.stop();
@@ -522,6 +524,7 @@ function closeConversation(fromHash) {
   S.selected = null; S.msgs = []; S.pending = [];
   syncExtra();
   if (window.REPLY) REPLY.onSelect(null);
+  if (window.EMAILBOX) EMAILBOX.onSelect(null);
   watchContact(null);
   $('thread').hidden = true; $('thread-empty').hidden = false;
   if (!fromHash && location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -549,6 +552,7 @@ function openConversation(id, fromHash) {
   S.selected = id; S.msgs = []; S.pending = []; banner('');
   syncExtra();                                                      // an older customer (not among the 300 newest) is watched on their own while open
   if (window.REPLY) REPLY.onSelect(id);                // Phase 9 R1: the Suggest reply button follows the open chat
+  if (window.EMAILBOX) EMAILBOX.onSelect(id);            // the chat's emails and the Email button follow the open chat
   $('text').value = messageDrafts.get(id) || ''; $('text').style.height = 'auto';
   if (!fromHash) history.replaceState(null, '', '#c/' + id);
   $('thread').hidden = false; $('thread-empty').hidden = true;
@@ -722,6 +726,14 @@ const timeOf = (m) => { const t = m.createdAt && m.createdAt.toDate ? m.createdA
 
 function buildBubble(m) {
   const out = m.direction === 'out';
+  if (m.type === 'email') {                                   // an email in the chat (docs/EMAIL_INBOX.md): its subject, what they wrote, and a link to Gmail when there are attachments
+    const e = el('div', 'm em ' + (out ? 'out' : 'in'));
+    e.append(el('div', 'em-head', (out ? '\u2709 You emailed' : '\u2709 Email') + ' \u00b7 ' + (m.subject || '(no subject)')));
+    if (m.body) e.append(el('div', 'body', m.body));
+    if (m.attachments && m.attachments.length) { const a = el('a', 'em-att', '\ud83d\udcce ' + m.attachments.map((x) => x.name).join(', ') + ' (open in Gmail)'); a.href = 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(m.gmailId || ''); a.target = '_blank'; a.rel = 'noopener'; e.append(a); }
+    const meta = el('div', 'meta'); meta.append(el('span', null, timeOf(m) + (out && m.confirmed === false ? ' \u00b7 not confirmed: check Gmail' : ''))); e.append(meta);
+    return e;
+  }
   const b = el('div', 'm ' + (out ? 'out' : 'in') + (m.status === 'failed' ? ' failed' : ''));
   const type = m.type || 'text';
   const isMedia = !!MEDIA_LABEL[type];
@@ -759,7 +771,9 @@ function renderMessages() {
   const box = $('msgs');
   if (cacheFor !== S.selected) { nodeCache.clear(); cacheFor = S.selected; }
   const atBottom = S.firstRender || box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  const all = [...S.msgs, ...S.pending.map((p) => ({ direction: 'out', type: p.attach ? p.kind : 'text', body: p.body, at: p.at, state: 'sending', attach: p.attach, progress: p.progress }))];
+  const mails = window.EMAILBOX ? EMAILBOX.items(S.selected) : [], at = (m) => ms(m.createdAt) || m.at || 0;
+  const base = mails.length ? [...S.msgs, ...mails].sort((a, b) => at(a) - at(b)) : S.msgs;          // emails are shown in time order with the WhatsApp messages
+  const all = [...base, ...S.pending.map((p) => ({ direction: 'out', type: p.attach ? p.kind : 'text', body: p.body, at: p.at, state: 'sending', attach: p.attach, progress: p.progress }))];
   const nodes = [], seen = new Set();
   let lastDay = null;
   for (const m of all) {
@@ -1203,6 +1217,7 @@ function watchContact(id) {
   setDetailsOpen(pref ? pref === 'open' && window.innerWidth >= 900 : window.innerWidth >= 1280, false);
   S.unsubContact = db.collection('contacts').doc(id).onSnapshot((d) => {
     S.contact = d.exists ? d.data() : {};
+    if (window.EMAILBOX) EMAILBOX.sync();                         // the Email button needs their address
     renderDetails(false);
   }, () => {});
 }

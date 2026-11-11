@@ -5,7 +5,7 @@ const STAGES = ['inbox', 'booked', 'quoted', 'won', 'closed'];
 const stageOf = (c) => (c && STAGES.includes(c.inboxStatus) ? c.inboxStatus : 'inbox');
 function neverWrote(c) {
   if (!c || stageOf(c) !== 'inbox') return false;
-  if (c.lastInboundAt || c.lastMessageDirection === 'in') return false;
+  if (c.lastInboundAt || c.emailInboundAt || c.lastMessageDirection === 'in') return false;          // a reply by email counts as writing to us
   if (typeof c.unreadCount === 'number' && c.unreadCount > 0) return false;
   if (c.doNotContact && c.doNotContact.on === true) return false;
   return true;

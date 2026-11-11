@@ -23,7 +23,7 @@ const when = (t) => new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin'
 function refusal(c, quoteId, sentMs, nowMs) {
   if (c.doNotContact && c.doNotContact.on === true) return 'They asked not to be contacted.';
   if (nowMs - sentMs < MIN_AGE_MS) return 'This quote was sent less than 3 days ago. Give them a little longer.';
-  if (ms(c.lastInboundAt) > sentMs) return 'They have written to you since the quote was sent, so check the chat and reply there.';
+  if (ms(c.lastInboundAt) > sentMs || ms(c.emailInboundAt) > sentMs) return 'They have written to you since the quote was sent, so check the chat and reply there.';          // by WhatsApp or by email
   const m = (c.quoteMail && c.quoteMail[quoteId]) || null;
   if (m && ms(m.sendingUntil) > nowMs) return 'An email is being sent about this quote right now.';
   if (m && Number(m.basis) === sentMs && ms(m.at)) return `You already emailed them about this quote on ${when(ms(m.at))}.`;
