@@ -1358,3 +1358,5 @@ div.td-open { cursor: default; }
 @media (max-width: 899px) { .m.em { max-width: 92%; } }
 .m.em .em-reply { margin-top: 8px; min-height: 36px; }
 @media (max-width: 899px) { .m.em .em-reply { min-height: 44px; width: 100%; } }
+
+.email-hd { flex: none; } .email-hd.em-hot { color: var(--accent); }

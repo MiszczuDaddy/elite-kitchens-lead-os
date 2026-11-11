@@ -15,7 +15,8 @@ window.EMAILBOX = (() => {
   function sync() {
     const b = $('email-btn'); if (!b) return;
     b.hidden = !(E.id && E.id === S.selected && (E.items.length || addressOf()));
-    b.textContent = lastIn() ? 'Reply by email' : 'Email';
+    const label = lastIn() ? 'Reply by email' : 'Email ' + nameOf();
+    b.setAttribute('aria-label', label); b.title = label; b.classList.toggle('em-hot', !!lastIn());          // an envelope in the chat header: it stands out once they have emailed
   }
   function stop() { if (E.unsub) { E.unsub(); E.unsub = null; } }
   function onSelect(id) {

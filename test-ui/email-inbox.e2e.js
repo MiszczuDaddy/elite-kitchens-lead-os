@@ -73,7 +73,7 @@ const gmail = http.createServer((req, res) => {
   await page.evaluate((id) => { location.hash = '#c/' + id; }, P.eve); await page.waitForSelector('#thread:not([hidden])'); await sleep(500);
   assert.equal(await page.locator('#email-btn').isVisible(), false, 'no address and no email: no Email button');
   await page.evaluate((id) => { location.hash = '#c/' + id; }, P.anna); await page.waitForSelector('#thread:not([hidden])'); await page.waitForSelector('#email-btn', { state: 'visible' });
-  ok('the Email button shows on a chat that has an address, and not on one with none');
+  ok('the envelope in the chat header shows on a chat that has an address, and not on one with none');
 
   // ------------------------------------------------------------------ 2. check for new email (the five-minute check, started by hand): replies come into the chats
   await page.click('#email-btn'); await page.waitForSelector('#em-dlg[open]');
@@ -87,7 +87,7 @@ const gmail = http.createServer((req, res) => {
   assert.equal(await bubble.locator('.em-att').getAttribute('href'), 'https://mail.google.com/mail/u/0/#all/a1b2c3d4'); assert.match(await bubble.locator('.em-att').innerText(), /our-kitchen-wall\.pdf \(open in Gmail\)/);
   assert.equal((await db.collection('conversations/' + P.eve + '/emails').get()).size, 0); assert.doesNotMatch(JSON.stringify((await db.collection('conversations').get()).docs.map((d) => d.data())), /SECRET supplier|supplier\.example/, 'nothing about the stranger is kept');
   ok('"Check for new email" brings the customer\'s reply into their chat with the history cut off and a Gmail link for the attachment; the stranger\'s email is looked at by sender only and never kept');
-  assert.equal(await bubble.locator('.em-reply').innerText(), 'Reply by email', 'a clear button right under their email'); assert.equal((await page.innerText('#email-btn')).trim(), 'Reply by email', 'and the button by the message box says so too');
+  assert.equal(await bubble.locator('.em-reply').innerText(), 'Reply by email', 'a clear button right under their email'); assert.equal(await page.getAttribute('#email-btn', 'aria-label'), 'Reply by email', 'and the envelope in the chat header says so too');
   await page.screenshot({ path: path.join(SHOTS, 'email-thread.png') });
 
   // ------------------------------------------------------------------ 3. the Inbox row, unread, and "they wrote to us"
@@ -114,9 +114,10 @@ const gmail = http.createServer((req, res) => {
   // ------------------------------------------------------------------ 5. phone
   const m = await open({ width: 375, height: 812 }, true);
   await m.page.evaluate((id) => { location.hash = '#c/' + id; }, P.anna); await m.page.waitForSelector('#msgs .m.em'); await m.page.waitForSelector('#email-btn', { state: 'visible' });
-  const box = await m.page.locator('#email-btn').boundingBox(); assert.ok(box && box.x >= 0 && box.x + box.width <= 375 && box.height >= 40, 'the Email button is on screen and big enough: ' + JSON.stringify(box));
+  const box = await m.page.locator('#email-btn').boundingBox(); assert.ok(box && box.x >= 0 && box.x + box.width <= 375 && box.height >= 36 && box.y < 120, 'the envelope is in the header, on screen and big enough: ' + JSON.stringify(box));
+  assert.equal(await m.page.locator('#composer .reply-btn:not([hidden])').count(), 0, 'no extra button above the message box'); assert.equal(await m.page.locator('#composer #email-btn').count(), 0);
   assert.equal(await m.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scrolling'); await m.page.screenshot({ path: path.join(SHOTS, 'email-phone.png') });
-  ok('on a 375px phone the emails fit in the chat and the Email button is on screen');
+  ok('on a 375px phone the emails fit in the chat, the envelope is in the header and the message box area has no extra button');
 
   assert.deepEqual(errors, [], 'no page errors: ' + errors.join(' | ')); ok('no console or page errors');
   await browser.close(); web.close(); gmail.close();

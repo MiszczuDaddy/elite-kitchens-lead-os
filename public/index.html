@@ -316,6 +316,7 @@
             <option value="inbox">New lead</option><option value="booked">Booked</option><option value="quoted">Quoted</option><option value="won">Won</option><option value="closed">Closed</option>
           </select>
         </label>
+        <button id="email-btn" type="button" class="icon-btn email-hd" hidden aria-label="Email" title="Write to them by email, in the same conversation as their emails"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6.5L20.5 7"/></svg></button>
         <button id="details-btn" class="btn btn-ghost btn-sm head-details" aria-expanded="false" aria-controls="details">Details</button>
       </header>
       <div id="status-feedback" class="status-feedback" role="status" hidden></div>
@@ -342,7 +343,6 @@
         </button>
         <input id="file" type="file" hidden accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
         <button id="recep-btn" type="button" class="btn btn-ghost btn-sm reply-btn recep-btn" hidden>Receptionist: off</button>
-        <button id="email-btn" type="button" class="btn btn-ghost btn-sm reply-btn email-btn" hidden title="Write to them by email, in the same conversation as their emails">Email</button>
         <button id="reply-btn" type="button" class="btn btn-ghost btn-sm reply-btn" hidden title="An AI draft you can edit. Nothing is sent until you press Send.">Suggest reply</button>
         <textarea id="text" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>
         <button id="send" class="btn btn-primary" type="submit">Send</button>
