@@ -87,6 +87,7 @@ const gmail = http.createServer((req, res) => {
   assert.equal(await bubble.locator('.em-att').getAttribute('href'), 'https://mail.google.com/mail/u/0/#all/a1b2c3d4'); assert.match(await bubble.locator('.em-att').innerText(), /our-kitchen-wall\.pdf \(open in Gmail\)/);
   assert.equal((await db.collection('conversations/' + P.eve + '/emails').get()).size, 0); assert.doesNotMatch(JSON.stringify((await db.collection('conversations').get()).docs.map((d) => d.data())), /SECRET supplier|supplier\.example/, 'nothing about the stranger is kept');
   ok('"Check for new email" brings the customer\'s reply into their chat with the history cut off and a Gmail link for the attachment; the stranger\'s email is looked at by sender only and never kept');
+  assert.equal(await bubble.locator('.em-reply').innerText(), 'Reply by email', 'a clear button right under their email'); assert.equal((await page.innerText('#email-btn')).trim(), 'Reply by email', 'and the button by the message box says so too');
   await page.screenshot({ path: path.join(SHOTS, 'email-thread.png') });
 
   // ------------------------------------------------------------------ 3. the Inbox row, unread, and "they wrote to us"
@@ -98,14 +99,14 @@ const gmail = http.createServer((req, res) => {
   ok('the Inbox row shows "✉ subject" and an unread badge, and a lead who replied by email leaves the No reply tab');
 
   // ------------------------------------------------------------------ 4. reply by email: the same conversation, as the business mailbox
-  await page.evaluate((id) => { location.hash = '#c/' + id; }, P.anna); await page.waitForSelector('#msgs .m.em.in'); await page.click('#email-btn'); await page.waitForSelector('#em-dlg[open]');
+  await page.evaluate((id) => { location.hash = '#c/' + id; }, P.anna); await page.waitForSelector('#msgs .m.em.in'); await page.click('#msgs .m.em.in .em-reply'); await page.waitForSelector('#em-dlg[open]');
   assert.equal(await page.inputValue('#em-subject'), 'Re: Your Elite Kitchens quote EK-0112'); assert.match(await page.innerText('#em-last'), /Their last email · Re: Your Elite Kitchens quote EK-0112[\s\S]*the price is fine/);
   await page.fill('#em-body', 'Hi Anna, of course. I will ring you tomorrow at 5.30pm.'); await page.screenshot({ path: path.join(SHOTS, 'email-reply-dialog.png') });
   await page.click('#em-send'); await page.waitForFunction(() => !document.getElementById('em-dlg').open); await page.waitForSelector('#msgs .m.em.out');
   assert.equal(log.sent.length, 1); const s = log.sent[0]; assert.equal(s.threadId, 'th_a1b2c3d4'); assert.match(s.raw, /^To: anna@example\.com/m); assert.match(s.raw, /^From: "Elite Kitchens" <info@test\.dev>/m); assert.match(s.raw, /^In-Reply-To: <a1b2c3d4@mail\.example>/m); assert.match(s.raw, /^Subject: Re: Your Elite Kitchens quote EK-0112/m);
   assert.match(await page.locator('#msgs .m.em.out').innerText(), /You emailed · Re: Your Elite Kitchens quote EK-0112[\s\S]*ring you tomorrow at 5\.30pm/); assert.match(await page.locator('#toast').innerText(), /Email sent to Anna Apple/);
   ok('Email opens a reply to the address they wrote from, in their Gmail conversation, as the business mailbox; the sent reply is kept in the thread');
-  await page.click('#email-btn'); await page.waitForSelector('#em-dlg[open]'); await page.fill('#em-body', 'Hi Anna, of course. I will ring you tomorrow at 5.30pm.'); await page.click('#em-send');
+  assert.equal(await page.locator('#msgs .m.em.in .em-reply').count(), 0, 'once answered, the button under their email goes'); await page.click('#email-btn'); await page.waitForSelector('#em-dlg[open]'); await page.fill('#em-body', 'Hi Anna, of course. I will ring you tomorrow at 5.30pm.'); await page.click('#em-send');
   await page.waitForFunction(() => /was just sent/.test(document.getElementById('em-err').textContent)); assert.equal(log.sent.length, 1, 'the same words twice in a row are refused'); await page.click('#em-cancel');
   ok('the very same email sent again straight away is refused (a double press cannot send twice)');
   await ctx.close();

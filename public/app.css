@@ -1356,3 +1356,5 @@ div.td-open { cursor: default; }
 .em-last-h { font-size: 12px; font-weight: 650; color: var(--muted); margin-bottom: 3px; overflow-wrap: anywhere; } .em-last-b { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 #em-dlg .dlg-actions .em-check { margin-right: auto; }
 @media (max-width: 899px) { .m.em { max-width: 92%; } }
+.m.em .em-reply { margin-top: 8px; min-height: 36px; }
+@media (max-width: 899px) { .m.em .em-reply { min-height: 44px; width: 100%; } }

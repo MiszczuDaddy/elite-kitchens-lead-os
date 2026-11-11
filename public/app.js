@@ -732,6 +732,7 @@ function buildBubble(m) {
     if (m.body) e.append(el('div', 'body', m.body));
     if (m.attachments && m.attachments.length) { const a = el('a', 'em-att', '\ud83d\udcce ' + m.attachments.map((x) => x.name).join(', ') + ' (open in Gmail)'); a.href = 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(m.gmailId || ''); a.target = '_blank'; a.rel = 'noopener'; e.append(a); }
     const meta = el('div', 'meta'); meta.append(el('span', null, timeOf(m) + (out && m.confirmed === false ? ' \u00b7 not confirmed: check Gmail' : ''))); e.append(meta);
+    if (m.replyable && window.EMAILBOX) { const r = el('button', 'btn btn-primary btn-sm em-reply', 'Reply by email'); r.type = 'button'; r.onclick = () => EMAILBOX.open(); e.append(r); }          // under the newest email from them that has not been answered
     return e;
   }
   const b = el('div', 'm ' + (out ? 'out' : 'in') + (m.status === 'failed' ? ' failed' : ''));
@@ -765,7 +766,7 @@ function patchTick(b, m) {
 // Keep each message's element between renders (a playing voice note must not restart when a new message arrives).
 const nodeCache = new Map();
 let cacheFor = null;
-const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename], m.quote && [m.quote.ref, m.quote.version], m.auto === true]); };
+const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename], m.quote && [m.quote.ref, m.quote.version], m.auto === true, m.replyable === true]); };
 
 function renderMessages() {
   const box = $('msgs');

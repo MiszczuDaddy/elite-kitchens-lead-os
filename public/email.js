@@ -12,7 +12,11 @@ window.EMAILBOX = (() => {
   const nameOf = () => { const c = typeof selectedConv === 'function' ? selectedConv() : null; return (c && c.name) || (S.contact && S.contact.name) || 'the customer'; };
 
   // The Email button shows when there is somewhere to send to: an address on their record, or an email from them.
-  function sync() { const b = $('email-btn'); if (b) b.hidden = !(E.id && E.id === S.selected && (E.items.length || addressOf())); }
+  function sync() {
+    const b = $('email-btn'); if (!b) return;
+    b.hidden = !(E.id && E.id === S.selected && (E.items.length || addressOf()));
+    b.textContent = lastIn() ? 'Reply by email' : 'Email';
+  }
   function stop() { if (E.unsub) { E.unsub(); E.unsub = null; } }
   function onSelect(id) {
     stop(); E.id = id || null; E.items = []; sync();
@@ -20,6 +24,10 @@ window.EMAILBOX = (() => {
     E.unsub = db.collection('conversations').doc(id).collection('emails').orderBy('createdAt').limitToLast(100).onSnapshot((snap) => {
       if (E.id !== id) return;
       E.items = snap.docs.map((d) => ({ id: d.id, type: 'email', ...d.data() }));
+      for (let i = E.items.length - 1; i >= 0; i--) {                       // the newest email from them, if we have not answered it yet, gets a "Reply by email" button under it
+        if (E.items[i].direction === 'in') { E.items[i].replyable = true; break; }
+        if (E.items[i].direction === 'out') break;
+      }
       sync(); if (S.selected === id) renderMessages();
     }, () => {});
   }
