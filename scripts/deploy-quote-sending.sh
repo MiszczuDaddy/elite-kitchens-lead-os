@@ -43,6 +43,7 @@
 #   ./scripts/deploy-quote-sending.sh followup   Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md): TWO new staff functions (sendFollowUpEmail for leads, sendQuoteFollowUp for quotes nobody answered). Needs email sending on (it is for the quotes). Run it BEFORE "live". Sends nothing by itself.
 #   ./scripts/deploy-quote-sending.sh assistantmail  The Assistant's "email all leads who never replied" (docs/FOLLOW_UP_EMAIL.md): aiChat, aiStatus, setAiSettings, aiDecide (all exist already). OFF until the owner ticks it in Assistant > Settings; then it emails only after you press Approve. Run it after "followup" and BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh emailin [on|off]  The email inbox (docs/EMAIL_INBOX.md): customers' email replies come into their chat and "Email" answers them. No argument: deploys emailSweep, sendEmailReply, checkEmail (and the 3 functions that now count an email reply as "they wrote"); reading stays OFF. "on" switches reading ON after the one Google Workspace approval (gmail.readonly); "off" is the kill switch. Run it BEFORE "live".
+#   ./scripts/deploy-quote-sending.sh nighthold [on|off]  No welcome message at night (docs/WELCOME_QUIET_HOURS.md): a lead that arrives between midnight and 07:00 Irish time gets its welcome at 07:00. No argument: deploys leadIntake and the new welcomeSweep; "off" turns the wait off, "on" back on. Nothing is sent by this stage.
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -92,6 +93,7 @@ FOLLOWUP_FUNCS="sendFollowUpEmail sendQuoteFollowUp"                            
 ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                                                          # the Assistant's follow-up emails: it prepares them (aiChat), shows the switch (aiStatus, setAiSettings) and sends after Approve (aiDecide); all exist already
 EMAILIN_NEW="emailSweep sendEmailReply checkEmail"                                                                      # the email inbox: the five-minute sweep (scheduled), the reply and the manual check (staff only, made public: each checks the signed-in staff account itself)
 EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"                                                      # + the three that decide who "never wrote": an email reply now counts
+NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                              # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
 BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
@@ -105,7 +107,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,56p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,57p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -491,6 +493,31 @@ case "${1:-}" in
         done
         check_reachable "sendEmailReply checkEmail"
         echo "Done. Next: $0 live (the screen), then the Google Workspace approval, then $0 emailin on. To go back: firebase functions:delete $EMAILIN_NEW --region $REGION --project $PROJECT"
+        ;;
+      *) usage ;;
+    esac
+    ;;
+  nighthold)
+    [ -f functions/lib/welcomeHold.js ] || { echo "This checkout has no night-hold code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    case "${2:-}" in
+      on|off)
+        [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
+        check_routing leadIntake
+        [ -n "$(serving_revision welcomesweep)" ] || { echo "Deploy the night-hold backend first: $0 nighthold"; exit 1; }
+        if [ "$2" = off ]; then echo "A lead that arrives at night will get its welcome message AT ONCE again (any hour)."; else echo "A lead that arrives between midnight and 07:00 Irish time will get its welcome message at 07:00."; fi
+        confirm "Switch the night wait $2 for the live project?"
+        setting "$ENVF" WELCOME_NIGHT_HOLD "$([ "$2" = on ] && echo on || echo off)"
+        install; save_revisions leadIntake; deploy_functions leadIntake
+        echo "The night wait is $2. $0 nighthold $([ "$2" = on ] && echo off || echo on) undoes it."
+        ;;
+      "")
+        check_settings; check_access; check_routing $NIGHTHOLD_FUNCS
+        echo "Functions: $NIGHTHOLD_FUNCS"
+        echo "leadIntake (the live endpoint Make calls; it exists already) now holds a NEW lead's welcome message when the lead arrives between midnight and 07:00 Irish time; welcomeSweep (new, every 5 minutes) sends the held ones from 07:00, after checking the customer has not written, been contacted or been deleted. The team is still alerted at once. Nothing is sent to any customer by this stage. NOT deployed: the WhatsApp webhook."
+        confirm "Deploy the night hold to the LIVE project?"
+        install; save_revisions leadIntake; deploy_functions $NIGHTHOLD_FUNCS
+        check_reachable "leadIntake"
+        echo "Done. Switch it off at any time: $0 nighthold off. To go back fully: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:leadIntake --project $PROJECT and firebase functions:delete welcomeSweep --region $REGION --project $PROJECT"
         ;;
       *) usage ;;
     esac

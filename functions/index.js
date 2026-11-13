@@ -68,12 +68,14 @@ exports.sendReply = onCall({ secrets: SECRETS }, (req) => h.sendReply(req.auth, 
 // Needs only the WhatsApp token and its own key (least privilege), and its own secret LEADS_API_KEY (comma-separated keys allow rotation).
 const LEADS_API_KEY = defineSecret('LEADS_API_KEY');
 const leads = require('./lib/leads');
+// 14 Nov 2026: a lead that arrives between midnight and 07:00 Irish time gets its welcome message at 07:00, not at 01:46 (docs/WELCOME_QUIET_HOURS.md). WELCOME_NIGHT_HOLD=off turns the wait off.
+const WELCOME_NIGHT_HOLD = defineString('WELCOME_NIGHT_HOLD', { default: 'on' });
 exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeoutSeconds: 60 }, async (req, res) => {
   try {
     const c = { phoneId: PHONE_ID.value(), template: TEMPLATE.value(), lang: LANG.value(), version: API_VERSION.value(),
       apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), apiKeys: LEADS_API_KEY.value(), onOutcome: waOutcome };
     const r = await leads.handleLeadRequest({ method: req.method, headers: req.headers, rawBody: req.rawBody, body: req.body },
-      { db: getFirestore(), wa: createClient(c), cfg: c, push: pushHook(), health: healthHook() });
+      { db: getFirestore(), wa: createClient(c), cfg: c, push: pushHook(), health: healthHook(), holdAtNight: WELCOME_NIGHT_HOLD.value().trim().toLowerCase() !== 'off' });
     Object.entries(r.headers || {}).forEach(([k, v]) => res.set(k, v));
     res.status(r.status).json(r.body);
   } catch (e) {   // unexpected: 500 makes Make retry, which is safe because processing is idempotent. No lead data in the log.
@@ -89,6 +91,11 @@ exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeout
 // Google Calendar is off unless GCAL_SYNC=on and both ids are set (functions/.env.<project>). Authentication is keyless: the
 // runtime identity gets a short-lived token for GCAL_SERVICE_ACCOUNT, the only account the calendar is shared with for editing.
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+exports.welcomeSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', secrets: [ACCESS_TOKEN], timeoutSeconds: 180, retryCount: 0 }, async () => {       // sends the welcomes held back overnight, from 07:00
+  const c = { phoneId: PHONE_ID.value(), template: TEMPLATE.value(), lang: LANG.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome };
+  try { const r = await require('./lib/welcomeHold').sweep({ db: getFirestore(), wa: createClient(c), cfg: c }); if (r.due || r.stuck) console.log(JSON.stringify({ level: 'info', msg: 'welcome sweep', ...r })); }
+  catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'welcome sweep failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
+});
 const gcalLib = require('./lib/gcal');
 const calendarSync = require('./lib/calendarSync');
 const GCAL_SYNC = defineString('GCAL_SYNC', { default: 'off' });

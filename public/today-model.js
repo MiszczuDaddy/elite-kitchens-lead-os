@@ -256,6 +256,7 @@
       if (w && ['failed', 'unknown'].includes(w) && !(ms(rec.humanAt) > at) && !(ms(c.lastInboundAt) > at)) { status = 'failed'; text = w === 'failed' ? 'The welcome message was refused' : 'Could not confirm the welcome message went'; }
       else if (dnc(c)) { status = 'needs'; text = 'Asked not to be contacted'; }
       else if (rs.length) { status = 'needs'; text = rs[0].text; }
+      else if (w === 'held') { status = 'ai'; text = 'The welcome message goes out at 07:00'; }          // arrived in quiet hours (midnight to 07:00): nobody is messaged at night
       else if (!c.lastMessageDirection && !ms(c.lastInboundAt)) { status = 'needs'; text = 'No message has been sent to them yet'; }
       else if (receptionistHandling(c)) { status = 'ai'; text = 'The receptionist is handling it'; }
       else { status = 'contacted'; text = w === 'blocked' ? 'Welcome message held back' : ms(rec.humanAt) > at || c.lastMessageDirection === 'out' ? 'Contacted' : 'Welcome message sent'; }

@@ -14,6 +14,7 @@ const Asap = require('./asap');                 // the ⭐ "wants it as soon as 
 const CB = require('./contactBlock');          // Phase 10: "do not contact"
 const LeadIssues = require('./leadIssues');    // Phase 10: rejected leads shown in "Needs attention"
 const health = require('./health');
+const QH = require('./quietHours');            // quiet hours: a lead that arrives at night gets its welcome in the morning
 const W = require('./welcome');                // which welcome wording goes out (the owner's choice)
 
 const MAX_BODY = 32 * 1024;
@@ -108,7 +109,41 @@ function classify(e) {
 // alert. A request with no key at all is someone else knocking (scanners): it is refused as before and alerts nobody.
 const offeredKey = (headers) => { const h = String(headers['authorization'] || '').trim(); return (h.toLowerCase().startsWith('bearer ') ? h.slice(7).trim() : h).length > 0 || String(headers['x-api-key'] || '').trim().length > 0; };
 
-async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: hh }) {
+// The welcome message itself, shared by the lead intake (at once) and the morning sweep (lib/welcomeHold.js, for a lead that arrived in quiet hours). Returns { welcome } (what happened, to be recorded on the
+// lead) or { retry: true } (Meta refused it for rate limiting, so it was definitely not sent and may be tried again). The owner's choice of wording is lib/welcome.js; a personal welcome that WhatsApp refuses
+// outright was definitely not sent, so the standard one goes instead, once.
+async function deliverWelcome({ db, wa, cfg }, { ref, id, phone, firstName, formId, now }) {
+  await ref.update({ welcome: { state: 'sending', at: now } });
+  let key = await W.chosen(db), fellBack = false;
+  const send = (k) => wa.sendTemplate(phone, firstName, { name: W.nameOf(k, cfg.template) });
+  try {
+    let wamid;
+    try { wamid = await send(key); }
+    catch (e) {
+      if (key === 'standard' || classify(e) !== 'permanent') throw e;
+      log('error', 'personal welcome refused: the standard welcome is sent instead', { leadId: id, err: redact(e && e.message) });
+      key = 'standard'; fellBack = true;
+      wamid = await send(key);
+    }
+    await store.storeOutbound(db, phone, { wamid, type: 'template', body: W.bodyOf(key, cfg.template, firstName) });
+    await releaseWelcome(db, phone, now);
+    return { welcome: { state: 'sent', wamid, at: now, template: key, ...(fellBack ? { fellBack: true } : {}) } };
+  } catch (e) {
+    const kind = classify(e), err = redact(e && e.message);
+    log('error', 'welcome template failed', { leadId: id, kind, err });
+    if (kind === 'retryable') {   // Meta refused it for rate limiting: definitely not sent, so it may safely be tried again
+      await ref.update({ welcome: { state: 'pending', lastError: err }, claimedAt: 0 });
+      await releaseWelcome(db, phone);
+      return { retry: true };
+    }
+    await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${W.nameOf(key, cfg.template)}]`,
+      error: kind === 'unknown' ? 'Welcome message status unknown (no answer from WhatsApp). Check WhatsApp, then send it manually if needed.' : err });
+    await releaseWelcome(db, phone);
+    return { welcome: { state: kind === 'unknown' ? 'unknown' : 'failed', error: err, at: now } };
+  }
+}
+
+async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: hh, holdAtNight }) {
   const now = clock ? clock() : Date.now();
   if (req.method !== 'POST') return respond(405, { ok: false, error: 'POST only' });
   if (!authorized(req.headers || {}, cfg.apiKeys)) {
@@ -171,7 +206,7 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: h
   };
   const w = claim.welcome || { state: 'pending' };
 
-  if (w.state === 'sent' || w.state === 'skipped_recent' || w.state === 'blocked') return finish(w);
+  if (w.state === 'sent' || w.state === 'skipped_recent' || w.state === 'blocked' || w.state === 'held') return finish(w);
   if (w.state === 'sending') {      // an earlier attempt died mid-send: the template may or may not have gone out. Flag it, never resend.
     await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: 'Welcome message status unknown (interrupted while sending). Check WhatsApp, then send it manually if needed.' });
     await releaseWelcome(db, phone);
@@ -182,6 +217,9 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: h
     await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${cfg.template}]`, error: 'Welcome message not sent: WhatsApp kept failing. Please send it manually.' });
     return finish({ state: 'failed', error: 'too many retries', at: now });
   }
+  // A lead that arrives in quiet hours (midnight to 07:00 Irish time) is saved and alerted as always, but its welcome message waits until 07:00: nobody should be messaged at 01:46. The morning sweep
+  // (lib/welcomeHold.js) sends it, after checking the customer has not been in touch or been contacted meanwhile.
+  if (holdAtNight && QH.isQuiet(now)) return finish({ state: 'held', at: now, sendAfter: QH.openAtMs(now), phone, firstName: lead.firstName });
   const cw = await claimWelcome(db, phone, now);
   if (cw === 'recent') return finish({ state: 'skipped_recent', at: now });
   if (cw === 'blocked') {          // Phase 10: "do not contact": no welcome, and the chat says why (a person decides whether the new form means they want to hear from us)
@@ -189,35 +227,9 @@ async function handleLeadRequest(req, { db, wa, cfg, now: clock, push, health: h
     return finish({ state: 'blocked', at: now });
   }
 
-  await ref.update({ welcome: { state: 'sending', at: now } });
-  // The owner's choice of wording (lib/welcome.js). A personal welcome that WhatsApp refuses outright was definitely not sent, so the standard one goes instead, once.
-  let key = await W.chosen(db), fellBack = false;
-  const send = (k) => wa.sendTemplate(phone, lead.firstName, { name: W.nameOf(k, cfg.template) });
-  try {
-    let wamid;
-    try { wamid = await send(key); }
-    catch (e) {
-      if (key === 'standard' || classify(e) !== 'permanent') throw e;
-      log('error', 'personal welcome refused: the standard welcome is sent instead', { leadId: id, err: redact(e && e.message) });
-      key = 'standard'; fellBack = true;
-      wamid = await send(key);
-    }
-    await store.storeOutbound(db, phone, { wamid, type: 'template', body: W.bodyOf(key, cfg.template, lead.firstName) });
-    await releaseWelcome(db, phone, now);
-    return finish({ state: 'sent', wamid, at: now, template: key, ...(fellBack ? { fellBack: true } : {}) });
-  } catch (e) {
-    const kind = classify(e), err = redact(e && e.message);
-    log('error', 'welcome template failed', { leadId: id, kind, err });
-    if (kind === 'retryable') {   // Meta refused it for rate limiting: definitely not sent, so Make may safely retry
-      await ref.update({ welcome: { state: 'pending', lastError: err }, claimedAt: 0 });
-      await releaseWelcome(db, phone);
-      return respond(503, { ok: false, status: 'retry', leadId: id }, { 'Retry-After': '30' });
-    }
-    await store.storeFailedOutbound(db, phone, { type: 'template', body: `[template: ${W.nameOf(key, cfg.template)}]`,
-      error: kind === 'unknown' ? 'Welcome message status unknown (no answer from WhatsApp). Check WhatsApp, then send it manually if needed.' : err });
-    await releaseWelcome(db, phone);
-    return finish({ state: kind === 'unknown' ? 'unknown' : 'failed', error: err, at: now });
-  }
+  const r = await deliverWelcome({ db, wa, cfg }, { ref, id, phone, firstName: lead.firstName, formId: lead.formId, now });
+  if (r.retry) return respond(503, { ok: false, status: 'retry', leadId: id }, { 'Retry-After': '30' });          // Meta refused it for rate limiting: definitely not sent, so Make may safely retry
+  return finish(r.welcome);
 }
 
-module.exports = { handleLeadRequest, authorized, upsertLeadCustomer, MAX_BODY, BREAKER_PER_HOUR, COOLDOWN_MS };
+module.exports = { handleLeadRequest, deliverWelcome, claimWelcome, releaseWelcome, DNC_WELCOME, classify, authorized, upsertLeadCustomer, MAX_BODY, BREAKER_PER_HOUR, COOLDOWN_MS };

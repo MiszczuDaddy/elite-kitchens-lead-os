@@ -36,7 +36,7 @@ const healthReport = (deps, kind, detail) => (deps.health ? Promise.resolve(deps
 const healthResolve = (deps, kinds) => (deps.health ? Promise.resolve(deps.health.resolve(kinds)).catch(() => null) : null);
 
 const TZ = 'Europe/Dublin';
-const WAIT_MS = 30000, DEBOUNCE_MS = 30000, MIN_DELAY_MS = 5000, MAX_DELAY_MS = 90000, DAILY_CAP = 6, QUIET_UNTIL_HOUR = 7, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
+const WAIT_MS = 30000, DEBOUNCE_MS = 30000, MIN_DELAY_MS = 5000, MAX_DELAY_MS = 90000, DAILY_CAP = 6, MAX_CHATS = 150, MAX_TRIES = 3, WINDOW_MS = 24 * 3600e3;
 // The backup check handles several chats at once, oldest waiting first, and stops starting new ones after a while (its function has a time limit): what is left waits for the next check.
 const SWEEP_CONCURRENCY = 4, SWEEP_DEADLINE_MS = 120000, RATE_RETRY_MS = 20000, RATE_RETRIES = 3;
 const ACTOR = { kind: 'system', id: 'receptionist' };
@@ -55,8 +55,7 @@ function courtesyOnly(messages) {
 }
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : typeof t === 'number' ? t : 0);
 const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...extra }));
-const hourOf = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(new Date(t)));
-const quiet = (t) => hourOf(t) < QUIET_UNTIL_HOUR;
+const { hourOf, isQuiet: quiet, QUIET_UNTIL_HOUR } = require('./quietHours');          // the one quiet-hours rule, shared with the welcome message of a new lead
 // Our own welcome template (sent by the lead intake) is not "a person took over".
 // Either wording counts (the standard welcome, or the owner's personal one: lib/welcome.js).
 const isWelcome = (x, welcomeTemplate) => x.type === 'template' && !!welcomeTemplate && W.isWelcomeBody(x.body, welcomeTemplate);
