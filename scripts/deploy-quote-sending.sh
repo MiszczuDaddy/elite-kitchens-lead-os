@@ -44,6 +44,7 @@
 #   ./scripts/deploy-quote-sending.sh assistantmail  The Assistant's "email all leads who never replied" (docs/FOLLOW_UP_EMAIL.md): aiChat, aiStatus, setAiSettings, aiDecide (all exist already). OFF until the owner ticks it in Assistant > Settings; then it emails only after you press Approve. Run it after "followup" and BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh emailin [on|off]  The email inbox (docs/EMAIL_INBOX.md): customers' email replies come into their chat and "Email" answers them. No argument: deploys emailSweep, sendEmailReply, checkEmail (and the 3 functions that now count an email reply as "they wrote"); reading stays OFF. "on" switches reading ON after the one Google Workspace approval (gmail.readonly); "off" is the kill switch. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh nighthold [on|off]  No welcome message at night (docs/WELCOME_QUIET_HOURS.md): a lead that arrives between midnight and 07:00 Irish time gets its welcome at 07:00. No argument: deploys leadIntake and the new welcomeSweep; "off" turns the wait off, "on" back on. Nothing is sent by this stage.
+#   ./scripts/deploy-quote-sending.sh pdfshare   Share PDF (docs/QUOTES.md, "Share PDF"): ONE function that already exists (quotePdfUrl) now also hands the phone the PDF file itself. Nothing is sent to anyone. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -93,7 +94,8 @@ FOLLOWUP_FUNCS="sendFollowUpEmail sendQuoteFollowUp"                            
 ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                                                          # the Assistant's follow-up emails: it prepares them (aiChat), shows the switch (aiStatus, setAiSettings) and sends after Approve (aiDecide); all exist already
 EMAILIN_NEW="emailSweep sendEmailReply checkEmail"                                                                      # the email inbox: the five-minute sweep (scheduled), the reply and the manual check (staff only, made public: each checks the signed-in staff account itself)
 EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"                                                      # + the three that decide who "never wrote": an email reply now counts
-NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                              # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
+PDFSHARE_FUNCS="quotePdfUrl"                                                                                           # Share PDF: the existing PDF link function can also return the file itself (the screen's Share button asks for it)
+NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                             # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
 BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
@@ -107,7 +109,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,57p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,58p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -521,6 +523,17 @@ case "${1:-}" in
         ;;
       *) usage ;;
     esac
+    ;;
+  pdfshare)
+    grep -q "SHARE_MAX" functions/lib/quotes.js || { echo "This checkout has no Share PDF code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision quotepdfurl)" ] || { echo "The quote functions are not deployed yet: run $0 backend first."; exit 1; }
+    check_settings; check_access; check_routing $PDFSHARE_FUNCS
+    echo "Functions: $PDFSHARE_FUNCS (exists already; no new function, nothing made public). It keeps answering exactly as before unless the screen asks for the file."
+    echo "After this, run $0 live: Sent versions get a Share button, and the Send box a Share PDF button, which open the phone's share sheet with the PDF named EliteKitchens-EK-0110-v1.pdf."
+    confirm "Deploy Share PDF (quotePdfUrl) to the LIVE project?"
+    install; save_revisions $PDFSHARE_FUNCS; deploy_functions $PDFSHARE_FUNCS
+    check_reachable "$PDFSHARE_FUNCS"
+    echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:quotePdfUrl --project $PROJECT (the screen's Share button then says it could not get the file; everything else is unaffected)."
     ;;
   asap)
     [ -f functions/lib/asap.js ] || { echo "This checkout has no asap code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }

@@ -24,6 +24,7 @@ const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TEXT = { notes: 2000, reason: 300 };
 const VALUE_MAX = 1000000;                     // the pipeline value's own limit (handlers.js QUOTE_MAX)
 const PDF_MAX = 25 * 1024 * 1024;
+const SHARE_MAX = 6 * 1024 * 1024;                     // the largest PDF returned inside a callable's answer for "Share PDF" (base64 adds a third; the answer limit is 32 MB)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const BUSINESS = { tradingName: 100, signatureName: 60, phone: 40, email: 200, web: 200, address: 300, vatNumber: 40 };
 
@@ -646,7 +647,7 @@ async function setNotes({ db }, actor, data, { nowMs = Date.now() } = {}) {
 
 // A 10-minute link to the stored PDF of a sent version. The bucket itself is closed to browsers.
 async function pdfLink({ db, bucket }, actor, data, { signedUrl }) {
-  onlyKeys(data, ['id', 'version', 'download']);
+  onlyKeys(data, ['id', 'version', 'download', 'bytes']);
   const ref = quoteRef(db, data.id);
   if (!Number.isInteger(data.version) || data.version < 1) throw bad('Missing version.');
   const [snap, vSnap] = await Promise.all([ref.get(), versionRef(ref, data.version).get()]);
@@ -661,8 +662,12 @@ async function pdfLink({ db, bucket }, actor, data, { signedUrl }) {
     console.error(JSON.stringify({ level: 'error', msg: 'stored quote pdf does not match its record', quote: ref.id, version: data.version }));
     throw refused('The stored PDF does not match its record, so it is not offered. Please tell support.');
   }
-  const url = await signedUrl(bucket, pdf.path, { filename: `EliteKitchens-${q.ref}-v${data.version}.pdf`, mime: 'application/pdf', download: flag(data.download, 'Download') });
-  return { url, filename: `EliteKitchens-${q.ref}-v${data.version}.pdf`, size: pdf.size };
+  const filename = `EliteKitchens-${q.ref}-v${data.version}.pdf`;
+  // "Share PDF" (13 Nov 2026): the phone's share sheet needs the FILE, named properly, and the bucket has no CORS rules, so the page cannot fetch the link above itself. With bytes:true the verified file
+  // comes back inside the answer (base64) when it is small enough; a larger one still gets the link, and the page falls back to opening it.
+  const wantBytes = flag(data.bytes, 'Bytes');
+  const url = await signedUrl(bucket, pdf.path, { filename, mime: 'application/pdf', download: flag(data.download, 'Download') });
+  return { url, filename, size: pdf.size, ...(wantBytes && stored.length <= SHARE_MAX ? { base64: stored.toString('base64') } : {}) };
 }
 
 // Small helpers for the delivery module (quoteDelivery.js), which keeps its own records but must validate, order and word things

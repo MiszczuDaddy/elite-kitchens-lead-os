@@ -791,6 +791,7 @@
     <div id="qsend-res-err" class="dlg-err" role="alert"></div>
     <div class="dlg-actions qsend-res-actions">
       <a id="qsend-res-download" class="btn btn-ghost" href="#" download hidden>Download PDF</a>
+      <button type="button" id="qsend-res-share" class="btn btn-ghost" hidden>Share PDF</button>
       <button type="button" id="qsend-res-manual" class="btn btn-ghost" hidden>I sent it myself: mark as sent</button>
       <button type="button" id="qsend-res-cancel" class="btn btn-ghost" hidden>Cancel this send</button>
       <button type="button" id="qsend-res-close" class="btn btn-primary">Close</button>
@@ -800,8 +801,10 @@
     <h2>Quote sent</h2>
     <p id="qsend-done-text" class="hint"></p>
     <p class="hint">Send the PDF to the customer: download it, or open an email draft and attach it. Elite OS keeps this exact file with the quote.</p>
+    <div id="qsend-done-err" class="dlg-err" role="alert"></div>
     <div class="dlg-actions">
       <a id="qsend-download" class="btn btn-ghost" href="#" download>Download PDF</a>
+      <button type="button" id="qsend-share" class="btn btn-ghost" hidden>Share PDF</button>
       <button type="button" id="qsend-email" class="btn btn-ghost">Email draft</button>
       <button type="button" id="qsend-close" class="btn btn-primary">Done</button>
     </div>

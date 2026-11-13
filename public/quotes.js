@@ -521,7 +521,9 @@ window.QUOTES = (() => {
         const links = el('span', 'qv-ver-links');
         const b = el('button', 'linkbtn', 'PDF'); b.type = 'button'; b.onclick = () => openPdf(v.n, b);
         const s = el('button', 'linkbtn', 'Send…'); s.type = 'button'; s.dataset.version = String(v.n); s.title = `Send v${v.n} to the customer again, by WhatsApp or email`; s.onclick = () => openSend('resend', v.n);   // audit 14
-        links.append(s, b); r.append(links);
+        links.append(s);
+        if (canShareFiles()) { const sh = el('button', 'linkbtn', 'Share'); sh.type = 'button'; sh.dataset.share = String(v.n); sh.title = `Share the v${v.n} PDF (WhatsApp, Mail…) with its proper file name`; sh.onclick = () => sharePdf(v.n, sh); links.append(sh); }
+        links.append(b); r.append(links);
       }
       nodes.push(r);
       // How this version reached the customer, channel by channel (a failed attempt is hidden once the same channel has since delivered).
@@ -601,6 +603,35 @@ window.QUOTES = (() => {
     btn.disabled = true;
     try { const r = (await call('quotePdfUrl')({ id: Q.quote.id, version: n })).data; window.open(r.url, '_blank', 'noopener'); }
     catch (err) { note(errText(err), 'err'); }
+    finally { btn.disabled = false; }
+  }
+  // "Share PDF" (13 Nov 2026): the phone's own share sheet with the quote attached as a real file called EliteKitchens-EK-0110-v1.pdf. (Opening the PDF in the browser and sharing from ITS viewer hands WhatsApp
+  // a random-looking name, because the viewer only has a temporary link.) The file comes from quotePdfUrl with bytes:true, because the storage bucket cannot be fetched from the page directly.
+  const sharedPdf = { key: null, file: null };                    // the last file fetched: a share must start from a tap, and a slow fetch can use that tap up, so a second tap shares at once
+  function canShareFiles() {
+    try { return typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && navigator.canShare({ files: [new File(['%PDF-'], 'a.pdf', { type: 'application/pdf' })] }); } catch (e) { return false; }
+  }
+  function pdfFileFrom(b64, name) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new File([u], name, { type: 'application/pdf' }); }
+  function saveFile(file) { const url = URL.createObjectURL(file), a = document.createElement('a'); a.href = url; a.download = file.name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+  // file0: a file already in hand (the one just made in the send dialog), so there is no wait before the share sheet. say(text, 'err'?): where to show a message (the toast, or the dialog's own line).
+  async function sharePdf(n, btn, file0, say = note) {
+    if (btn.disabled) return;
+    btn.disabled = true; say('');
+    try {
+      const key = `${Q.quote.id}|${n}`;
+      let file = file0 || (sharedPdf.key === key ? sharedPdf.file : null);
+      if (!file) {
+        const r = (await call('quotePdfUrl')({ id: Q.quote.id, version: n, bytes: true })).data;
+        if (!r.base64) { window.open(r.url, '_blank', 'noopener'); say('This PDF is too big to share from here, so it was opened instead. Save it, then share it from your files.', 'err'); return; }
+        file = pdfFileFrom(r.base64, r.filename); sharedPdf.key = key; sharedPdf.file = file;
+      }
+      try { await navigator.share({ files: [file], title: file.name }); }
+      catch (err) {
+        if (err && err.name === 'AbortError') return;                       // they closed the share sheet
+        if (err && err.name === 'NotAllowedError' && !file0) { say('The PDF is ready. Tap Share again to choose WhatsApp or Mail.'); return; }     // the fetch used up the tap: the file is kept, the next tap shares at once
+        saveFile(file); say(`Sharing is not available here, so the PDF was downloaded as ${file.name}.`);
+      }
+    } catch (err) { say(errText(err), 'err'); }
     finally { btn.disabled = false; }
   }
   // Generic confirmation (discard a draft revision, delete a never-sent quote).
@@ -1056,11 +1087,12 @@ window.QUOTES = (() => {
       const r = (await call('sendQuote')({ id: d.q.id, expectedRev, requestId: d.requestId, issueDate: d.issueDate, settingsRev: d.ctx.settings.rev,
         customer: d.ctx.customer, pdfUploadPath: path, pipeline })).data;
       Q.dirty = false;
-      d.blobUrl = URL.createObjectURL(blob); d.filename = filename; d.sentN = n; d.sheetSent = sheet;
+      d.blobUrl = URL.createObjectURL(blob); d.blob = blob; d.filename = filename; d.sentN = n; d.sheetSent = sheet;
       const who = d.ctx.customer.name || 'The customer';
       $('qsend-done-text').textContent = [`${d.q.ref} v${n} is marked sent, valid until ${fmtDate(r.validUntil)}.`,
         r.stage ? `${who} moved from ${stageName(r.stage.from)} to Quoted.` : `${who}'s stage did not change.`, r.value ? valueChange(r.value) : ''].filter(Boolean).join(' ');
       $('qsend-download').href = d.blobUrl; $('qsend-download').download = filename;
+      $('qsend-share').hidden = !canShareFiles(); $('qsend-done-err').textContent = '';
       $('qsend-email').disabled = false;
       $('qsend-form').hidden = true; $('qsend-done').hidden = false; $('qsend-download').focus();
     } catch (e2) {
@@ -1118,7 +1150,13 @@ window.QUOTES = (() => {
     const dl = $('qsend-res-download'); dl.hidden = !(d.blobUrl || prepared || d.mode === 'resend');
     if (d.blobUrl) { dl.href = d.blobUrl; dl.download = d.filename; dl.onclick = null; }
     else { dl.href = '#'; dl.removeAttribute('download'); dl.onclick = (ev) => { ev.preventDefault(); openPdf(d.sentN || d.n, dl); }; }
+    $('qsend-res-share').hidden = !canShareFiles() || dl.hidden;
   }
+  // Share PDF in the send dialog: the file just made is shared as it is (no wait); after a reload it is fetched from the stored copy.
+  const dlgSay = (id) => (text, kind) => { $(id).textContent = text || ''; $(id).classList.toggle('err', kind === 'err'); };
+  const dlgFile = (d) => (d.blob ? new File([d.blob], d.filename || `EliteKitchens-${d.q.ref}-v${d.sentN || d.n}.pdf`, { type: 'application/pdf' }) : null);
+  $('qsend-share').onclick = (ev) => { const d = sendDlg(); if (d) sharePdf(d.sentN || d.n, ev.currentTarget, dlgFile(d), dlgSay('qsend-done-err')); };
+  $('qsend-res-share').onclick = (ev) => { const d = sendDlg(); if (d) sharePdf(d.sentN || d.n, ev.currentTarget, dlgFile(d), dlgSay('qsend-res-err')); };
   $('qsend-res-close').onclick = () => closeSend(true);
   $('qsend-res-manual').onclick = () => markPreparedSent();
   $('qsend-res-cancel').onclick = () => cancelPreparedSend();
