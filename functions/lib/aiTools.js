@@ -103,8 +103,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { filter: { type: 'string', enum: PROJECT_FILTERS, description: 'active (default), carcasses (carcasses still to order), doors, ready (ready for installation), completed' }, customerId: { type: 'string' }, limit: { type: 'integer' } }, additionalProperties: false } },
   { name: 'get_project', description: 'One project in detail: the five steps, installation date and notes.',
     input_schema: { type: 'object', properties: { projectId: { type: 'string' } }, required: ['projectId'], additionalProperties: false } },
-  { name: 'find_leads', description: 'COUNT or LIST customers by what they did and by the answers they gave on the lead form (when they want to start, budget, best time to contact, Eircode). USE THIS for any question such as "how many of my leads that never replied want to start in 3-6 months", "who picked this budget" or "how many are asap". It does the counting itself: reply with its numbers, do not open customers one by one. neverReplied=true means New leads who never wrote to us (the No reply tab). The result includes `lines`: the finished list, one line per customer with name, phone number and best time to contact. When asked to list leads, reply with those lines as bullets, exactly as they are. Each customer also has bestTimeToContact, whenTheyWantToStart and budget (null when none given). Give question to get a breakdown of every answer given to it by the matching customers (the best way to answer "how many want X"), and answer (part of the wording, e.g. "3-6 months") to keep only customers who gave it. asap=true keeps the leads who want it as soon as possible (the star); createdFrom / createdTo (YYYY-MM-DD) keep customers who arrived in that period.',
-    input_schema: { type: 'object', properties: { neverReplied: { type: 'boolean', description: 'only New leads who never wrote to us' }, stage: { type: 'string', enum: Object.keys(STAGES), description: 'only customers in this pipeline stage' }, question: { type: 'string', enum: Object.keys(LEAD_QUESTIONS), description: 'which lead-form question to group or filter by' }, answer: { type: 'string', description: 'part of the answer to keep, e.g. "3-6 months"' }, asap: { type: 'boolean', description: 'true: only leads who want it as soon as possible' }, createdFrom: { type: 'string', description: 'YYYY-MM-DD: arrived on or after' }, createdTo: { type: 'string', description: 'YYYY-MM-DD: arrived on or before' }, limit: { type: 'integer', description: 'how many customers to list, up to 20' } }, additionalProperties: false } },
+  { name: 'find_leads', description: 'COUNT or LIST customers by what they did and by the answers they gave on the lead form (when they want to start, budget, best time to contact, Eircode). USE THIS for any question such as "how many of my leads that never replied want to start in 3-6 months", "who picked this budget" or "how many are asap". It does the counting itself: reply with its numbers, do not open customers one by one. neverReplied=true means New leads who never wrote to us (the No reply tab). The result includes `lines`: the finished list, one line per customer with name, phone number and best time to contact. When asked to list leads, reply with those lines as bullets, exactly as they are. Each customer also has bestTimeToContact, whenTheyWantToStart and budget (null when none given). Give question to get a breakdown of every answer given to it by the matching customers (the best way to answer "how many want X"), and answer (part of the wording, e.g. "3-6 months") to keep only customers who gave it. asap=true keeps the leads who want it as soon as possible (the star); emailed=true keeps only customers Elite OS has emailed (a follow-up email or an email reply), emailed=false only those it has not. Every result also has `emailSplit`: how many of the matching customers were emailed, how many were not, and how many of those have no email address (they cannot be emailed). USE IT for "how many of the leads that never replied were emailed, and who was not": call it once with neverReplied=true, give the counts from emailSplit, and for the list of who was not emailed call it again with neverReplied=true and emailed=false. createdFrom / createdTo (YYYY-MM-DD) keep customers who arrived in that period.',
+    input_schema: { type: 'object', properties: { neverReplied: { type: 'boolean', description: 'only New leads who never wrote to us' }, stage: { type: 'string', enum: Object.keys(STAGES), description: 'only customers in this pipeline stage' }, question: { type: 'string', enum: Object.keys(LEAD_QUESTIONS), description: 'which lead-form question to group or filter by' }, answer: { type: 'string', description: 'part of the answer to keep, e.g. "3-6 months"' }, asap: { type: 'boolean', description: 'true: only leads who want it as soon as possible' }, emailed: { type: 'boolean', description: 'true: only customers Elite OS has emailed; false: only those it has not emailed' }, createdFrom: { type: 'string', description: 'YYYY-MM-DD: arrived on or after' }, createdTo: { type: 'string', description: 'YYYY-MM-DD: arrived on or before' }, limit: { type: 'integer', description: 'how many customers to list, up to 20' } }, additionalProperties: false } },
   { name: 'find_messages', description: 'WHO sent or received what, in a period: counts and lists customers by the messages in their WhatsApp chats. USE THIS for questions such as "who sent us photos last week", "who sent a voice note today", "who wrote to us yesterday" or "who did we send a document to". It looks through every chat itself: reply with its list, do not open chats one by one. type: photo, video, document, voice, text or any. direction: in (from customers, the default), out (from us) or any. from / to are dates (YYYY-MM-DD, Irish days; default the last 7 days up to today). contains: a word in the message text or caption.',
     input_schema: { type: 'object', properties: { type: { type: 'string', enum: [...Object.keys(MESSAGE_KINDS), 'any'] }, direction: { type: 'string', enum: MESSAGE_DIRECTIONS }, from: { type: 'string', description: 'YYYY-MM-DD, first day (default 7 days ago)' }, to: { type: 'string', description: 'YYYY-MM-DD, last day (default today)' }, contains: { type: 'string', description: 'a word to look for in the text or caption' }, limit: { type: 'integer', description: 'how many customers to list, up to 20' } }, additionalProperties: false } },
   { name: 'pipeline_summary', description: 'How many customers are in each pipeline stage, and how many quotes are in each status.',
@@ -139,8 +139,17 @@ function factsOf({ id, conv, con, qs, ps, as }, nowMs) {
 // "+353 86 035 1551" from the digits of an Irish number; any other number is shown with a plus.
 const phoneText = (id) => { const d = String(id || '').replace(/\D/g, ''); return /^353\d{9}$/.test(d) ? `+353 ${d.slice(3, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : d ? '+' + d : ''; };
 // One lead as one finished line: name, number, best time to contact, and the other form answers they gave.
-const leadLine = (r) => [`**${r.name || 'No name'}**`, phoneText(r.id), 'Best time to contact: ' + (r.bestTimeToContact || 'not given'),
-  r.whenTheyWantToStart ? 'Start: ' + r.whenTheyWantToStart : '', r.budget ? 'Budget: ' + r.budget : '', r.wantsItAsap ? 'wants it ASAP' : ''].filter(Boolean).join(' · ');
+const leadLine = (r, withEmail) => [`**${r.name || 'No name'}**`, phoneText(r.id), 'Best time to contact: ' + (r.bestTimeToContact || 'not given'),
+  r.whenTheyWantToStart ? 'Start: ' + r.whenTheyWantToStart : '', r.budget ? 'Budget: ' + r.budget : '', r.wantsItAsap ? 'wants it ASAP' : '', withEmail ? r.emailNote : ''].filter(Boolean).join(' · ');
+// Has Elite OS emailed this customer? A follow-up email (conversations.followUp) or a reply sent by email (lastEmailDir 'out') counts; a quote's own email is a quote delivery and is not counted here.
+// hasEmail: whether there is an address to email at all, so "who wasn't" can say who CAN still be emailed.
+const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function emailFacts(c, k) {
+  const f = (c && c.followUp) || {}, count = Number(f.emailCount) || 0, sentOut = c && c.lastEmailDir === 'out';
+  const at = ms(f.emailAt) || (sentOut ? ms(c.lastEmailAt) : null), emailed = count > 0 || sentOut, hasEmail = EMAIL_OK.test(String((k && k.email) || '').trim());
+  const day = at ? new Intl.DateTimeFormat('en-IE', { timeZone: TZ, day: 'numeric', month: 'short' }).format(new Date(at)) : null;
+  return { emailed, emailedAt: when(at), hasEmail, emailNote: emailed ? 'Emailed' + (day ? ' ' + day : '') : hasEmail ? 'Not emailed' : 'No email address' };
+}
 const IMPL = {
   async search_customers({ db }, input) {
     const i = only(input, ['query', 'stage', 'limit']), limit = limitOf(i.limit, CAP.customers, 5);
@@ -233,24 +242,28 @@ const IMPL = {
   },
   // Counting by the lead form's answers, done here in code. The base set is chosen first (never replied / a stage), then the answers are read from each customer's Notes (the budget from its own field).
   async find_leads({ db, nowMs }, input) {
-    const i = only(input, ['neverReplied', 'stage', 'question', 'answer', 'asap', 'createdFrom', 'createdTo', 'limit']), limit = limitOf(i.limit, CAP.customers * 2, 10);
+    const i = only(input, ['neverReplied', 'stage', 'question', 'answer', 'asap', 'emailed', 'createdFrom', 'createdTo', 'limit']), limit = limitOf(i.limit, CAP.customers * 2, 10);
     if (i.asap != null && typeof i.asap !== 'boolean') throw new ToolError('asap must be true or false.');
+    if (i.emailed != null && typeof i.emailed !== 'boolean') throw new ToolError('emailed must be true or false.');
     const created = rangeOf(i, nowMs, 'createdFrom', 'createdTo', false);
     if (i.neverReplied != null && typeof i.neverReplied !== 'boolean') throw new ToolError('neverReplied must be true or false.');
     if (i.stage != null && !STAGES[i.stage]) throw new ToolError('Unknown stage.');
     if (i.question != null && !Object.prototype.hasOwnProperty.call(LEAD_QUESTIONS, i.question)) throw new ToolError('Unknown question. Choose one of: ' + Object.keys(LEAD_QUESTIONS).join(', ') + '.');
     if (i.answer != null && (typeof i.answer !== 'string' || !i.answer.trim() || i.answer.length > 80)) throw new ToolError('answer must be a short piece of text.');
-    if (!i.neverReplied && !i.stage && !i.question && i.answer == null && i.asap == null && !created) throw new ToolError('Give at least one of neverReplied, stage, question, answer, asap or createdFrom/createdTo.');
+    if (!i.neverReplied && !i.stage && !i.question && i.answer == null && i.asap == null && i.emailed == null && !created) throw new ToolError('Give at least one of neverReplied, stage, question, answer, asap, emailed or createdFrom/createdTo.');
     const [cs, ks] = await Promise.all([convs(db), db.collection('contacts').limit(CAP.scan).get()]);
     const contacts = new Map(ks.docs.map((d) => [d.id, d.data()])), re = i.question ? LEAD_QUESTIONS[i.question] : null;
-    const base = [];
+    const base = [], split = { emailed: 0, notEmailed: 0, notEmailedNoAddress: 0 };        // the email split is counted over everyone who passes the other filters, before `emailed` narrows the list
     for (const d of cs) {
       const c = d.data();
       if (i.stage && (c.inboxStatus || 'inbox') !== i.stage) continue;
       if (i.neverReplied && !(c.lastMessageDirection === 'out' && neverWrote(c))) continue;
       if (i.asap != null && (c.asap === true) !== i.asap) continue;
       if (created) { const at = ms(c.createdAt); if (at == null || at < created.fromMs || at >= created.toMs) continue; }
-      base.push({ id: d.id, c, k: contacts.get(d.id) || {} });
+      const k = contacts.get(d.id) || {}, e = emailFacts(c, k);
+      if (e.emailed) split.emailed++; else { split.notEmailed++; if (!e.hasEmail) split.notEmailedNoAddress++; }
+      if (i.emailed != null && e.emailed !== i.emailed) continue;
+      base.push({ id: d.id, c, k, e });
     }
     const answersOf = (k) => { const a = LeadAnswers.fromNotes(k.notes); if (k.budget && !a.some((x) => LEAD_QUESTIONS.budget.test(x.question))) a.push({ question: 'Budget', answer: LeadAnswers.pretty(k.budget) }); return a; };
     const rows = [], breakdown = {};                                         // keys are prefixed, so an answer such as "constructor" can never clash with an object's own properties
@@ -262,14 +275,16 @@ const IMPL = {
       // every listed lead always carries the answers people ask for (newest answer to each), so a list never has to be re-asked per person; `otherAnswers` are the rest of the form
       const pick = (q) => { const f = all.filter((x) => LEAD_QUESTIONS[q].test(x.question)); return f.length ? f[f.length - 1].answer : null; };
       rows.push({ at: ms(b.c.createdAt) || ms(b.c.updatedAt) || 0, row: { ...customerBrief(b.id, b.c, b.k), bestTimeToContact: pick('best_time_to_contact'), whenTheyWantToStart: pick('start_timing'), budget: pick('budget'), wantsItAsap: b.c.asap === true,
+        emailed: b.e.emailed, emailedAt: b.e.emailedAt, hasEmailAddress: b.e.hasEmail, emailNote: b.e.emailNote,
         otherAnswers: all.filter((x) => !Object.values(LEAD_QUESTIONS).some((r) => r.test(x.question))).slice(0, 6).map((x) => ({ question: text(x.question, 80), answer: x.answer })) } });
     }
     rows.sort((a, b) => b.at - a.at);
     const out = { note: NOTE + ' The answers are what the customer chose on the lead form.', matching: rows.length, outOf: base.length, scanned: cs.length, ...(cs.length >= CAP.scan ? { partial: 'Only the newest ' + CAP.scan + ' customers were read.' } : {}),
-      ...(i.neverReplied ? { rule: 'New leads whose last message was ours and who have never written to us, by the conversation record.' } : {}) };
+      ...(i.neverReplied ? { rule: 'New leads whose last message was ours and who have never written to us, by the conversation record.' } : {}),
+      emailSplit: { ...split, rule: 'emailed = Elite OS sent them a follow-up email or an email reply; notEmailed = it did not (notEmailedNoAddress of them have no email address on file, so they cannot be emailed). Counted over every customer matching the other filters.' } };
     if (re) out.breakdown = Object.values(breakdown).sort((a, b) => b.n - a.n).map((x) => ({ answer: x.answer, customers: x.n }));
     out.customers = rows.slice(0, limit).map((x) => x.row);
-    out.lines = out.customers.map(leadLine);                    // the finished list, one line per lead: the assistant prints these as they are, so every name has its number and time beside it
+    out.lines = out.customers.map((r) => leadLine(r, i.emailed != null));                  // the finished list, one line per lead: the assistant prints these as they are, so every name has its number and time beside it
     return out;
   },
   // Who sent or received which kind of message in a period, found by looking inside the chats that were active then (a chat whose newest customer message, or newest activity for messages from us, falls in the period).

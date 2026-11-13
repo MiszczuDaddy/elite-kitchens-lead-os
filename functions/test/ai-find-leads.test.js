@@ -157,3 +157,31 @@ test('THE FINISHED LIST: find_leads returns one ready line per lead, with the nu
   await ai.chat({ db, model, owners: 'thomas@example.com' }, { kind: 'staff', id: 'thomas@example.com' }, { message: 'hi' }, { uid: 'u1', nowMs: NOW });
   assert.match(model.calls[0].system, /reply with the `lines` it returns as bullets, exactly as they are/); assert.match(JSON.stringify(model.calls[0].tools), /The result includes `lines`/);
 });
+
+test('"HOW MANY OF THE LEADS THAT NEVER REPLIED WERE EMAILED, AND WHO WASN\'T": the split is counted by code, the list says who was not, and who has no address', async () => {
+  const at = ts(NOW - 2 * DAY);
+  await db.doc('contacts/' + A).update({ email: 'aoife@example.com' }); await db.doc('conversations/' + A).update({ followUp: { emailCount: 2, emailAt: at } });                  // a follow-up email from Elite OS
+  await db.doc('contacts/' + B).update({ email: 'brian@example.com' }); await db.doc('conversations/' + B).update({ lastEmailDir: 'out', lastEmailAt: at });                   // an email reply sent from the chat
+  await db.doc('contacts/' + C).update({ email: 'ciara@example.com' });                                                                                                       // has an address, never emailed
+  await db.doc('conversations/' + D).update({ followUp: { emailCount: 1, emailAt: at } });                                                                                   // emailed, but then wrote back: not a "never replied" lead
+  const all = await run({ neverReplied: true });
+  assert.deepEqual({ ...all.emailSplit, rule: undefined }, { emailed: 2, notEmailed: 3, notEmailedNoAddress: 2, rule: undefined }, 'A and B were emailed; C, F and H were not, and F and H have no address');
+  assert.match(all.emailSplit.rule, /cannot be emailed/);
+  const yes = await run({ neverReplied: true, emailed: true });
+  assert.deepEqual(yes.customers.map((x) => x.name).sort(), ['Aoife Anders', 'Brian Byrne']); assert.equal(yes.matching, 2);
+  assert.ok(yes.lines.some((l) => /^\*\*Aoife Anders\*\* .* · Emailed 7 Nov$/.test(l)), 'the line says when: ' + JSON.stringify(yes.lines)); assert.ok(yes.lines.some((l) => /^\*\*Brian Byrne\*\* .* · Emailed 7 Nov$/.test(l)));
+  assert.deepEqual(yes.emailSplit.emailed, 2, 'the split still covers everyone, not just the list');
+  const no = await run({ neverReplied: true, emailed: false });
+  assert.deepEqual(no.customers.map((x) => x.name).sort(), ['Ciara Casey', 'Fiona Fahey', 'Hana Hearn']); assert.equal(no.matching, 3);
+  const line = (n) => no.lines.find((l) => l.includes(n));
+  assert.match(line('Ciara'), / · Not emailed$/); assert.match(line('Fiona'), / · No email address$/); assert.match(line('Hana'), / · No email address$/);
+  assert.equal(no.customers.find((x) => x.name === 'Ciara Casey').hasEmailAddress, true); assert.equal(no.customers.find((x) => x.name === 'Fiona Fahey').hasEmailAddress, false);
+  assert.equal((await run({ neverReplied: true })).lines.every((l) => !/Emailed|Not emailed|No email address/.test(l)), true, 'without the filter the lines stay as they were');
+  assert.equal((await run({ emailed: true })).matching, 3, 'emailed alone is a filter too (A, B and D, whoever they are)');
+  await fails({ neverReplied: true, emailed: 'yes' }, /emailed must be true or false/);
+  await fails({}, /emailed/);
+  // the assistant is told about it
+  assert.match(JSON.stringify(T.TOOLS.find((t) => t.name === 'find_leads').input_schema), /"emailed":\{"type":"boolean"/);
+  assert.match(T.TOOLS.find((t) => t.name === 'find_leads').description, /emailSplit[\s\S]*emailed=false/);
+  assert.match(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'ai.js'), 'utf8'), /emailSplit counts and the emailed filter of find_leads; never say that email contact is not recorded/);
+});

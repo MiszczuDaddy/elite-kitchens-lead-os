@@ -27,6 +27,9 @@ On **Today**, a quote that was sent and never answered (5 days or more) now has 
 - It goes out from the same mailbox as the lead follow-ups (`FOLLOWUP_SENDER`, else the business mailbox), replies come to info@, and the record (`conversations/{phone}.quoteMail.{quoteId}`) is erased with the customer.
 - Needs one more function: `sendQuoteFollowUp` (deployed by the same `followup` stage).
 
+## Ask the Assistant: "how many were emailed, and who wasn't" (13 Nov 2026)
+The Assistant could not answer "how many people that never replied were contacted by email and who wasn't": `find_leads` had no way to see email contact, so it said it was not recorded. Now every `find_leads` result carries `emailSplit` (how many of the matching customers were emailed, how many were not, and how many of those have **no email address** and so cannot be emailed), and an `emailed` filter (`true`/`false`) lists them. "Emailed" means Elite OS sent them a follow-up email (`conversations.followUp`) or an email reply from their chat (`lastEmailDir: 'out'`); a quote's own email is a quote delivery and is not counted. With the filter, each list line ends with **Emailed 7 Nov**, **Not emailed** or **No email address**. Read-only, counted in code. Backend only: `./scripts/deploy-quote-sending.sh assistantmail` (redeploys `aiChat` and the other Assistant functions); no screen change. Test: `functions/test/ai-find-leads.test.js`.
+
 ## Putting it live
 1. `./scripts/deploy-quote-sending.sh followup` (two new functions, `sendFollowUpEmail` and `sendQuoteFollowUp`).
 2. `./scripts/deploy-quote-sending.sh assistantmail` (the Assistant: `aiChat`, `aiStatus`, `setAiSettings`, `aiDecide`; all exist already).
