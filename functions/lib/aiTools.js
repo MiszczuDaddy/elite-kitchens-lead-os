@@ -105,6 +105,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { projectId: { type: 'string' } }, required: ['projectId'], additionalProperties: false } },
   { name: 'find_leads', description: 'COUNT or LIST customers by what they did and by the answers they gave on the lead form (when they want to start, budget, best time to contact, Eircode). USE THIS for any question such as "how many of my leads that never replied want to start in 3-6 months", "who picked this budget" or "how many are asap". It does the counting itself: reply with its numbers, do not open customers one by one. neverReplied=true means New leads who never wrote to us (the No reply tab). The result includes `lines`: the finished list, one line per customer with name, phone number and best time to contact. When asked to list leads, reply with those lines as bullets, exactly as they are. Each customer also has bestTimeToContact, whenTheyWantToStart and budget (null when none given). Give question to get a breakdown of every answer given to it by the matching customers (the best way to answer "how many want X"), and answer (part of the wording, e.g. "3-6 months") to keep only customers who gave it. asap=true keeps the leads who want it as soon as possible (the star); emailed=true keeps only customers Elite OS has emailed (a follow-up email or an email reply), emailed=false only those it has not. Every result also has `emailSplit`: how many of the matching customers were emailed, how many were not, and how many of those have no email address (they cannot be emailed). USE IT for "how many of the leads that never replied were emailed, and who was not": call it once with neverReplied=true, give the counts from emailSplit, and for the list of who was not emailed call it again with neverReplied=true and emailed=false. createdFrom / createdTo (YYYY-MM-DD) keep customers who arrived in that period.',
     input_schema: { type: 'object', properties: { neverReplied: { type: 'boolean', description: 'only New leads who never wrote to us' }, stage: { type: 'string', enum: Object.keys(STAGES), description: 'only customers in this pipeline stage' }, question: { type: 'string', enum: Object.keys(LEAD_QUESTIONS), description: 'which lead-form question to group or filter by' }, answer: { type: 'string', description: 'part of the answer to keep, e.g. "3-6 months"' }, asap: { type: 'boolean', description: 'true: only leads who want it as soon as possible' }, emailed: { type: 'boolean', description: 'true: only customers Elite OS has emailed; false: only those it has not emailed' }, createdFrom: { type: 'string', description: 'YYYY-MM-DD: arrived on or after' }, createdTo: { type: 'string', description: 'YYYY-MM-DD: arrived on or before' }, limit: { type: 'integer', description: 'how many customers to list, up to 20' } }, additionalProperties: false } },
+  { name: 'find_quotes', description: 'COUNT or LIST the quotes that were SENT to customers: who got which quote and when, how many days ago, what it is worth, and whether they have answered or been followed up. USE THIS for "which leads got a quote", "who has not responded to their quote for 2 weeks", "how much have I quoted" or "which quotes still need a follow-up". It does the counting itself: reply with its numbers and its `lines`, one finished line per quote with the name, number, quote, value, date and what happened since: print them as bullets exactly as they are (oldest first). status defaults to sent (waiting for an answer). olderThanDays=14 keeps quotes sent at least two weeks ago; unanswered=true keeps customers who have NOT written to us since the quote was sent (by WhatsApp or email); followedUp=true or false keeps the quotes Elite OS has, or has not, sent a follow-up email about; sentFrom / sentTo (YYYY-MM-DD) keep quotes sent in that period. `counts` says how many of the matching quotes are ready for the follow-up email (two weeks old, no answer, not yet emailed, has an email address, not asked to be left alone). To send those emails use propose_quote_followup_emails (when it is offered): it only prepares them, a person approves.',
+    input_schema: { type: 'object', properties: { status: { type: 'string', enum: QUOTE_STATUSES, description: 'default sent' }, olderThanDays: { type: 'integer', description: 'only quotes sent at least this many days ago (0 to 365)' }, unanswered: { type: 'boolean', description: 'true: the customer has not written since the quote was sent' }, followedUp: { type: 'boolean', description: 'true: a follow-up email was sent about this quote; false: not yet' }, sentFrom: { type: 'string', description: 'YYYY-MM-DD: sent on or after' }, sentTo: { type: 'string', description: 'YYYY-MM-DD: sent on or before' }, limit: { type: 'integer', description: 'how many quotes to list, up to 20' } }, additionalProperties: false } },
   { name: 'find_messages', description: 'WHO sent or received what, in a period: counts and lists customers by the messages in their WhatsApp chats. USE THIS for questions such as "who sent us photos last week", "who sent a voice note today", "who wrote to us yesterday" or "who did we send a document to". It looks through every chat itself: reply with its list, do not open chats one by one. type: photo, video, document, voice, text or any. direction: in (from customers, the default), out (from us) or any. from / to are dates (YYYY-MM-DD, Irish days; default the last 7 days up to today). contains: a word in the message text or caption.',
     input_schema: { type: 'object', properties: { type: { type: 'string', enum: [...Object.keys(MESSAGE_KINDS), 'any'] }, direction: { type: 'string', enum: MESSAGE_DIRECTIONS }, from: { type: 'string', description: 'YYYY-MM-DD, first day (default 7 days ago)' }, to: { type: 'string', description: 'YYYY-MM-DD, last day (default today)' }, contains: { type: 'string', description: 'a word to look for in the text or caption' }, limit: { type: 'integer', description: 'how many customers to list, up to 20' } }, additionalProperties: false } },
   { name: 'pipeline_summary', description: 'How many customers are in each pipeline stage, and how many quotes are in each status.',
@@ -150,6 +152,8 @@ function emailFacts(c, k) {
   const day = at ? new Intl.DateTimeFormat('en-IE', { timeZone: TZ, day: 'numeric', month: 'short' }).format(new Date(at)) : null;
   return { emailed, emailedAt: when(at), hasEmail, emailNote: emailed ? 'Emailed' + (day ? ' ' + day : '') : hasEmail ? 'Not emailed' : 'No email address' };
 }
+// One sent quote as one finished line: who, the quote, its value, when it went and what has happened since.
+const quoteLine = (r) => [`**${r.customer || 'No name'}**`, phoneText(r.customerId), r.ref, r.value != null ? '€' + Math.round(r.value).toLocaleString('en-IE') : '', `sent ${r.sentDay} (${r.daysAgo} day${r.daysAgo === 1 ? '' : 's'} ago)`, r.state].filter(Boolean).join(' · ');
 const IMPL = {
   async search_customers({ db }, input) {
     const i = only(input, ['query', 'stage', 'limit']), limit = limitOf(i.limit, CAP.customers, 5);
@@ -285,6 +289,47 @@ const IMPL = {
     if (re) out.breakdown = Object.values(breakdown).sort((a, b) => b.n - a.n).map((x) => ({ answer: x.answer, customers: x.n }));
     out.customers = rows.slice(0, limit).map((x) => x.row);
     out.lines = out.customers.map((r) => leadLine(r, i.emailed != null));                  // the finished list, one line per lead: the assistant prints these as they are, so every name has its number and time beside it
+    return out;
+  },
+  // The quotes that were sent: who got which one, when, and what happened since (an answer, a follow-up email), counted here in code. The follow-up rules are the server's (lib/quoteFollowUp.js), restated read-only:
+  // a customer who wrote (WhatsApp or email) after THIS sending has answered; a follow-up email counts only for this sending of the quote (a re-sent quote starts again).
+  async find_quotes({ db, nowMs }, input) {
+    const i = only(input, ['status', 'olderThanDays', 'unanswered', 'followedUp', 'sentFrom', 'sentTo', 'limit']), limit = limitOf(i.limit, CAP.customers * 2, 10), status = i.status == null ? 'sent' : i.status;
+    if (!QUOTE_STATUSES.includes(status)) throw new ToolError('Unknown quote status.');
+    if (i.olderThanDays != null && (!Number.isInteger(i.olderThanDays) || i.olderThanDays < 0 || i.olderThanDays > 365)) throw new ToolError('olderThanDays must be a whole number of days from 0 to 365.');
+    for (const k of ['unanswered', 'followedUp']) if (i[k] != null && typeof i[k] !== 'boolean') throw new ToolError(k + ' must be true or false.');
+    const period = rangeOf(i, nowMs, 'sentFrom', 'sentTo', false), DAYMS = 24 * 3600e3, READY_DAYS = 14;
+    const qs = (await db.collection('quotes').where('status', '==', status).limit(CAP.scan).get()).docs;
+    const phones = [...new Set(qs.map((d) => String(d.data().phone || '')).filter((p) => /^\d{9,15}$/.test(p)))], chats = {}, cons = {};          // plain objects keyed 'p' + phone: the file must have no way to write, not even a Map.set
+    for (let n = 0; n < phones.length; n += 200) {
+      const part = phones.slice(n, n + 200), [cd, kd] = await Promise.all([db.getAll(...part.map((p) => db.doc('conversations/' + p))), db.getAll(...part.map((p) => db.doc('contacts/' + p)))]);
+      for (const d of cd) if (d.exists) chats['p' + d.id] = d.data(); for (const d of kd) if (d.exists) cons['p' + d.id] = d.data();
+    }
+    const rows = [], counts = { readyForFollowUp: 0, noAnswerSinceSent: 0, followedUpAlready: 0, noEmailAddress: 0 };
+    let totalValue = 0;
+    for (const d of qs) {
+      const q = d.data(), sent = ms(q.sentAt), phone = String(q.phone || '');
+      if (!sent) continue;                                                                     // never sent (a draft): nothing to follow up
+      if (i.olderThanDays != null && nowMs - sent < i.olderThanDays * DAYMS) continue;
+      if (period && (sent < period.fromMs || sent >= period.toMs)) continue;
+      const c = chats['p' + phone] || {}, k = cons['p' + phone] || {}, qm = (c.quoteMail && c.quoteMail[d.id]) || null;
+      const wrote = (ms(c.lastInboundAt) || 0) > sent || (ms(c.emailInboundAt) || 0) > sent, followedAt = qm && Number(qm.basis) === sent ? ms(qm.at) : null, followed = !!followedAt;
+      const hasEmail = EMAIL_OK.test(String(k.email || '').trim()), dnc = !!(c.doNotContact && c.doNotContact.on === true), age = Math.floor((nowMs - sent) / DAYMS);
+      if (i.unanswered != null && !wrote !== i.unanswered) continue;
+      if (i.followedUp != null && followed !== i.followedUp) continue;
+      const ready = status === 'sent' && nowMs - sent >= READY_DAYS * DAYMS && !wrote && !followed && hasEmail && !dnc;
+      const state = wrote ? 'They have written back since' : followed ? 'Follow-up emailed ' + S.dayLabel(S.dayOf(followedAt)) : dnc ? 'Asked not to be contacted' : !hasEmail ? 'No email address' : 'Not followed up';
+      const value = q.summary && q.summary.dearest ? euro(Number(q.summary.dearest.incVat)) : null;
+      if (ready) counts.readyForFollowUp++; if (!wrote) counts.noAnswerSinceSent++; if (followed) counts.followedUpAlready++; if (!hasEmail) counts.noEmailAddress++;
+      if (value != null) totalValue += value;
+      rows.push({ sent, row: { quoteId: d.id, ref: text(q.ref, 20), customer: text((k && k.name) || q.customerName || c.name, 80), customerId: phone, value, sentAt: when(q.sentAt), sentDay: S.dayLabel(S.dayOf(sent)), daysAgo: age,
+        answeredSinceSent: wrote, followUpEmailedAt: followed ? when(followedAt) : null, hasEmailAddress: hasEmail, askedNotToBeContacted: dnc, readyForFollowUp: ready, state } });
+    }
+    rows.sort((a, b) => a.sent - b.sent);                                                       // oldest first: the most overdue at the top
+    const out = { note: NOTE + ' Prices are VAT-inclusive euro as stored.', status, matching: rows.length, totalValue: Math.round(totalValue), counts: { ...counts, rule: 'readyForFollowUp = still Sent, at least 14 days old, no reply since it was sent, not yet followed up for this sending, has an email address, not asked to be left alone.' },
+      ...(qs.length >= CAP.scan ? { partial: 'Only the newest ' + CAP.scan + ' quotes were read.' } : {}) };
+    out.quotes = rows.slice(0, limit).map((x) => x.row);
+    out.lines = out.quotes.map(quoteLine);
     return out;
   },
   // Who sent or received which kind of message in a period, found by looking inside the chats that were active then (a chat whose newest customer message, or newest activity for messages from us, falls in the period).

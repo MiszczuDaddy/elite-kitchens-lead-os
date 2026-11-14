@@ -148,7 +148,7 @@ test('"THEY WROTE" COUNTS EMAIL: a lead who replied by email is not "never repli
   const lead = { inboxStatus: 'inbox', lastMessageDirection: 'out', unreadCount: 0 };
   for (const c of [lead, { ...lead, emailInboundAt: ts(NOW) }, { ...lead, emailInboundAt: null }]) assert.equal(NoReplyRule.neverWrote(c), NoReply.neverWrote(c), 'the server and the screen agree');
   assert.equal(NoReplyRule.neverWrote(lead), true); assert.equal(NoReplyRule.neverWrote({ ...lead, emailInboundAt: ts(NOW) }), false);
-  const sent = NOW - 8 * DAY;
+  const sent = NOW - 16 * DAY;                                                                  // two weeks is the follow-up minimum
   assert.match(QF.refusal({ emailInboundAt: ts(sent + 3600e3) }, 'q_x', sent, NOW), /written to you since the quote was sent/); assert.equal(QF.refusal({ emailInboundAt: ts(sent - 3600e3) }, 'q_x', sent, NOW), null, 'an email from before the quote does not stop it');
 });
 

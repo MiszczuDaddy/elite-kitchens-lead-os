@@ -32,18 +32,19 @@ const bodyOf = (raw) => raw.split('\r\n\r\n').slice(1).join('\r\n\r\n').replace(
 (async () => {
   initializeApp({ projectId: 'demo-leados' }); const db = getFirestore(), T = (ms) => Timestamp.fromMillis(ms), now = Date.now(), DAY = 86400000;
   const token = await getAuth().createCustomToken((await getAuth().createUser({ email: 'staff@test.dev', emailVerified: true })).uid);
-  const P = { maeve: '353871160001', noel: '353871160002', fiona: '353871160003' }, id = (c) => 'q_' + c.repeat(24);
-  const Q = { maeve: id('a'), noel: id('b'), fiona: id('c') };
+  const P = { maeve: '353871160001', noel: '353871160002', fiona: '353871160003', una: '353871160004' }, id = (c) => 'q_' + c.repeat(24);
+  const Q = { maeve: id('a'), noel: id('b'), fiona: id('c'), una: id('d') };
   const customer = async (phone, name, email, convOver = {}) => {
     await db.doc('contacts/' + phone).set({ phone, name, ...(email ? { email } : {}), createdAt: T(now - 40 * DAY) });
     await db.doc('conversations/' + phone).set({ phone, name, inboxStatus: 'quoted', unreadCount: 0, lastMessage: 'Hi, as discussed, your quotation', lastMessageDirection: 'out', lastInboundAt: T(now - 20 * DAY), createdAt: T(now - 40 * DAY), updatedAt: T(now - 9 * DAY), ...convOver });
   };
   const quote = (qid, phone, name, ref, days) => db.doc('quotes/' + qid).set({ phone, ref, status: 'sent', customerName: name, sentAt: T(now - days * DAY), validUntil: '2099-01-01', summary: { dearest: { incVat: 12500 } } });
-  const sentAtMaeve = now - 9 * DAY;
-  await customer(P.maeve, 'Maeve Doyle', 'maeve@example.com'); await quote(Q.maeve, P.maeve, 'Maeve Doyle', 'EK-0201', 9);
-  await customer(P.noel, 'Noel Nolan', null); await quote(Q.noel, P.noel, 'Noel Nolan', 'EK-0202', 12);
-  await customer(P.fiona, 'Fiona Fahey', 'fiona@example.com', { quoteMail: { [Q.fiona]: { at: T(now - 2 * DAY), by: 'thomas@example.com', basis: now - 10 * DAY, confirmed: true } } }); await quote(Q.fiona, P.fiona, 'Fiona Fahey', 'EK-0203', 10);
-  await db.doc('quotes/' + Q.fiona).update({ sentAt: T(now - 10 * DAY) });
+  const sentAtMaeve = now - 16 * DAY;
+  await customer(P.maeve, 'Maeve Doyle', 'maeve@example.com'); await quote(Q.maeve, P.maeve, 'Maeve Doyle', 'EK-0201', 16);
+  await customer(P.noel, 'Noel Nolan', null); await quote(Q.noel, P.noel, 'Noel Nolan', 'EK-0202', 15);
+  await customer(P.fiona, 'Fiona Fahey', 'fiona@example.com', { quoteMail: { [Q.fiona]: { at: T(now - 2 * DAY), by: 'thomas@example.com', basis: now - 17 * DAY, confirmed: true } } }); await quote(Q.fiona, P.fiona, 'Fiona Fahey', 'EK-0203', 17);
+  await db.doc('quotes/' + Q.fiona).update({ sentAt: T(now - 17 * DAY) });
+  await customer(P.una, 'Una Underweek', 'una@example.com'); await quote(Q.una, P.una, 'Una Underweek', 'EK-0204', 8);          // sent 8 days ago: a card to phone about, but too early for the email (two weeks)
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/pw-browsers/chromium' }), errors = []; global.__errors = errors;
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } }), page = await ctx.newPage(); page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
@@ -59,7 +60,9 @@ const bodyOf = (raw) => raw.split('\r\n\r\n').slice(1).join('\r\n\r\n').replace(
   assert.deepEqual(await card(Q.maeve).locator('.td-actions button, button.btn').allInnerTexts().then((t) => t.map((x) => x.trim())), ['Open quote', 'Email', 'Followed up', 'Dismiss'], 'the buttons, in order');
   await until(async () => (await card(Q.fiona).locator('button.btn:text-is("Email")').count()) === 0, 'already emailed about this quote: no button');
   assert.match(await card(Q.fiona).innerText(), /EK-0203[\s\S]*emailed \d+ \w+/);
-  ok('a quote card has Open quote, Email, Followed up, Dismiss; a quote already emailed says "emailed" and has no Email button');
+  await until(async () => (await keys()).includes('quote|' + Q.una), 'the 8-day quote card');
+  assert.equal(await card(Q.una).locator('button.btn:text-is("Email")').count(), 0, 'no Email button before two weeks'); assert.deepEqual(await card(Q.una).locator('button.btn').allInnerTexts().then((t) => t.map((x) => x.trim())), ['Open quote', 'Followed up', 'Dismiss']);
+  ok('a quote card has Open quote, Email, Followed up, Dismiss from two weeks; a quote already emailed says "emailed" and has no Email button; at 8 days the card has no Email button yet');
 
   // ------------------------------------------------------------------ 2. a customer with no address is told, nothing opens
   await card(Q.noel).locator('button.btn:text-is("Email")').click();

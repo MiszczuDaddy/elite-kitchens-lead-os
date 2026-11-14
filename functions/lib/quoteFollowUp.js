@@ -1,7 +1,7 @@
 'use strict';
-// A follow-up EMAIL about a quote that was sent and never answered (7 Nov 2026). Staff only; one email per press, written by a person's click (the text is shown first and can be changed: lib/followUpText.js).
+// A follow-up EMAIL about a quote that was sent and never answered (7 Nov 2026). From 14 Nov 2026 only once the quote is two weeks old: ONE friendly check-in, then leave them (owner's decision). Staff only; one email per press, written by a person's click (the text is shown first and can be changed: lib/followUpText.js).
 //   conversations/{phone}.quoteMail.{quoteId} = { at, by, basis (the quote's sent time), confirmed, providerId, sendingUntil, sendBy }      (erased with the customer: it is part of the conversation)
-// Every rule is decided HERE, again, whatever the screen showed: the quote must still be Sent (not accepted, declined or a draft) and at least 3 days old; the customer must not have asked not to be
+// Every rule is decided HERE, again, whatever the screen showed: the quote must still be Sent (not accepted, declined or a draft) and at least 14 days (two weeks) old; the customer must not have asked not to be
 // contacted, must have a valid email address and must not have written to you since the quote was sent; and ONE follow-up email per sending of the quote (sending the quote again allows one more).
 // A double press, or two staff at once, sends ONE email (a claim inside a transaction). An answer we cannot confirm counts as sent: it is never retried by itself. After a send the quote's Today card is
 // hidden for 7 days (the same note as "Followed up"), so it comes back for a phone call if there is still no answer.
@@ -13,7 +13,7 @@ const Text = require('./followUpText');
 const { GMAIL_TEXT, CLAIM_MS } = require('./followUp');
 const TodayLib = require('./today');
 
-const DAY = 24 * 3600e3, MIN_AGE_MS = 3 * DAY, QUOTE_ID = /^q_[0-9a-f]{24}$/;
+const DAY = 24 * 3600e3, MIN_AGE_DAYS = 14, MIN_AGE_MS = MIN_AGE_DAYS * DAY, QUOTE_ID = /^q_[0-9a-f]{24}$/;
 const bad = (m) => new HttpsError('invalid-argument', m);
 const refuse = (m) => new HttpsError('failed-precondition', m);
 const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : 0);
@@ -22,7 +22,7 @@ const when = (t) => new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin'
 // Why this quote may not be followed up by email now, in plain words; null when it may.
 function refusal(c, quoteId, sentMs, nowMs) {
   if (c.doNotContact && c.doNotContact.on === true) return 'They asked not to be contacted.';
-  if (nowMs - sentMs < MIN_AGE_MS) return 'This quote was sent less than 3 days ago. Give them a little longer.';
+  if (nowMs - sentMs < MIN_AGE_MS) return 'This quote was sent less than 2 weeks ago. Give them a little longer.';
   if (ms(c.lastInboundAt) > sentMs || ms(c.emailInboundAt) > sentMs) return 'They have written to you since the quote was sent, so check the chat and reply there.';          // by WhatsApp or by email
   const m = (c.quoteMail && c.quoteMail[quoteId]) || null;
   if (m && ms(m.sendingUntil) > nowMs) return 'An email is being sent about this quote right now.';
@@ -83,4 +83,4 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
   }
 }
 
-module.exports = { send, refusal, MIN_AGE_MS };
+module.exports = { send, refusal, MIN_AGE_MS, MIN_AGE_DAYS };

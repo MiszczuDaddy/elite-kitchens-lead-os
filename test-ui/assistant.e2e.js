@@ -159,7 +159,7 @@ const XSS_NAME = '<img src=x onerror="window.__xss=1"> Zed';
   await page.click('#as-settings'); await page.waitForSelector('#as-dlg[open]'); await page.waitForFunction(() => /this month/.test(document.getElementById('as-set-spent').textContent));
   assert.equal(await page.locator('#as-set-actions').isDisabled(), false); assert.equal(await page.locator('#as-set-actions').isChecked(), false);
   await page.check('#as-set-actions'); await page.check('#as-set-kind-customerNote'); await page.check('#as-set-kind-projectUpdate'); await page.click('#as-set-save'); await page.waitForFunction(() => !document.getElementById('as-dlg').open);
-  const act = (await settingsDoc().get()).data(); assert.equal(act.actionsEnabled, true); assert.deepEqual(act.actionKinds, { customerNote: true, projectUpdate: true, followUpEmails: false });
+  const act = (await settingsDoc().get()).data(); assert.equal(act.actionsEnabled, true); assert.deepEqual(act.actionKinds, { customerNote: true, projectUpdate: true, followUpEmails: false, quoteFollowUps: false });
   for (const d of (await db.collection('aiRate').get()).docs) await d.ref.delete();
   const notesNow = async () => ((await db.doc('contacts/' + ph.anna).get()).data() || {}).notes || null;
   await ask('note: call after 5pm');

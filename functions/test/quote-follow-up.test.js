@@ -12,7 +12,7 @@ const M = require('../../public/today-model.js');
 const PROJECT = 'demo-leados';
 initializeApp({ projectId: PROJECT });
 const db = getFirestore();
-const NOW = Date.UTC(2026, 10, 9, 12, 0), DAY = 24 * 3600e3, ts = (t) => Timestamp.fromMillis(t), P = '353871119401', QID = 'q_' + 'ab'.repeat(12), SENT = NOW - 8 * DAY;
+const NOW = Date.UTC(2026, 10, 9, 12, 0), DAY = 24 * 3600e3, ts = (t) => Timestamp.fromMillis(t), P = '353871119401', QID = 'q_' + 'ab'.repeat(12), SENT = NOW - 16 * DAY;
 const cfg = { allowedEmails: 'thomas@example.com' };
 const staff = { uid: 'u1', token: { email: 'thomas@example.com', email_verified: true, staff: true } };
 const actor = { kind: 'staff', id: 'thomas@example.com' };
@@ -57,11 +57,12 @@ test('YOUR OWN WORDS: an edited subject and body are what is sent (within limits
   assert.equal(g2.sent.length, 0);
 });
 
-test('WHO MAY BE FOLLOWED UP: only a Sent, unanswered quote that is 3 days old, for a customer with an address who has not written since and did not ask to be left alone', async () => {
+test('WHO MAY BE FOLLOWED UP: only a Sent, unanswered quote that is two weeks (14 days) old, for a customer with an address who has not written since and did not ask to be left alone', async () => {
   const g = gmail();
   for (const status of ['draft', 'accepted', 'declined']) { await quote({ status }); await rejects(go(g), 'failed-precondition', /sent and not answered/); }
   await quote({ sentAt: null }); await rejects(go(g), 'failed-precondition', /sent and not answered/);
-  await quote({ sentAt: ts(NOW - 2 * DAY) }); await rejects(go(g), 'failed-precondition', /less than 3 days/);
+  await quote({ sentAt: ts(NOW - 10 * DAY) }); await rejects(go(g), 'failed-precondition', /less than 2 weeks/);
+  await quote({ sentAt: ts(NOW - 14 * DAY + 1) }); await rejects(go(g), 'failed-precondition', /less than 2 weeks/); assert.equal(g.sent.length, 0, 'one millisecond short of two weeks sends nothing');
   await quote(); await customer({ lastInboundAt: ts(SENT + 3600e3) }); await rejects(go(g), 'failed-precondition', /written to you since the quote was sent/);
   await customer({ doNotContact: { on: true } }); await rejects(go(g), 'failed-precondition', /not to be contacted/);
   await customer({}, { email: '' }); await rejects(go(g), 'failed-precondition', /no email address/);
@@ -79,7 +80,7 @@ test('ONCE PER SENDING: a second press is refused with the date; a double press 
   await rejects(go(g, { quoteId: QID }, {}, NOW + 3600e3), 'failed-precondition', /already emailed them about this quote on 9 Nov/); assert.equal(g.sent.length, 1);
   await db.doc('conversations/' + P).update({ quoteMail: require('firebase-admin/firestore').FieldValue.delete() }); const g2 = gmail();
   const both = await Promise.allSettled([go(g2), go(g2)]); assert.equal(both.filter((x) => x.status === 'fulfilled').length, 1, 'exactly one of two presses at once sends'); assert.equal(g2.sent.length, 1);
-  await db.doc('quotes/' + QID).update({ sentAt: ts(NOW - 4 * DAY) }); const g3 = gmail(); assert.equal((await go(g3)).ok, true, 'a quote sent again may be followed up once more'); assert.equal(g3.sent.length, 1);
+  await db.doc('quotes/' + QID).update({ sentAt: ts(NOW - 15 * DAY) }); const g3 = gmail(); assert.equal((await go(g3)).ok, true, 'a quote sent again may be followed up once more'); assert.equal(g3.sent.length, 1);
 });
 
 test('GOOGLE REFUSES: nothing is recorded, the card is not hidden, and the customer can be tried again; an answer we cannot confirm counts as sent and is never retried by itself', async () => {
@@ -104,4 +105,16 @@ test('THE WORDS: the quote email text is the same on the screen and the server',
   assert.equal(Text.quoteSubject('EK-0104'), 'Your Elite Kitchens quote EK-0104'); assert.equal(Text.quoteSubject(''), 'Your Elite Kitchens quote');
   assert.match(Text.quoteBodyFor({ first: 'Maeve', ref: 'EK-0104' }), /^Hi Maeve,\n\nI just wanted to check that you received your quote \(EK-0104\), and to see if you have any questions about it\./);
   assert.match(Text.quoteBodyFor({}), /^Hi there,\n\nI just wanted to check that you received your quote, and/);
+});
+
+test('TWO WEEKS, EVERYWHERE: the server refuses before 14 days; Today\'s quote card appears at 5 days but offers the Email button only from 14 days, to the millisecond, the same moment the server accepts', async () => {
+  assert.equal(Q.MIN_AGE_DAYS, 14); assert.equal(Q.MIN_AGE_MS, 14 * DAY);
+  const q = { id: QID, phone: P, ref: 'EK-0112', status: 'sent', sentAt: ts(NOW), customerName: 'Maeve Doyle' }, convs = [{ id: P, name: 'Maeve Doyle', inboxStatus: 'quoted', lastMessageDirection: 'out' }];
+  const card = (now) => M.build({ convs, quotes: [q], marks: {}, now }).cards.find((c) => c.kind === 'quote');
+  assert.equal(card(NOW + 4 * DAY), undefined, 'under 5 days: no card');
+  assert.equal(card(NOW + 5 * DAY).emailable, false, 'a card at 5 days is only a nudge to phone: no Email button');
+  assert.equal(card(NOW + 14 * DAY - 1).emailable, false); assert.equal(card(NOW + 14 * DAY).emailable, true, 'from exactly 14 days');
+  await quote({ sentAt: ts(NOW) }); await customer({ updatedAt: ts(NOW) });
+  const g = gmail(); await rejects(go(g, { quoteId: QID }, {}, NOW + 14 * DAY - 1), 'failed-precondition', /less than 2 weeks/); assert.equal(g.sent.length, 0);
+  assert.equal((await go(g, { quoteId: QID }, {}, NOW + 14 * DAY)).ok, true); assert.equal(g.sent.length, 1, 'the same moment the button appears, the server sends');
 });

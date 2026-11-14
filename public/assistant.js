@@ -133,7 +133,7 @@ window.ASSIST = (() => {
       bar.append(ok, no); if (v.minutes != null) bar.append(el('span', 'as-card-exp', 'Expires in ' + v.minutes + ' min')); d.append(bar);
     } else {
       d.append(el('div', 'as-card-state', v.label + (v.message && v.status !== 'rejected' && v.status !== 'expired' ? ': ' + v.message : '')));
-      if ((v.status === 'partial' || (v.status === 'failed' && v.kind === 'followUpEmails')) && v.results.length) { const ul = el('ul', 'as-card-res'); for (const x of v.results) ul.append(el('li', x.ok ? '' : 'bad', (x.ok ? (v.kind === 'followUpEmails' ? 'Sent: ' : 'Saved: ') : (v.kind === 'followUpEmails' ? 'Not sent: ' : 'Not saved: ')) + (x.label || '') + (!x.ok && x.message ? ' (' + x.message + ')' : ''))); d.append(ul); }
+      if ((v.status === 'partial' || (v.status === 'failed' && ['followUpEmails', 'quoteFollowUps'].includes(v.kind))) && v.results.length) { const ul = el('ul', 'as-card-res'); for (const x of v.results) ul.append(el('li', x.ok ? '' : 'bad', (x.ok ? (v.kind === 'followUpEmails' ? 'Sent: ' : 'Saved: ') : (v.kind === 'followUpEmails' ? 'Not sent: ' : 'Not saved: ')) + (x.label || '') + (!x.ok && x.message ? ' (' + x.message + ')' : ''))); d.append(ul); }
     }
     if (note && v.canDecide) d.append(el('div', 'as-card-state', note));
     return d;

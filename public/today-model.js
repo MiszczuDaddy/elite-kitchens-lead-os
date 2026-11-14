@@ -12,7 +12,7 @@
   const AMBER_MIN = 30, RED_MIN = 120;                  // a message waiting: amber after 30, red after 120 WORKING minutes (08:00 to 20:00 Irish time)
   const WORK_FROM = 8, WORK_TO = 20;
   const REPLY_WINDOW_MS = 60 * DAY, HANDOVER_WINDOW_MS = 14 * DAY, QUOTE_WINDOW_MS = 60 * DAY;
-  const QUOTE_AMBER_DAYS = 5, QUOTE_RED_DAYS = 10;
+  const QUOTE_AMBER_DAYS = 5, QUOTE_RED_DAYS = 10, QUOTE_EMAIL_DAYS = 14;          // the card appears at 5 days (a nudge to phone); the follow-up EMAIL is offered only from 14 days (functions/lib/quoteFollowUp.js MIN_AGE_DAYS, a test keeps them equal)
   const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : typeof t === 'number' && isFinite(t) ? t : null);
   const clip = (s, n) => { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; };
 
@@ -137,7 +137,7 @@
       const mk = (marks || {})[quoteKey(q.id)];
       if (mk && mk.basis === sent && ms(mk.snoozeUntil) > now) continue;       // snoozed: only for THIS send of the quote
       const conv = convById.get(String(q.phone)) || {}, qm = (conv.quoteMail && conv.quoteMail[q.id]) || null, emailedAt = qm && Number(qm.basis) === sent ? ms(qm.at) : 0;      // emailed about THIS sending of the quote
-      out.push({ key: quoteKey(q.id), kind: 'quote', quoteId: q.id, emailedAt, phone: String(q.phone || ''), name: q.customerName || conv.name || '', ref: q.ref || '', price: q.summary && q.summary.dearest ? q.summary.dearest.incVat : null,
+      out.push({ key: quoteKey(q.id), kind: 'quote', quoteId: q.id, emailedAt, emailable: now - sent >= QUOTE_EMAIL_DAYS * DAY, phone: String(q.phone || ''), name: q.customerName || conv.name || '', ref: q.ref || '', price: q.summary && q.summary.dearest ? q.summary.dearest.incVat : null,
         reasons: [{ type: 'quote', text: `Sent ${days} days ago, no answer${q.validUntil && q.validUntil < today ? ' (expired)' : ''}`, since: sent, urgency: days >= QUOTE_RED_DAYS ? 2 : 1 }], urgency: days >= QUOTE_RED_DAYS ? 2 : 1, since: sent, primary: 'quote' });
     }
     return out;

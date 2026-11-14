@@ -145,7 +145,7 @@ window.TODAY = (() => {
         row.append(btn('Open chat', 'btn-primary', open, null), btn('It arrived', 'btn-ghost', say('arrived'), 'n' + c.apptId), btn('It did not arrive', 'btn-ghost', say('notArrived'), 'n' + c.apptId));
       } else row.append(btn('Open chat', 'btn-primary', open, null));              // WhatsApp refused the reminder: message the customer yourself
     } else if (c.kind === 'quote') {
-      row.append(btn('Open quote', 'btn-primary', open, null), ...(c.emailedAt || !window.FOLLOWUP ? [] : [btn('Email', 'btn-ghost', () => FOLLOWUP.openQuote(c), null)]), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
+      row.append(btn('Open quote', 'btn-primary', open, null), ...(c.emailedAt || !c.emailable || !window.FOLLOWUP ? [] : [btn('Email', 'btn-ghost', () => FOLLOWUP.openQuote(c), null)]), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
         btn('Dismiss', 'btn-ghost', () => act('q' + c.quoteId, () => dismissQuote(c.quoteId), `${c.ref || 'Quote'} dismissed. It comes back only if you send the quote again.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId));
     } else if (c.kind === 'reminder') {
       row.append(btn('Done', 'btn-primary', () => act('r' + c.reminderId, () => reminder({ action: 'done', id: c.reminderId }), 'Reminder done.', () => reminder({ action: 'undo', id: c.reminderId })), 'r' + c.reminderId),
