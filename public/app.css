@@ -1360,3 +1360,20 @@ div.td-open { cursor: default; }
 @media (max-width: 899px) { .m.em .em-reply { min-height: 44px; width: 100%; } }
 
 .email-hd { flex: none; } .email-hd.em-hot { color: var(--accent); }
+
+/* The Emails window (docs/EMAIL_LIST.md): every email in and out, newest first. */
+.ea-dlg { max-width: 640px; }
+.ea-filters { display: flex; gap: 8px; margin: 6px 0 8px; flex-wrap: wrap; }
+.ea-chip { min-height: 38px; padding: 6px 16px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+.ea-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ea-list { list-style: none; margin: 0; padding: 0; max-height: 56vh; overflow-y: auto; border-top: 1px solid var(--line); }
+.ea-row { border-bottom: 1px solid var(--line); }
+.ea-open { display: block; width: 100%; min-height: 56px; padding: 10px 6px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.ea-open:hover { background: var(--hover); }
+.ea-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.ea-name { font-weight: 650; overflow-wrap: anywhere; } .ea-when { flex: none; font-size: 12.5px; color: var(--muted); }
+.ea-sub { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin: 2px 0; font-size: 12.5px; }
+.ea-kind { font-weight: 600; } .ea-in { color: var(--ok); } .ea-out { color: var(--accent); }
+.ea-warn { padding: 0 7px; border-radius: 9px; background: #f8e3e1; color: var(--err); font-weight: 600; } .ea-ref { color: var(--muted); }
+.ea-subject { font-weight: 600; overflow-wrap: anywhere; } .ea-snip { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 899px) { .ea-dlg { width: 100%; max-width: none; } .ea-list { max-height: 60vh; } .ea-chip { min-height: 44px; } }

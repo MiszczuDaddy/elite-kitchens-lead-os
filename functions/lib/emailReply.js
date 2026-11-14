@@ -8,6 +8,7 @@ const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const { normalizePhone } = require('./whatsapp');
 const Gmail = require('./gmail');
 const { GMAIL_TEXT, CLAIM_MS } = require('./followUp');
+const EmailLog = require('./emailLog');
 
 const LIMIT = { subject: 200, body: 5000, bodyMin: 2 }, SAME_EMAIL_MS = 2 * 60e3;          // the very same words to the same customer twice within two minutes is a double press or a retry, not a second reply
 const fingerprint = (to, subject, body) => crypto.createHash('sha256').update([to, subject.trim(), body].join('\n')).digest('hex').slice(0, 24);
@@ -60,6 +61,7 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
     await convRef.collection('emails').doc(id).set({ direction: 'out', gmailId: sent && sent.id || null, threadId: (sent && sent.threadId) || (inb && inb.threadId) || null, messageId: null, references: [], subject: subject.trim().slice(0, 200), fromEmail: mailer.sender, fromName: null, to,
       body: body.slice(0, 5000), attachments: [], createdAt: Timestamp.fromMillis(nowMs), by: actor.id, confirmed });
     await convRef.update({ lastEmailAt: FieldValue.serverTimestamp(), lastEmailSubject: subject.trim().slice(0, 120), lastEmailDir: 'out', updatedAt: FieldValue.serverTimestamp(), emailSendingUntil: FieldValue.delete(), emailLast: { hash: fp, at: Timestamp.fromMillis(nowMs) } });
+    await EmailLog.record(db, { id, phone, name: c.name, direction: 'out', kind: 'reply', subject, text: body, email: to, atMs: nowMs, confirmed, by: actor.id });          // the list of all emails
   };
   try {
     const r = await mailer.gmail.sendRaw(raw, inb && inb.threadId ? { threadId: inb.threadId } : {});

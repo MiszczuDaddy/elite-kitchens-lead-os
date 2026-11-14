@@ -45,6 +45,7 @@
 #   ./scripts/deploy-quote-sending.sh emailin [on|off]  The email inbox (docs/EMAIL_INBOX.md): customers' email replies come into their chat and "Email" answers them. No argument: deploys emailSweep, sendEmailReply, checkEmail (and the 3 functions that now count an email reply as "they wrote"); reading stays OFF. "on" switches reading ON after the one Google Workspace approval (gmail.readonly); "off" is the kill switch. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh nighthold [on|off]  No welcome message at night (docs/WELCOME_QUIET_HOURS.md): a lead that arrives between midnight and 07:00 Irish time gets its welcome at 07:00. No argument: deploys leadIntake and the new welcomeSweep; "off" turns the wait off, "on" back on. Nothing is sent by this stage.
 #   ./scripts/deploy-quote-sending.sh pdfshare   Share PDF (docs/QUOTES.md, "Share PDF"): ONE function that already exists (quotePdfUrl) now also hands the phone the PDF file itself. Nothing is sent to anyone. Run it BEFORE "live".
+#   ./scripts/deploy-quote-sending.sh emaillist  The Emails list on the Inbox (docs/EMAIL_LIST.md): the functions that send or receive an email now also add it to the list (all exist already; nothing is sent, nothing made public). Run it BEFORE "live". Optional afterwards: node scripts/backfill-email-log.js.
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -94,6 +95,7 @@ FOLLOWUP_FUNCS="sendFollowUpEmail sendQuoteFollowUp"                            
 ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                                                          # the Assistant's follow-up emails: it prepares them (aiChat), shows the switch (aiStatus, setAiSettings) and sends after Approve (aiDecide); all exist already
 EMAILIN_NEW="emailSweep sendEmailReply checkEmail"                                                                      # the email inbox: the five-minute sweep (scheduled), the reply and the manual check (staff only, made public: each checks the signed-in staff account itself)
 EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"                                                      # + the three that decide who "never wrote": an email reply now counts
+EMAILLIST_FUNCS="emailSweep checkEmail sendEmailReply sendFollowUpEmail sendQuoteFollowUp aiDecide deliverQuote retryQuoteDelivery resolveQuoteDelivery deleteCustomer"          # the Emails list: everything that sends, receives or erases an email now also writes (or erases) its list entry
 PDFSHARE_FUNCS="quotePdfUrl"                                                                                           # Share PDF: the existing PDF link function can also return the file itself (the screen's Share button asks for it)
 NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                             # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
@@ -109,7 +111,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,58p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,59p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -523,6 +525,18 @@ case "${1:-}" in
         ;;
       *) usage ;;
     esac
+    ;;
+  emaillist)
+    [ -f functions/lib/emailLog.js ] || { echo "This checkout has no Emails list code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision sendemailreply)" ] || { echo "The email inbox is not deployed yet: run $0 emailin first."; exit 1; }
+    [ -n "$(serving_revision deliverquote)" ] || { echo "The quote functions are not deployed yet: run $0 backend first."; exit 1; }
+    check_settings; check_access; check_routing $EMAILLIST_FUNCS
+    echo "Functions: $EMAILLIST_FUNCS (all exist already; no new function, nothing made public). Each answers exactly as before; it also adds the email to the list."
+    echo "After this, run $0 live: the Emails button (left rail, or the section buttons on a phone) opens the Emails list. Optional: node scripts/backfill-email-log.js (adds the emails already in chats)."
+    confirm "Deploy the Emails list functions to the LIVE project?"
+    install; save_revisions $EMAILLIST_FUNCS; deploy_functions $EMAILLIST_FUNCS
+    check_reachable "$EMAILLIST_FUNCS"
+    echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:<each name above> --project $PROJECT (the list simply stops filling; nothing else is affected)."
     ;;
   pdfshare)
     grep -q "SHARE_MAX" functions/lib/quotes.js || { echo "This checkout has no Share PDF code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }

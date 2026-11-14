@@ -70,3 +70,52 @@ window.EMAILBOX = (() => {
   init();
   return { onSelect, items, sync, open };
 })();
+
+// The Emails window (docs/EMAIL_LIST.md): every email in and out, newest first, from the server's list (emailLog: a short preview of each, written only by the server). Tapping a row opens that customer's chat, where the
+// whole email is. Live while the window is open; nothing is written from here.
+window.EMAILLIST = (() => {
+  const L = { unsub: null, items: [], filter: 'all', limit: 100, loaded: false, error: null };
+  const MAX = 500;
+  const KIND = { customer: 'Received', reply: 'Sent · your reply', followup: 'Sent · follow-up', quotefollowup: 'Sent · quote follow-up', quote: 'Sent · quote' };
+  const showDialog = (d) => { if (typeof d.showModal === 'function') { if (!d.open) d.showModal(); } else d.setAttribute('open', ''); };
+  const hideDialog = (d) => { if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); };
+  const DAY_F = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin' }), TIME_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), DATE_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' });
+  function whenText(t, now = Date.now()) {
+    if (t == null) return '';
+    const d = DAY_F.format(new Date(t)), today = DAY_F.format(new Date(now)), yest = DAY_F.format(new Date(now - 86400000));
+    return d === today ? TIME_F.format(new Date(t)) : d === yest ? 'Yesterday ' + TIME_F.format(new Date(t)) : DATE_F.format(new Date(t));
+  }
+  const shown = () => L.items.filter((m) => L.filter === 'all' || m.direction === L.filter);
+  function render() {
+    const ul = $('ea-list'), rows = shown(); ul.replaceChildren();
+    $('ea-note').textContent = L.error ? 'The list could not be loaded just now. Close this and open it again.' : !L.loaded ? 'Loading…' : rows.length ? '' : (L.filter === 'all' ? 'No emails yet. Emails you send from Elite OS, and customers\' replies, will appear here.' : L.filter === 'in' ? 'No emails received from customers yet.' : 'No emails sent yet.');
+    for (const m of rows) {
+      const li = el('li', 'ea-row'), b = el('button', 'ea-open'); b.type = 'button'; b.dataset.phone = m.phone; b.dataset.kind = m.kind;
+      const top = el('div', 'ea-top'); top.append(el('span', 'ea-name', m.name || 'Customer'), el('span', 'ea-when', whenText(ms(m.at))));
+      const sub = el('div', 'ea-sub'), kind = el('span', 'ea-kind ' + (m.direction === 'in' ? 'ea-in' : 'ea-out'), (m.direction === 'in' ? '\u2199 ' : '\u2197 ') + (KIND[m.kind] || (m.direction === 'in' ? 'Received' : 'Sent')));
+      sub.append(kind); if (m.confirmed === false) { const w = el('span', 'ea-warn', 'Not confirmed'); w.title = 'Google did not confirm this email was sent. Check the Sent folder of the mailbox.'; sub.append(w); }
+      if (m.quoteRef) sub.append(el('span', 'ea-ref', m.quoteRef));
+      b.append(top, sub, el('div', 'ea-subject', m.subject || '(no subject)'), el('div', 'ea-snip', m.snippet || ''));
+      b.onclick = () => { close(); if (typeof openConversation === 'function') openConversation(m.phone); };
+      li.append(b); ul.append(li);
+    }
+    $('ea-more').hidden = L.error || L.items.length < L.limit || L.limit >= MAX;
+    for (const c of document.querySelectorAll('#ea-dlg .ea-chip')) c.setAttribute('aria-pressed', c.dataset.f === L.filter ? 'true' : 'false');
+  }
+  function stop() { if (L.unsub) { L.unsub(); L.unsub = null; } }
+  function start() {
+    stop(); L.error = null;
+    L.unsub = db.collection('emailLog').orderBy('at', 'desc').limit(L.limit).onSnapshot((snap) => { L.items = snap.docs.map((d) => ({ id: d.id, ...d.data() })); L.loaded = true; render(); }, () => { L.error = true; render(); });
+  }
+  function open() { L.filter = 'all'; L.limit = 100; L.loaded = false; L.items = []; render(); showDialog($('ea-dlg')); start(); }
+  function close() { stop(); hideDialog($('ea-dlg')); }
+  function init() {
+    if (!$('ea-dlg')) return;
+    for (const id of ['emails-rail', 'to-emails']) if ($(id)) $(id).onclick = open;                  // the left rail on a computer, the section buttons on a phone
+    $('ea-close').onclick = close; $('ea-dlg').addEventListener('close', stop);
+    $('ea-more').onclick = () => { L.limit = Math.min(MAX, L.limit + 100); start(); };
+    for (const c of document.querySelectorAll('#ea-dlg .ea-chip')) c.onclick = () => { L.filter = c.dataset.f; render(); };
+  }
+  init();
+  return { open, close, whenText, KIND };
+})();

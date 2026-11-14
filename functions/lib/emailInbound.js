@@ -8,6 +8,7 @@
 // receptionist, the WhatsApp 24-hour window and "last message" never see them. An email counts as "they wrote to us" for the No reply tab and for the follow-up emails (emailInboundAt).
 const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const Gmail = require('./gmail');
+const EmailLog = require('./emailLog');
 
 const DAY = 24 * 3600e3, OVERLAP_MS = 15 * 60e3, FIRST_WINDOW_MS = 3 * DAY, MAX_PAGES = 3, MAX_PER_RUN = 60, SEEN_KEEP = 400, BODY_MAX = 4000, SUBJECT_MAX = 200, ATTACH_MAX = 10;
 const log = (level, msg, extra) => console.log(JSON.stringify({ level, msg, ...extra }));
@@ -78,13 +79,16 @@ function emailDoc(full, from, atMs) {
 async function keepInbound(db, phone, doc) {
   const convRef = db.collection('conversations').doc(phone);
   try { await convRef.collection('emails').doc('g_' + doc.gmailId).create(doc); } catch (e) { if (alreadyExists(e)) return false; throw e; }
+  let name = null;
   await db.runTransaction(async (tx) => {
     const c = await tx.get(convRef);
     if (!c.exists) return;
+    name = c.data().name || null;
     const at = ms(doc.createdAt), prev = ms(c.data().emailInboundAt);
     tx.update(convRef, { emailInboundAt: Timestamp.fromMillis(Math.max(at, prev)), lastEmailAt: FieldValue.serverTimestamp(), lastEmailSubject: doc.subject.slice(0, 120), lastEmailDir: 'in',
       updatedAt: FieldValue.serverTimestamp(), unreadCount: FieldValue.increment(1) });
   });
+  await EmailLog.record(db, { id: 'g_' + doc.gmailId, phone, name, direction: 'in', kind: 'customer', subject: doc.subject, text: doc.body, email: doc.fromEmail, atMs: ms(doc.createdAt) });          // the list of all emails
   return true;
 }
 

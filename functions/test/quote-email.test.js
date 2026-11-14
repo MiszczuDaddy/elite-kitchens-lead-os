@@ -156,6 +156,10 @@ test('the email goes to the customer\'s saved address, from the business mailbox
   const d = await dOf(id, 'email');
   assert.deepEqual([d.state, d.provider, d.to, d.subject], ['sent', { id: 'gmsg-1' }, { email: 'anna@example.com' }, 'Elite Kitchens — Kitchen Quote EK-0104 v1']);
   assert.deepEqual(d.pdf, v.pdf); assert.equal(meta.messages.length, 0);                              // nothing went to WhatsApp
+  // the list of all emails (docs/EMAIL_LIST.md): the quote email is listed, as a short preview only
+  const listed = (await db.collection('emailLog').where('phone', '==', P).get()).docs.map((x) => x.data());
+  assert.equal(listed.length, 1); assert.deepEqual([listed[0].direction, listed[0].kind, listed[0].confirmed, listed[0].subject, listed[0].email, listed[0].quoteRef, listed[0].by], ['out', 'quote', true, 'Elite Kitchens — Kitchen Quote EK-0104 v1', 'anna@example.com', q.ref, 'thomas@example.com']);
+  assert.equal(listed[0].snippet, MSG.email.replace(/\s+/g, ' ').trim().slice(0, 200), 'a preview of the words, never the PDF');
 });
 
 test('the sign-in names the business mailbox and only the send scope; no token or key is stored anywhere', async () => {
@@ -229,11 +233,13 @@ test('an answer we cannot confirm (Google 5xx, no message id, no connection, no 
     assert.deepEqual([r.sent, states(r), r.deliveries[0].error.code], [false, [['email', 'unknown']], 'not_confirmed'], mode);
     assert.match(r.deliveries[0].error.text, /Check the Sent folder of info@example\.test/);
     assert.deepEqual([(await quote(id)).status, (await conv(p)).inboxStatus], ['draft', undefined], mode);
+    assert.deepEqual((await db.collection('emailLog').where('phone', '==', p).get()).docs.map((x) => [x.data().kind, x.data().confirmed]), [['quote', false]], mode + ': listed, marked not confirmed');
     google.mode = 'ok';
     await rejects(run(D.retry, { id, deliveryId: r.deliveries[0].id }), 'failed-precondition', /could not confirm/);
     assert.equal(google.sent.length, 1, mode);                                                         // exactly one attempt
     const ok = await run(D.resolve, { id, deliveryId: r.deliveries[0].id, outcome: 'delivered' });    // staff saw it in the Sent folder
     assert.deepEqual([ok.sent, states(ok)], [true, [['email', 'sent']]], mode); assert.equal(google.sent.length, 1, mode);
+    assert.deepEqual((await db.collection('emailLog').where('phone', '==', p).get()).docs.map((x) => x.data().confirmed), [true], mode + ': staff confirmed it arrived, so the list says so');
   }
 });
 

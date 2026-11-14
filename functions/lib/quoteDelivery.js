@@ -20,6 +20,7 @@
 const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const quotes = require('./quotes');
+const EmailLog = require('./emailLog');
 const CB = require('./contactBlock');
 
 const { onlyKeys, text, bad, refused, checkRev, quoteRef, versionRef, capped, at, view, REQUEST_ID } = quotes.H;
@@ -172,6 +173,10 @@ async function attempt(deps, actor, id, did, { nowMs, retry = false, message = n
     return { did, channel, state: 'unknown', error: { code: 'record_failed', text: NOT_CONFIRMED } };   // the claim stays: shown as not confirmed
   }
   if (stale) return { did, channel, state: 'stale', skipped: true };
+  if (channel === 'email' && (outcome.state === 'sent' || outcome.state === 'unknown')) {                          // the list of all emails: the quote itself, by email (a short preview only; never the PDF)
+    await EmailLog.record(db, { id: `qd_${id}_${did}_${claim.attempt}`.replace(/[^A-Za-z0-9_-]/g, '_'), phone: claim.phone, name: claim.d.customerName, direction: 'out', kind: 'quote', subject: claim.d.subject,
+      text: claim.d.message, email: claim.d.to && claim.d.to.email, atMs: nowMs, confirmed: outcome.state === 'sent', by: actor && actor.id, quoteRef: claim.quoteRef });
+  }
   return { did, channel, state: outcome.state, error: outcome.error || null, committed: committed && committed.committed ? { stage: committed.stage, value: committed.value } : null };
 }
 
@@ -307,9 +312,9 @@ async function resolve(deps, actor, data, { nowMs = Date.now() } = {}) {
   const { db } = deps;
   const { ref, dRef } = deliveryRef(db, data);
   if (!['delivered', 'not_delivered', 'cancel'].includes(data.outcome)) throw bad('Choose "It arrived" or "It did not arrive".');
-  let requestId, committed = null;
+  let requestId, committed = null, mailAttempt = null;
   await db.runTransaction(async (tx) => {
-    committed = null;
+    committed = null; mailAttempt = null;
     const dSnap = await tx.get(dRef);
     if (!dSnap.exists) throw new HttpsError('not-found', 'Delivery not found.');
     const d = dSnap.data();
@@ -323,7 +328,7 @@ async function resolve(deps, actor, data, { nowMs = Date.now() } = {}) {
       return;
     }
     if (effectiveState(d, nowMs) !== 'unknown') throw refused('Only a send that could not be confirmed can be settled this way.');
-    requestId = d.requestId;
+    requestId = d.requestId; if (d.channel === 'email') mailAttempt = d.attempts;
     const st = data.outcome === 'delivered' ? await quotes.readState(tx, db, data.id, d.version) : null;
     const now = at(nowMs), ev = entry({ now, actor }, { event: data.outcome === 'delivered' ? 'confirmed delivered' : 'confirmed not delivered' });
     tx.update(dRef, data.outcome === 'delivered'
@@ -331,6 +336,7 @@ async function resolve(deps, actor, data, { nowMs = Date.now() } = {}) {
       : { state: 'failed', failedAt: now, error: { code: 'confirmed_not_delivered', text: 'You confirmed that it did not arrive.' }, resolvedBy: actor.id, history: capped(d.history, ev, HISTORY_MAX), updatedAt: now });
     if (st) committed = quotes.commitPrepared(tx, st, actor, nowMs, d.requestId, d.channel);
   });
+  if (mailAttempt != null) await EmailLog.settle(db, `qd_${data.id}_${dRef.id}_${mailAttempt}`.replace(/[^A-Za-z0-9_-]/g, '_'), data.outcome === 'delivered');          // the list of all emails follows what staff confirmed
   return summary(deps, data.id, requestId, nowMs, { committed: committed && committed.committed ? { stage: committed.stage, value: committed.value } : null });
 }
 

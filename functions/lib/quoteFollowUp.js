@@ -12,6 +12,7 @@ const Gmail = require('./gmail');
 const Text = require('./followUpText');
 const { GMAIL_TEXT, CLAIM_MS } = require('./followUp');
 const TodayLib = require('./today');
+const EmailLog = require('./emailLog');
 
 const DAY = 24 * 3600e3, MIN_AGE_DAYS = 14, MIN_AGE_MS = MIN_AGE_DAYS * DAY, QUOTE_ID = /^q_[0-9a-f]{24}$/;
 const bad = (m) => new HttpsError('invalid-argument', m);
@@ -75,10 +76,12 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
   try {
     const r = await mailer.gmail.sendRaw(raw);
     await done(true, r.id);
+    await EmailLog.keepSent(db, { phone, name: k.name || c.name || q.customerName, id: `qf_${quoteId}_${sentMs}`, sender: mailer.sender, to, subject: subject.trim(), body, kind: 'quotefollowup', atMs: nowMs, confirmed: true, by: actor.id, providerId: r.id, quoteRef: ref });
     return { ok: true, sentAt: nowMs };
   } catch (e) {
     if (e instanceof Gmail.GmailError && e.definite) { await release(); throw refuse(`${GMAIL_TEXT[e.code] || `Google refused the email (code ${e.status}).`} Nothing was sent.`); }
     await done(false, null);                                                                  // Google may or may not have sent it: counted as sent, never retried by itself
+    await EmailLog.keepSent(db, { phone, name: k.name || c.name || q.customerName, id: `qf_${quoteId}_${sentMs}`, sender: mailer.sender, to, subject: subject.trim(), body, kind: 'quotefollowup', atMs: nowMs, confirmed: false, by: actor.id, quoteRef: ref });
     throw new HttpsError('unavailable', `Not confirmed: we could not tell whether Google sent the email. Check the Sent folder of ${mailer.sender}. Elite OS will not send it again by itself.`);
   }
 }
