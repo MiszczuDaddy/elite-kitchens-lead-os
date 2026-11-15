@@ -535,7 +535,7 @@ case "${1:-}" in
     echo "After this, run $0 live: the Emails button (left rail, or the section buttons on a phone) opens the Emails list. Optional: node scripts/backfill-email-log.js (adds the emails already in chats)."
     confirm "Deploy the Emails list functions to the LIVE project?"
     install; save_revisions $EMAILLIST_FUNCS; deploy_functions $EMAILLIST_FUNCS
-    check_reachable "$EMAILLIST_FUNCS"
+    check_reachable "${EMAILLIST_FUNCS#emailSweep }"                                # emailSweep runs on a schedule and has no web address to ask: only the callable ones are checked
     echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:<each name above> --project $PROJECT (the list simply stops filling; nothing else is affected)."
     ;;
   pdfshare)
