@@ -14,6 +14,7 @@ const { GMAIL_TEXT, CLAIM_MS } = require('./followUp');
 const TodayLib = require('./today');
 const EmailLog = require('./emailLog');
 
+const SENT_MARGIN_MS = 10 * 60e3;                                           // the quote's own email goes out within seconds of its sent time: only an email written well after it counts as "you emailed them since"
 const DAY = 24 * 3600e3, MIN_AGE_DAYS = 14, MIN_AGE_MS = MIN_AGE_DAYS * DAY, QUOTE_ID = /^q_[0-9a-f]{24}$/;
 const bad = (m) => new HttpsError('invalid-argument', m);
 const refuse = (m) => new HttpsError('failed-precondition', m);
@@ -28,6 +29,7 @@ function refusal(c, quoteId, sentMs, nowMs) {
   const m = (c.quoteMail && c.quoteMail[quoteId]) || null;
   if (m && ms(m.sendingUntil) > nowMs) return 'An email is being sent about this quote right now.';
   if (m && Number(m.basis) === sentMs && ms(m.at)) return `You already emailed them about this quote on ${when(ms(m.at))}.`;
+  if (c.lastEmailDir === 'out' && ms(c.lastEmailAt) > sentMs + SENT_MARGIN_MS) return `You emailed them on ${when(ms(c.lastEmailAt))}, after the quote was sent (from Gmail or from their chat), so check the chat first.`;          // an email you wrote yourself counts too
   return null;
 }
 

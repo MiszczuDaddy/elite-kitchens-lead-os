@@ -60,8 +60,8 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
     const id = 'g_' + (sent && sent.id ? sent.id : 'u' + nowMs);
     await convRef.collection('emails').doc(id).set({ direction: 'out', gmailId: sent && sent.id || null, threadId: (sent && sent.threadId) || (inb && inb.threadId) || null, messageId: null, references: [], subject: subject.trim().slice(0, 200), fromEmail: mailer.sender, fromName: null, to,
       body: body.slice(0, 5000), attachments: [], createdAt: Timestamp.fromMillis(nowMs), by: actor.id, confirmed });
-    await convRef.update({ lastEmailAt: FieldValue.serverTimestamp(), lastEmailSubject: subject.trim().slice(0, 120), lastEmailDir: 'out', updatedAt: FieldValue.serverTimestamp(), emailSendingUntil: FieldValue.delete(), emailLast: { hash: fp, at: Timestamp.fromMillis(nowMs) } });
-    await EmailLog.record(db, { id, phone, name: c.name, direction: 'out', kind: 'reply', subject, text: body, email: to, atMs: nowMs, confirmed, by: actor.id });          // the list of all emails
+    await convRef.update({ lastEmailAt: Timestamp.fromMillis(nowMs), lastEmailSubject: subject.trim().slice(0, 120), lastEmailDir: 'out', updatedAt: Timestamp.fromMillis(nowMs), emailSendingUntil: FieldValue.delete(), emailLast: { hash: fp, at: Timestamp.fromMillis(nowMs) } });
+    await EmailLog.record(db, { id, phone, name: c.name, direction: 'out', kind: 'reply', subject, text: body, email: to, atMs: nowMs, confirmed, by: actor.id, gmailId: sent && sent.id });          // the list of all emails
   };
   try {
     const r = await mailer.gmail.sendRaw(raw, inb && inb.threadId ? { threadId: inb.threadId } : {});

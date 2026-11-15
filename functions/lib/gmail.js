@@ -112,9 +112,10 @@ function createGmailReader({ apiBase = API_BASE, fetchImpl = fetch, tokens }) {
     return r.json;
   };
   return {
-    // The inbox messages that arrived after `afterSec` (epoch seconds), newest first, one page at a time: { ids, next }.
-    async list({ afterSec, pageToken, max = 50, timeoutMs = 15000 } = {}) {
-      const q = new URLSearchParams({ labelIds: 'INBOX', maxResults: String(Math.min(100, Math.max(1, max))) });
+    // The messages in a folder ('INBOX' by default, or 'SENT') that arrived after `afterSec` (epoch seconds), newest first, one page at a time: { ids, next }.
+    async list({ afterSec, pageToken, max = 50, timeoutMs = 15000, label = 'INBOX' } = {}) {
+      if (!['INBOX', 'SENT'].includes(label)) throw new GmailError('bad_request', 400, true);
+      const q = new URLSearchParams({ labelIds: label, maxResults: String(Math.min(100, Math.max(1, max))) });
       if (afterSec) q.set('q', 'after:' + Math.floor(afterSec));
       if (pageToken) q.set('pageToken', pageToken);
       const j = await call('messages?' + q.toString(), timeoutMs);

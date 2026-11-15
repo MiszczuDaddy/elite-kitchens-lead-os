@@ -59,7 +59,7 @@ window.EMAILBOX = (() => {
     try {
       const r = (await call('checkEmail')({})).data || {};
       if (r.ok === false) $('em-err').textContent = r.error === 'forbidden' ? 'Google has not allowed Elite OS to read the mailbox yet (an admin step in Google Workspace is needed).' : 'Could not check the mailbox just now (' + (r.error || 'error') + '). Try again in a moment.';
-      else $('em-err').textContent = r.stored ? `Found ${r.stored} new email${r.stored === 1 ? '' : 's'} from customers.` : 'No new emails from customers.';
+      else { const a = r.stored || 0, b = r.sentStored || 0; $('em-err').textContent = a || b ? 'Found ' + [a ? `${a} new email${a === 1 ? '' : 's'} from customers` : '', b ? `${b} you sent from Gmail` : ''].filter(Boolean).join(' and ') + '.' : 'No new emails to or from customers. (An email you sent in the last two minutes is picked up a little later.)'; }
     } catch (e) { $('em-err').textContent = errText(e); }
     $('em-check').disabled = false;
   }
@@ -76,7 +76,7 @@ window.EMAILBOX = (() => {
 window.EMAILS = (() => {
   const L = { active: false, unsub: null, items: [], filter: 'all', query: '', limit: 100, loaded: false, error: null, sel: null, seq: 0 };
   const MAX = 500, BASE = ['nav-inbox', 'nav-pipeline', 'nav-appointments', 'nav-quotes', 'nav-projects', 'nav-assistant'];
-  const KIND = { customer: 'Received', reply: 'Sent · your reply', followup: 'Sent · follow-up', quotefollowup: 'Sent · quote follow-up', quote: 'Sent · quote' };
+  const KIND = { customer: 'Received', reply: 'Sent · your reply', followup: 'Sent · follow-up', quotefollowup: 'Sent · quote follow-up', quote: 'Sent · quote', gmail: 'Sent · from Gmail' };
   const DAY_F = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin' }), TIME_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), DATE_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' });
   const FULL_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const handles = (hash) => hash === '#emails';

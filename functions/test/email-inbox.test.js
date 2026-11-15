@@ -29,7 +29,7 @@ const b64 = (s, enc = 'utf8') => Buffer.from(s, enc).toString('base64url');
 // ---- a fake Gmail: a mailbox of messages (newest first), and a record of every call ----
 function fakeMailbox(msgs = []) {
   const m = { msgs, listCalls: [], getCalls: [], listError: null,
-    async list({ afterSec, pageToken, max } = {}) { m.listCalls.push({ afterSec, pageToken, max }); if (m.listError) throw m.listError; return { ids: m.msgs.map((x) => x.id), next: null }; },
+    async list({ afterSec, pageToken, max, label = 'INBOX' } = {}) { m.listCalls.push({ afterSec, pageToken, max, label }); if (m.listError) throw m.listError; return { ids: m.msgs.filter((x) => (x.labelIds || []).includes(label)).map((x) => x.id), next: null }; },
     async get(id, { full = false } = {}) { m.getCalls.push({ id, full }); const x = m.msgs.find((y) => y.id === id); return full ? x : { id: x.id, threadId: x.threadId, labelIds: x.labelIds, internalDate: x.internalDate, payload: { headers: x.payload.headers } }; } };
   return m;
 }
@@ -100,7 +100,7 @@ test('THE SWEEP: a customer\'s reply is kept in their chat (only what they wrote
     gm('ddd444', { from: 'Anna Apple <anna@example.com>', labels: ['INBOX', 'SENT'], text: 'a copy of something sent' }),
   ]);
   const before = await conv(ANNA), r = await sweep(mb);
-  assert.deepEqual([r.ok, r.listed, r.matched, r.stored], [true, 4, 1, 1]);
+  assert.deepEqual([r.ok, r.listed, r.matched, r.stored], [true, 5, 1, 1], 'four in the inbox and one in the Sent folder (which carries both labels)');
   const [e] = await emails(ANNA); assert.equal(e.id, 'g_aaa111');
   assert.deepEqual([e.direction, e.subject, e.fromEmail, e.fromName, e.to, e.threadId, e.messageId, e.references, e.attachments], ['in', 'Re: Your Elite Kitchens quote EK-0112', 'anna@example.com', 'Anna Apple', MAILBOX, 'th_aaa111', '<aaa111@mail.example>', ['<q0@mail.example>'], [{ name: 'wall.pdf', size: 1234 }]]);
   assert.equal(e.body, 'Hi, the price looks fine. Can you call me tomorrow?', 'the quoted history is not kept'); assert.equal(e.createdAt.toMillis(), NOW - 3600e3);
@@ -117,7 +117,8 @@ test('SWEEPING AGAIN: nothing is read twice or stored twice; the unread count go
   const mb = fakeMailbox([gm('aaa111', { from: 'anna@example.com', text: 'first' })]);
   await sweep(mb); await sweep(mb, NOW + 300e3); await sweep(mb, NOW + 600e3);
   assert.equal((await emails(ANNA)).length, 1); assert.equal((await conv(ANNA)).unreadCount, 1); assert.equal(mb.getCalls.length, 2, 'one metadata look and one full read, the other sweeps found nothing new');
-  assert.equal(mb.listCalls[0].afterSec, Math.floor((NOW - 3 * DAY - 15 * 60e3) / 1000), 'the first time: the last 3 days'); assert.equal(mb.listCalls[1].afterSec, Math.floor((NOW - 15 * 60e3) / 1000), 'then from just before the last sweep');
+  const inbox = mb.listCalls.filter((x) => x.label === 'INBOX'); assert.equal(mb.listCalls.length, 2 * inbox.length, 'every sweep looks at the inbox and at the Sent folder');
+  assert.equal(inbox[0].afterSec, Math.floor((NOW - 3 * DAY - 15 * 60e3) / 1000), 'the first time: the last 3 days'); assert.equal(inbox[1].afterSec, Math.floor((NOW - 15 * 60e3) / 1000), 'then from just before the last sweep');
   mb.msgs.unshift(gm('eee555', { from: 'anna@example.com', text: 'second', at: NOW + 400e3 })); await sweep(mb, NOW + 900e3);
   assert.deepEqual((await emails(ANNA)).map((x) => x.body).sort(), ['first', 'second']); const c = await conv(ANNA); assert.deepEqual([c.unreadCount, c.emailInboundAt.toMillis()], [2, NOW + 400e3]);
   await sweep(mb, NOW + 1200e3); assert.equal((await emails(ANNA)).length, 2);
@@ -195,8 +196,8 @@ test('STAFF ONLY, AND THE CHECK BUTTON: the callables refuse a signed-out or oth
   assert.equal((await run(staff, { phone: ANNA, body: 'Hello there' })).ok, true);
   const mb = fakeMailbox([gm('zzz999', { from: 'bob@example.com', text: 'ok thanks' })]); const check = (auth, inbox, data) => h.checkEmail(auth, data, { db, cfg, inbox });
   await rejects(check(null, { enabled: true, reader: mb, mailbox: MAILBOX }), 'unauthenticated'); await rejects(check(staff, { enabled: false }), 'failed-precondition', /not switched on/); await rejects(check(staff, null), 'failed-precondition'); await rejects(check(staff, { enabled: true, reader: mb, mailbox: MAILBOX }, { x: 1 }), 'invalid-argument');
-  assert.deepEqual(await check(staff, { enabled: true, reader: mb, mailbox: MAILBOX }), { ok: true, stored: 1, matched: 1 });
-  mb.listError = new Gmail.GmailError('forbidden', 403, true); assert.deepEqual(await check(staff, { enabled: true, reader: mb, mailbox: MAILBOX }), { ok: false, stored: 0, matched: 0, error: 'forbidden' });
+  assert.deepEqual(await check(staff, { enabled: true, reader: mb, mailbox: MAILBOX }), { ok: true, stored: 1, matched: 1, sentStored: 0, sentMatched: 0 });
+  mb.listError = new Gmail.GmailError('forbidden', 403, true); assert.deepEqual(await check(staff, { enabled: true, reader: mb, mailbox: MAILBOX }), { ok: false, stored: 0, matched: 0, sentStored: 0, sentMatched: 0, error: 'forbidden' });
 });
 
 test('ERASURE: deleting a customer also deletes their emails', async () => {

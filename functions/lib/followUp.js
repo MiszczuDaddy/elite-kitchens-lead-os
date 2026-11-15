@@ -31,6 +31,7 @@ function refusal(c, nowMs) {
   if (ms(f.sendingUntil) > nowMs) return 'An email is being sent to them right now.';
   if ((f.emailCount || 0) >= MAX_EMAILS) return 'They have already had two follow-up emails.';
   if (f.emailAt && nowMs - ms(f.emailAt) < COOLDOWN_MS) return `They were emailed on ${when(ms(f.emailAt))}. Wait until ${when(ms(f.emailAt) + COOLDOWN_MS)} before another.`;
+  if (c.lastEmailDir === 'out' && ms(c.lastEmailAt) && nowMs - ms(c.lastEmailAt) < COOLDOWN_MS) return `You emailed them on ${when(ms(c.lastEmailAt))} (from Gmail or from their chat). Wait until ${when(ms(c.lastEmailAt) + COOLDOWN_MS)} before another.`;          // an email you wrote yourself counts too
   return null;
 }
 

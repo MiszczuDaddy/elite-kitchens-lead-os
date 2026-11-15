@@ -175,7 +175,7 @@ async function attempt(deps, actor, id, did, { nowMs, retry = false, message = n
   if (stale) return { did, channel, state: 'stale', skipped: true };
   if (channel === 'email' && (outcome.state === 'sent' || outcome.state === 'unknown')) {                          // the list of all emails: the quote itself, by email (a short preview only; never the PDF)
     await EmailLog.record(db, { id: `qd_${id}_${did}_${claim.attempt}`.replace(/[^A-Za-z0-9_-]/g, '_'), phone: claim.phone, name: claim.d.customerName, direction: 'out', kind: 'quote', subject: claim.d.subject,
-      text: claim.d.message, email: claim.d.to && claim.d.to.email, atMs: nowMs, confirmed: outcome.state === 'sent', by: actor && actor.id, quoteRef: claim.quoteRef });
+      text: claim.d.message, email: claim.d.to && claim.d.to.email, atMs: nowMs, confirmed: outcome.state === 'sent', by: actor && actor.id, quoteRef: claim.quoteRef, gmailId: outcome.providerId });
   }
   return { did, channel, state: outcome.state, error: outcome.error || null, committed: committed && committed.committed ? { stage: committed.stage, value: committed.value } : null };
 }

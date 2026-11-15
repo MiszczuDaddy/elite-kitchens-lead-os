@@ -91,8 +91,8 @@ test('A QUOTE FOLLOW-UP: listed with the quote number, and kept in the customer\
   assert.match(e.snippet, /^Hi Anna, I just wanted to check that you received your quote \(EK-0112\)/);
   const kept = (await db.doc(`conversations/${ANNA}/emails/qf_${QID}_${sent1}`).get()).data(); assert.deepEqual([kept.kind, kept.quoteRef, kept.direction], ['quotefollowup', 'EK-0112', 'out']);
   assert.equal((await db.doc('conversations/' + ANNA).get()).data().updatedAt.toMillis(), sent1, 'the chat did not move up the Inbox');
-  await db.doc('quotes/' + QID).update({ sentAt: ts(NOW - 15 * DAY) });                                                             // sent again: a new sending
-  await QF.send({ db, mailer: mailer(g) }, actor, { quoteId: QID }, { nowMs: NOW + 1000 }); assert.equal((await logOf(ANNA)).length, 2);
+  await db.doc('quotes/' + QID).update({ sentAt: ts(NOW + 3600e3) });                                                               // sent again, after the last email: a new sending
+  await QF.send({ db, mailer: mailer(g) }, actor, { quoteId: QID }, { nowMs: NOW + 16 * DAY }); assert.equal((await logOf(ANNA)).length, 2);
 });
 
 test('THE LIST NEVER STOPS AN EMAIL: when it cannot be written the email is still sent and recorded; bad entries are refused; text is clipped', async () => {

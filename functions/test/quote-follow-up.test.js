@@ -52,7 +52,7 @@ test('THE SCREEN KNOWS: after the email the card says it was emailed (this sendi
 test('YOUR OWN WORDS: an edited subject and body are what is sent (within limits); anything else in the request is refused', async () => {
   const g = gmail(); await go(g, { quoteId: QID, subject: 'Quick check on your quote', body: 'Hi Maeve, just checking the quote reached you and everything makes sense.' });
   assert.match(g.sent[0], /^Subject: Quick check on your quote/m); assert.ok(bodyOf(g.sent[0]).includes('just checking the quote reached you'));
-  await db.doc('conversations/' + P).update({ quoteMail: require('firebase-admin/firestore').FieldValue.delete() }); const g2 = gmail();
+  await db.doc('conversations/' + P).update({ quoteMail: require('firebase-admin/firestore').FieldValue.delete(), lastEmailAt: require('firebase-admin/firestore').FieldValue.delete(), lastEmailDir: require('firebase-admin/firestore').FieldValue.delete(), lastEmailSubject: require('firebase-admin/firestore').FieldValue.delete() }); const g2 = gmail();
   for (const data of [{ quoteId: QID, subject: 'Two\nlines' }, { quoteId: QID, subject: 'x'.repeat(121) }, { quoteId: QID, body: 'short' }, { quoteId: QID, body: 'x'.repeat(2001) }, { quoteId: QID, to: 'someone@else.ie' }, { quoteId: 'q_nope' }, { quoteId: 5 }, {}, null, []]) await rejects(go(g2, data), 'invalid-argument');
   assert.equal(g2.sent.length, 0);
 });
@@ -78,16 +78,17 @@ test('WHO MAY BE FOLLOWED UP: only a Sent, unanswered quote that is two weeks (1
 test('ONCE PER SENDING: a second press is refused with the date; a double press sends one email; sending the quote again allows one more', async () => {
   const g = gmail(); await go(g);
   await rejects(go(g, { quoteId: QID }, {}, NOW + 3600e3), 'failed-precondition', /already emailed them about this quote on 9 Nov/); assert.equal(g.sent.length, 1);
-  await db.doc('conversations/' + P).update({ quoteMail: require('firebase-admin/firestore').FieldValue.delete() }); const g2 = gmail();
+  await db.doc('conversations/' + P).update({ quoteMail: require('firebase-admin/firestore').FieldValue.delete(), lastEmailAt: require('firebase-admin/firestore').FieldValue.delete(), lastEmailDir: require('firebase-admin/firestore').FieldValue.delete(), lastEmailSubject: require('firebase-admin/firestore').FieldValue.delete() }); const g2 = gmail();
   const both = await Promise.allSettled([go(g2), go(g2)]); assert.equal(both.filter((x) => x.status === 'fulfilled').length, 1, 'exactly one of two presses at once sends'); assert.equal(g2.sent.length, 1);
-  await db.doc('quotes/' + QID).update({ sentAt: ts(NOW - 15 * DAY) }); const g3 = gmail(); assert.equal((await go(g3)).ok, true, 'a quote sent again may be followed up once more'); assert.equal(g3.sent.length, 1);
+  await db.doc('quotes/' + QID).update({ sentAt: ts(NOW + 3600e3) }); const g3 = gmail(); assert.equal((await go(g3, { quoteId: QID }, {}, NOW + 16 * DAY)).ok, true, 'a quote sent again (after the last email) may be followed up once more'); assert.equal(g3.sent.length, 1);
+  await db.doc('quotes/' + QID).update({ sentAt: ts(NOW + 15 * DAY) }); await rejects(go(gmail(), { quoteId: QID }, {}, NOW + 30 * DAY), 'failed-precondition', /You emailed them on[\s\S]*after the quote was sent/);        // an email you wrote since the quote was sent (here the follow-up just sent) stops another
 });
 
 test('GOOGLE REFUSES: nothing is recorded, the card is not hidden, and the customer can be tried again; an answer we cannot confirm counts as sent and is never retried by itself', async () => {
   const g = gmail('refused'); await rejects(go(g), 'failed-precondition', /limiting how fast email can be sent[\s\S]*Nothing was sent/);
   const c = await conv(); assert.ok(!c.quoteMail || !c.quoteMail[QID] || !c.quoteMail[QID].at, 'not recorded'); assert.equal(await mark(), null, 'the card stays');
   assert.equal((await go(gmail())).ok, true, 'the claim was released: they can try again');
-  await db.doc('conversations/' + P).update({ quoteMail: require('firebase-admin/firestore').FieldValue.delete() });
+  await db.doc('conversations/' + P).update({ quoteMail: require('firebase-admin/firestore').FieldValue.delete(), lastEmailAt: require('firebase-admin/firestore').FieldValue.delete(), lastEmailDir: require('firebase-admin/firestore').FieldValue.delete(), lastEmailSubject: require('firebase-admin/firestore').FieldValue.delete() });
   const u = gmail('unknown'); await rejects(go(u), 'unavailable', /Not confirmed[\s\S]*Sent folder of followups@example\.com/);
   const m = (await conv()).quoteMail[QID]; assert.deepEqual([m.confirmed, !!m.at], [false, true], 'counted as sent');
   await rejects(go(gmail()), 'failed-precondition', /already emailed/);

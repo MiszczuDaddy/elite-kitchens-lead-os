@@ -17,6 +17,7 @@ One page that lists **every email Elite OS has sent to, or received from, a cust
 | **Sent · follow-up** | The follow-up to a lead who never replied (the Email button, or the Assistant). |
 | **Sent · quote follow-up** | The follow-up about a quote nobody answered (after two weeks), with the quote number. |
 | **Sent · quote** | The quote itself, sent by email, with the quote number (its wording is not kept: the page shows the start of it). |
+| **Sent · from Gmail** | An email you wrote to a customer from Gmail yourself, found in the mailbox's Sent folder (see docs/EMAIL_INBOX.md, "Both directions"). |
 
 A red **Not confirmed** means Google did not confirm the email was sent: check the Sent folder of the mailbox (Elite OS never resends it by itself); the email's page says so too. The list is live: a new email appears at the top while the page is open. **Show older** loads more (100 at a time, up to 500).
 

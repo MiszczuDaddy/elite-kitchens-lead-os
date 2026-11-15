@@ -441,7 +441,7 @@ const checkEmail = async (auth, data, deps) => {
   if (data != null && (typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length)) throw new HttpsError('invalid-argument', 'Nothing to send here.');
   if (!deps.inbox || !deps.inbox.enabled) throw new HttpsError('failed-precondition', 'Email checking is not switched on yet.');
   const r = await emailInboundLib.sweep({ db: deps.db, reader: deps.inbox.reader, mailbox: deps.inbox.mailbox });
-  return { ok: r.ok, stored: r.stored, matched: r.matched, ...(r.error ? { error: r.error } : {}) };
+  return { ok: r.ok, stored: r.stored, matched: r.matched, sentStored: r.sentStored, sentMatched: r.sentMatched, ...(r.error ? { error: r.error } : {}) };
 };
 const sendQuoteFollowUp = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return quoteFollowUpLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
 const todayLib = require('./today');

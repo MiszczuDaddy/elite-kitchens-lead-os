@@ -2,16 +2,18 @@
 // The list of every email Elite OS has sent to, or received from, a customer (14 Nov 2026, docs/EMAIL_LIST.md): the "Emails" page. Staff read it; only the server writes it.
 //   emailLog/{id} = { phone, name, direction: 'in'|'out', kind, subject, snippet, email, at, confirmed, by?, quoteRef? }
 //   kind: customer (they wrote to us) · reply (you replied by email from their chat) · followup (the follow-up to a lead who never replied) · quotefollowup (the follow-up about a quote nobody answered) · quote (the quote itself, by email)
+//         gmail (you wrote to them from Gmail yourself: found in the Sent folder by the sweep, lib/emailInbound.js)
 // It is a COPY made for looking at: a short preview (never the whole email, never an attachment). The full text of a received email, a reply and a follow-up stays in the customer's own chat
 // (conversations/{phone}/emails); a quote email's body is not kept beyond the preview. Writing it never changes whether an email was sent or recorded: a failure here is logged and ignored, because the
 // email already went (or arrived) and is recorded where it matters. Deleting a customer deletes their entries (store.js deleteCustomerData).
-const { Timestamp, FieldValue } = require('firebase-admin/firestore');
+const { Timestamp } = require('firebase-admin/firestore');
 
-const KINDS = ['customer', 'reply', 'followup', 'quotefollowup', 'quote'];
+const KINDS = ['customer', 'reply', 'followup', 'quotefollowup', 'quote', 'gmail'];
 const SNIPPET_MAX = 200, SUBJECT_MAX = 200, NAME_MAX = 80;
 const oneLine = (s, n) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n);
 
-// entry: { id, phone, name, direction, kind, subject, text, email, atMs, confirmed?, by?, quoteRef? }. Never throws; returns whether it was written.
+// entry: { id, phone, name, direction, kind, subject, text, email, atMs, confirmed?, by?, quoteRef?, gmailId? }. Never throws; returns whether it was written.
+// gmailId is Google's own id of the email: it lets the Sent-mail watcher recognise an email Elite OS sent itself (and not list it twice).
 async function record(db, entry) {
   try {
     if (!entry || !/^[A-Za-z0-9_\-]{3,160}$/.test(String(entry.id || '')) || !/^\d{9,15}$/.test(String(entry.phone || '')) || !KINDS.includes(entry.kind) || !['in', 'out'].includes(entry.direction)) return false;
@@ -19,7 +21,7 @@ async function record(db, entry) {
       phone: entry.phone, name: oneLine(entry.name, NAME_MAX) || null, direction: entry.direction, kind: entry.kind,
       subject: oneLine(entry.subject, SUBJECT_MAX) || '(no subject)', snippet: oneLine(entry.text, SNIPPET_MAX), email: oneLine(entry.email, 200) || null,
       at: Timestamp.fromMillis(Number(entry.atMs) || Date.now()), confirmed: entry.confirmed !== false,
-      ...(entry.by ? { by: oneLine(entry.by, 120) } : {}), ...(entry.quoteRef ? { quoteRef: oneLine(entry.quoteRef, 40) } : {}),
+      ...(entry.by ? { by: oneLine(entry.by, 120) } : {}), ...(entry.quoteRef ? { quoteRef: oneLine(entry.quoteRef, 40) } : {}), ...(entry.gmailId ? { gmailId: oneLine(entry.gmailId, 60) } : {}),
     });
     return true;
   } catch (e) {
@@ -36,9 +38,9 @@ async function keepSent(db, e) {
     const subject = oneLine(e.subject, SUBJECT_MAX) || '(no subject)', convRef = db.collection('conversations').doc(e.phone);
     await convRef.collection('emails').doc(e.id).set({ direction: 'out', gmailId: e.providerId || null, threadId: null, messageId: null, references: [], subject, fromEmail: e.sender || null, fromName: null, to: e.to || null,
       body: String(e.body == null ? '' : e.body).slice(0, 5000), attachments: [], createdAt: Timestamp.fromMillis(e.atMs), by: e.by || null, confirmed: e.confirmed !== false, kind: e.kind, ...(e.quoteRef ? { quoteRef: e.quoteRef } : {}) });
-    await convRef.update({ lastEmailAt: FieldValue.serverTimestamp(), lastEmailSubject: subject.slice(0, 120), lastEmailDir: 'out' });
+    await convRef.update({ lastEmailAt: Timestamp.fromMillis(e.atMs), lastEmailSubject: subject.slice(0, 120), lastEmailDir: 'out' });
   } catch (err) { console.log(JSON.stringify({ level: 'error', msg: 'sent email not kept in the chat', kind: e && e.kind, code: err && err.code })); }
-  return record(db, { id: e.phone + '_' + e.id, phone: e.phone, name: e.name, direction: 'out', kind: e.kind, subject: e.subject, text: e.body, email: e.to, atMs: e.atMs, confirmed: e.confirmed, by: e.by, quoteRef: e.quoteRef });
+  return record(db, { id: e.phone + '_' + e.id, phone: e.phone, name: e.name, direction: 'out', kind: e.kind, subject: e.subject, text: e.body, email: e.to, atMs: e.atMs, confirmed: e.confirmed, by: e.by, quoteRef: e.quoteRef, gmailId: e.providerId });
 }
 
 // A quote email that could not be confirmed was settled by staff ("it arrived" / "it did not arrive"): the list follows. Never throws.
@@ -67,4 +69,4 @@ async function backfill(db, { apply = false } = {}) {
   return out;
 }
 
-module.exports = { record, keepSent, settle, backfill, KINDS, SNIPPET_MAX };
+module.exports = { record, keepSent, settle, backfill, oneLine, KINDS, SNIPPET_MAX };
