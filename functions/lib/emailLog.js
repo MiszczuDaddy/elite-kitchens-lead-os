@@ -1,5 +1,5 @@
 'use strict';
-// The list of every email Elite OS has sent to, or received from, a customer (14 Nov 2026, docs/EMAIL_LIST.md): the "Emails" window. Staff read it; only the server writes it.
+// The list of every email Elite OS has sent to, or received from, a customer (14 Nov 2026, docs/EMAIL_LIST.md): the "Emails" page. Staff read it; only the server writes it.
 //   emailLog/{id} = { phone, name, direction: 'in'|'out', kind, subject, snippet, email, at, confirmed, by?, quoteRef? }
 //   kind: customer (they wrote to us) · reply (you replied by email from their chat) · followup (the follow-up to a lead who never replied) · quotefollowup (the follow-up about a quote nobody answered) · quote (the quote itself, by email)
 // It is a COPY made for looking at: a short preview (never the whole email, never an attachment). The full text of a received email, a reply and a follow-up stays in the customer's own chat

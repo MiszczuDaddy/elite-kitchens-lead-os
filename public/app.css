@@ -1361,19 +1361,48 @@ div.td-open { cursor: default; }
 
 .email-hd { flex: none; } .email-hd.em-hot { color: var(--accent); }
 
-/* The Emails window (docs/EMAIL_LIST.md): every email in and out, newest first. */
-.ea-dlg { max-width: 640px; }
-.ea-filters { display: flex; gap: 8px; margin: 6px 0 8px; flex-wrap: wrap; }
+/* The Emails page (docs/EMAIL_LIST.md): the list of every email in and out on the left, the chosen email on the right; on a phone one at a time. */
+.emails-pane { display: none; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg); }
+.app[data-view=emails] { grid-template-columns: 196px minmax(0,1fr); }
+.app[data-view=emails] .list-pane, .app[data-view=emails] .thread-pane, .app[data-view=emails] .details-pane { display: none !important; }
+.app[data-view=emails] .emails-pane { display: flex; }
+@media (min-width: 1280px) and (max-width: 1439px) { .app[data-view=emails] { grid-template-columns: 176px minmax(0,1fr); } }
+@media (min-width: 900px) and (max-width: 1279px) { .app[data-view=emails] { grid-template-columns: 68px minmax(0,1fr); } }
+@media (max-width: 899px) { .app[data-view=emails] { grid-template-columns: minmax(0,1fr); } }
+.emails-pane .quotes-head .quotes-titles { flex: 1 1 200px; }
+.emp-tools { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 12px 28px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.emp-search { flex: 1 1 280px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
+.emp-filters { display: flex; gap: 8px; flex-wrap: wrap; }
 .ea-chip { min-height: 38px; padding: 6px 16px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
 .ea-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-.ea-list { list-style: none; margin: 0; padding: 0; max-height: 56vh; overflow-y: auto; border-top: 1px solid var(--line); }
+.emp-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 440px) minmax(0, 1fr); }
+.emp-listcol { min-height: 0; overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); }
+.emp-note { margin: 0; padding: 12px 16px 0; }
+.ea-list { list-style: none; margin: 0; padding: 0; }
 .ea-row { border-bottom: 1px solid var(--line); }
-.ea-open { display: block; width: 100%; min-height: 56px; padding: 10px 6px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
-.ea-open:hover { background: var(--hover); }
+.ea-open { display: block; width: 100%; min-height: 56px; padding: 10px 16px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.ea-open:hover { background: var(--hover); } .ea-open[aria-current="true"] { background: var(--selected); }
 .ea-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .ea-name { font-weight: 650; overflow-wrap: anywhere; } .ea-when { flex: none; font-size: 12.5px; color: var(--muted); }
 .ea-sub { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin: 2px 0; font-size: 12.5px; }
 .ea-kind { font-weight: 600; } .ea-in { color: var(--ok); } .ea-out { color: var(--accent); }
 .ea-warn { padding: 0 7px; border-radius: 9px; background: #f8e3e1; color: var(--err); font-weight: 600; } .ea-ref { color: var(--muted); }
 .ea-subject { font-weight: 600; overflow-wrap: anywhere; } .ea-snip { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 899px) { .ea-dlg { width: 100%; max-width: none; } .ea-list { max-height: 60vh; } .ea-chip { min-height: 44px; } }
+.emp-more { padding: 12px 16px 20px; }
+.emp-readcol { min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
+.emp-empty { color: var(--muted); padding: 40px 0; text-align: center; }
+.emp-tolist { display: none; margin-bottom: 12px; }
+.emp-d-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.emp-d-name { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.emp-d-subject { margin: 12px 0 8px; font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
+.emp-d-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 14px; margin: 0 0 14px; font-size: 13.5px; }
+.emp-d-meta dt { color: var(--muted); } .emp-d-meta dd { margin: 0; overflow-wrap: anywhere; }
+.emp-d-warn { margin: 0 0 14px; padding: 9px 12px; border-radius: 8px; background: #f8e3e1; color: #7a1f1b; font-size: 13.5px; }
+.emp-d-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+@media (max-width: 899px) {
+  .emp-tools { padding: 10px 12px; } .emp-cols { grid-template-columns: minmax(0, 1fr); } .emp-listcol { border-right: 0; } .emp-readcol { padding: 14px 14px 28px; }
+  .emails-pane[data-sub=list] .emp-readcol, .emails-pane[data-sub=read] .emp-listcol { display: none; }
+  .emails-pane[data-sub=read] .emp-tools { display: none; }                                    /* reading an email: the search and filters are for the list */
+  .emp-tolist { display: inline-flex; min-height: 44px; } .ea-chip { min-height: 44px; } .emp-search { min-height: 44px; font-size: 16px; }
+  .emails-pane .quotes-head { padding: max(14px,env(safe-area-inset-top)) 12px 12px; gap: 6px; }
+}

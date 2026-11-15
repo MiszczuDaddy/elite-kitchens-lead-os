@@ -467,6 +467,16 @@ function routeFromHash() {
   // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
   if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
   if (window.PROJ && !PROJ.mayLeave(location.hash)) return;           // Phase 7: leaving a project with unsaved notes asks first
+  // Emails (14 Nov 2026): #emails, the list of every email in and out. Like the other screens it closes whatever is open before it shows, and any other address closes it.
+  if (window.EMAILS) {
+    if (EMAILS.handles(location.hash)) {
+      if (S.selected) closeConversation(true);
+      if (window.TODAY) TODAY.fromToday = false;
+      for (const m of [window.TODAY, window.PIPE, window.APPT, window.QUOTES, window.PROJ, window.ASSIST]) if (m && m.active) m.hide();
+      EMAILS.show(); return;
+    }
+    if (EMAILS.active) EMAILS.hide();
+  }
   // Today (Phase 11): the screen Elite OS opens on. Any other address closes it first. This comes AFTER the two "unsaved changes" questions above: going to Today must ask them too
   // (review of 18 Oct 2026: it used to close a quote or project with unsaved edits without asking).
   if (window.TODAY) {
@@ -514,7 +524,7 @@ function routeFromHash() {
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = window.TODAY && TODAY.active ? 'today' : window.ASSIST && ASSIST.active ? 'assistant' : window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.EMAILS && EMAILS.active ? 'emails' : window.TODAY && TODAY.active ? 'today' : window.ASSIST && ASSIST.active ? 'assistant' : window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
