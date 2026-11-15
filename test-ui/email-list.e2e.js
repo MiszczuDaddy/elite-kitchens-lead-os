@@ -92,6 +92,7 @@ const web = http.createServer((req, res) => {
   await entry('g_10', P.bob, 'Bob Byrne', 'out', 'followup', 'Your kitchen enquiry with Elite Kitchens', 'Hi Bob, Thanks for your enquiry with Elite Kitchens. I just wanted to check in', Date.now() - 3 * DAY);
   await entry('g_11', P.anna, 'Anna Apple', 'out', 'quotefollowup', 'Your Elite Kitchens quote EK-0112', 'Hi Anna, I just wanted to check that you received your quote (EK-0112)', Date.now() - 2 * DAY, { quoteRef: 'EK-0112' });
   await entry('g_12', P.bob, 'Bob Byrne', 'out', 'quote', 'Elite Kitchens \u2014 Kitchen Quote EK-0118 v1', 'Dear Bob, Please find attached your quotation', Date.now() - 5 * DAY, { quoteRef: 'EK-0118', confirmed: false });
+  await page.click('#emails-rail'); await page.waitForSelector('#ea-dlg[open]'); await until(async () => (await rows()).length === 4, 'four emails on the computer screen'); await page.screenshot({ path: path.join(SHOTS, 'email-list-desktop.png') }); await page.click('#ea-close');
   const m = await open({ width: 375, height: 812 }, true);
   await m.page.click('#to-emails'); await m.page.waitForSelector('#ea-dlg[open]'); await m.page.waitForSelector('#ea-list .ea-open');
   const box = await m.page.locator('#ea-dlg').boundingBox(), row = await m.page.locator('#ea-list .ea-open').first().boundingBox(), eb = await m.page.locator('#to-emails').boundingBox();
