@@ -76,7 +76,7 @@ window.EMAILBOX = (() => {
 window.EMAILS = (() => {
   const L = { active: false, unsub: null, items: [], filter: 'all', query: '', limit: 100, loaded: false, error: null, sel: null, seq: 0 };
   const MAX = 500, BASE = ['nav-inbox', 'nav-pipeline', 'nav-appointments', 'nav-quotes', 'nav-projects', 'nav-assistant'];
-  const KIND = { customer: 'Received', reply: 'Sent · your reply', followup: 'Sent · follow-up', quotefollowup: 'Sent · quote follow-up', quote: 'Sent · quote', gmail: 'Sent · from Gmail' };
+  const KIND = { customer: 'Received', reply: 'Sent · your reply', followup: 'Sent · follow-up', quotefollowup: 'Sent · quote follow-up', quote: 'Sent · quote', gmail: 'Sent · from Gmail', assistant: 'Sent · written by the Assistant' };
   const DAY_F = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin' }), TIME_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), DATE_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' });
   const FULL_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const handles = (hash) => hash === '#emails';

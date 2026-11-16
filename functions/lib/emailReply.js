@@ -24,7 +24,8 @@ async function latestInbound(convRef) {
   return d || null;
 }
 // mailer: { enabled, sender, replyTo, fromName, gmail } (the BUSINESS mailbox, not the follow-up one: the reply must come from the address they wrote to)
-async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
+// thread:false sends a NEW email (no Gmail conversation: it may come from another mailbox than the one the customer wrote to); kind is how the email is labelled in the list ('reply', or 'assistant' when the Assistant wrote it).
+async function send({ db, mailer }, actor, data, { nowMs = Date.now(), thread = true, kind = 'reply' } = {}) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw bad('Missing details.');
   for (const k of Object.keys(data)) if (!['phone', 'subject', 'body'].includes(k)) throw bad(`Unknown field: ${k}`);
   const phone = normalizePhone(data.phone);
@@ -54,17 +55,17 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
   let raw;
   try {
     raw = Gmail.toRaw(Gmail.buildTextMessage({ from: mailer.sender, fromName: mailer.fromName || 'Elite Kitchens', to, replyTo: mailer.replyTo || mailer.sender, subject: subject.trim(), text: body,
-      ...(inb && inb.messageId ? { inReplyTo: inb.messageId, references: [...(inb.references || []), inb.messageId] } : {}) }));
+      ...(thread && inb && inb.messageId ? { inReplyTo: inb.messageId, references: [...(inb.references || []), inb.messageId] } : {}) }));
   } catch (e) { await release(); throw bad('The email could not be put together (the subject or an address is not valid). Nothing was sent.'); }
   const keep = async (confirmed, sent) => {
     const id = 'g_' + (sent && sent.id ? sent.id : 'u' + nowMs);
-    await convRef.collection('emails').doc(id).set({ direction: 'out', gmailId: sent && sent.id || null, threadId: (sent && sent.threadId) || (inb && inb.threadId) || null, messageId: null, references: [], subject: subject.trim().slice(0, 200), fromEmail: mailer.sender, fromName: null, to,
-      body: body.slice(0, 5000), attachments: [], createdAt: Timestamp.fromMillis(nowMs), by: actor.id, confirmed });
+    await convRef.collection('emails').doc(id).set({ direction: 'out', gmailId: sent && sent.id || null, threadId: (sent && sent.threadId) || (thread && inb && inb.threadId) || null, messageId: null, references: [], subject: subject.trim().slice(0, 200), fromEmail: mailer.sender, fromName: null, to,
+      body: body.slice(0, 5000), attachments: [], createdAt: Timestamp.fromMillis(nowMs), by: actor.id, confirmed, kind });
     await convRef.update({ lastEmailAt: Timestamp.fromMillis(nowMs), lastEmailSubject: subject.trim().slice(0, 120), lastEmailDir: 'out', updatedAt: Timestamp.fromMillis(nowMs), emailSendingUntil: FieldValue.delete(), emailLast: { hash: fp, at: Timestamp.fromMillis(nowMs) } });
-    await EmailLog.record(db, { id, phone, name: c.name, direction: 'out', kind: 'reply', subject, text: body, email: to, atMs: nowMs, confirmed, by: actor.id, gmailId: sent && sent.id });          // the list of all emails
+    await EmailLog.record(db, { id, phone, name: c.name, direction: 'out', kind, subject, text: body, email: to, atMs: nowMs, confirmed, by: actor.id, gmailId: sent && sent.id });          // the list of all emails
   };
   try {
-    const r = await mailer.gmail.sendRaw(raw, inb && inb.threadId ? { threadId: inb.threadId } : {});
+    const r = await mailer.gmail.sendRaw(raw, thread && inb && inb.threadId ? { threadId: inb.threadId } : {});
     await keep(true, r);
     return { ok: true, sentAt: nowMs, to };
   } catch (e) {

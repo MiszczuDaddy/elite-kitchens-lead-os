@@ -4,7 +4,7 @@
 //   decide      (called by the person, from the Approve / Reject buttons)   re-checks that nothing changed since the proposal, then applies it through the existing Elite OS
 //               functions (projects.js), or one small transaction for notes, as the person who approved. Applied once at most; every step is audited.
 // Rules this file keeps: a proposal expires after 30 minutes; only the person who asked can decide it; if the record changed since the proposal it is refused ("stale"), never overwritten;
-// nothing is applied while the AI is switched off, customer data is off, AI actions are off, or that kind of action is off; nothing is ever deleted. TWO kinds send: "followUpEmails" (3 Nov 2026, owner's
+// nothing is applied while the AI is switched off, customer data is off, AI actions are off, or that kind of action is off; nothing is ever deleted. THREE kinds send: "customerEmail" (15 Nov 2026: ONE email to ONE customer, written by the Assistant and sent only as the person approved it), "followUpEmails" (3 Nov 2026, owner's
 // decision), the follow-up email to leads who never replied, and "quoteFollowUps" (14 Nov 2026), one friendly follow-up about each quote nobody answered for two weeks (lib/quoteFollowUp.js); the first is (lib/followUp.js): the model supplies NO words (the email is fixed, lib/followUpText.js), the preview lists every recipient and the exact text, and
 // nothing goes until the person presses Approve; the send then applies the same rules again lead by lead.
 // The model supplies only ids and the wording the person asked for. It never supplies numbers, previews, or the final text: those are built here.
@@ -18,9 +18,10 @@ const PR = require('./projects');
 const FU = require('./followUp');
 const FT = require('./followUpText');
 const QF = require('./quoteFollowUp');
+const Reply = require('./emailReply');
 const Gmail = require('./gmail');
 
-const KINDS = { customerNote: 'Customer notes', projectUpdate: 'Project updates', followUpEmails: 'Follow-up emails to leads who never replied', quoteFollowUps: 'Follow-up emails about quotes nobody answered' };
+const KINDS = { customerNote: 'Customer notes', projectUpdate: 'Project updates', followUpEmails: 'Follow-up emails to leads who never replied', quoteFollowUps: 'Follow-up emails about quotes nobody answered', customerEmail: 'An email to one customer, written by the Assistant' };
 const EXPIRY_MS = 30 * 60 * 1000, MAX_PENDING = 5, NOTE_MAX = 1000, CONTACT_NOTES_MAX = 5000;
 const MAX_FOLLOWUPS = 30;                                                                // leads in one proposal (ask again for the rest)
 const PROPOSAL_ID = /^ap_[0-9a-f]{24}$/, PROJECT_ID = /^[pm]_[0-9a-f]{24}$/, DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -56,6 +57,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'propose_quote_followup_emails', kind: 'quoteFollowUps', description: 'Prepare the friendly follow-up email about EVERY quote that was sent at least two weeks ago and has had no reply (still Sent, nobody wrote since, not followed up for this sending, has an email address, not asked to be left alone). Use ONLY when the person asked to follow up or email the quotes nobody answered. You write no words: Elite OS builds the email and the list of who gets it. One follow-up per quote, never more. Nothing is sent until the person approves the preview.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'propose_customer_email', kind: 'customerEmail', description: 'Prepare ONE email to ONE customer, written by you, when the person asks you to write or send an email to a customer ("write a follow up email to Ray Ryan", "email Aoife about the delivery"). First find the customer (search_customers) and read their record, quotes and recent messages so what you write is accurate. Write a short, warm, plain email in the first person plural ("we"). Start with a greeting by first name; do NOT add a sign-off, the signature is added for you. Say only what the record supports: never invent prices, dates or promises, and never mention warranties or guarantees. For several customers at once use the follow-up tools instead. The person reads the exact text and presses Approve; nothing is sent before that.',
+    input_schema: { type: 'object', properties: { customerId: { type: 'string', description: 'the customer id (the phone number, digits only)' }, subject: { type: 'string', description: 'one line, at most 120 characters' }, body: { type: 'string', description: 'the email, 20 to 1800 characters, plain text, no sign-off' } }, required: ['customerId', 'subject', 'body'], additionalProperties: false } },
 ];
 const offKinds = (settings) => { const a = available(settings); return Object.keys(KINDS).filter((k) => !a[k]).map((k) => KINDS[k]); };       // the kinds that are not switched on, by name
 const isProposeTool =(name) => TOOLS.some((t) => t.name === name);
@@ -181,6 +184,38 @@ async function buildQuoteFollowUps(db, input, nowMs) {
     payload: { quoteIds: chosen.map((r) => r.id) }, baseline: { count: n } };
 }
 
+// ONE email to ONE customer, in the Assistant's own words (15 Nov 2026). The model writes the subject and the body; code adds the greeting if it is missing and the signature, refuses a warranty or guarantee promise, shows the
+// person the EXACT final text, and sends exactly that text only after Approve. At Approve it is checked again: a customer who wrote since it was prepared, one who asked not to be contacted, or an address that went are refused.
+const CE = { subjectMax: FT.LIMIT.subject, bodyMin: 20, bodyMax: 1800, fullMax: 5000 };
+const PROMISE = /\b(warrant(?:y|ies|ied)|guarantee[ds]?|guaranteeing)\b/i;                                       // standing rule: never any warranty language
+const SIGNED = /(?:\n|^)[ \t]*(?:kind regards|best regards|regards|many thanks|thanks|best wishes|best|sincerely)[,.!]?[ \t]*(?:\n[ \t]*(?:the\s+team\s+at\s+)?elite kitchens)?[ \t]*$/i;          // only a sign-off on a line of its own ("... we will do our best" is left alone)
+async function buildCustomerEmail(db, input, nowMs) {
+  const i = only(input, ['customerId', 'subject', 'body']);
+  if (typeof i.customerId !== 'string') throw new T.ToolError('customerId is needed.');
+  const phone = normalizePhone(i.customerId);
+  if (!/^\d{9,15}$/.test(phone)) throw new T.ToolError('That is not a valid customer id.');
+  if (typeof i.subject !== 'string' || /[\r\n]/.test(i.subject) || !i.subject.trim() || i.subject.trim().length > CE.subjectMax) throw new T.ToolError(`The subject must be one line of up to ${CE.subjectMax} characters.`);
+  if (typeof i.body !== 'string' || clean(i.body).length < CE.bodyMin || clean(i.body).length > CE.bodyMax) throw new T.ToolError(`The email must be between ${CE.bodyMin} and ${CE.bodyMax} characters.`);
+  if (PROMISE.test(i.subject) || PROMISE.test(i.body)) throw new T.ToolError('Do not mention warranties or guarantees in an email. Write it again without them.');
+  const [conv, contact] = await Promise.all([db.doc('conversations/' + phone).get(), db.doc('contacts/' + phone).get()]);
+  if (!conv.exists) throw new T.ToolError('No customer with that id.');
+  const c = conv.data(), k = contact.exists ? contact.data() : {}, email = String(k.email || '').trim(), name = String(k.name || c.name || '').trim();
+  if (c.doNotContact && c.doNotContact.on === true) throw new T.ToolError('They asked not to be contacted, so no email can be prepared.');
+  if (!email || !Gmail.EMAIL_RE.test(email)) throw new T.ToolError('This customer has no email address on file. Ask the person to add one in their Details first.');
+  let text = clean(i.body).replace(SIGNED, '').trim();                                                          // a sign-off the model added anyway is replaced by the real signature
+  if (!/^(hi|hello|dear|good (morning|afternoon|evening))\b/i.test(text)) text = `Hi ${FT.firstNameOf(name)},\n\n` + text;
+  const full = [text, '', 'Kind regards,', 'Elite Kitchens', [FT.CONTACT.phone, FT.CONTACT.email, FT.CONTACT.web].filter(Boolean).join(' | ')].join('\n');
+  if (full.length > CE.fullMax) throw new T.ToolError('The email is too long.');
+  const subject = i.subject.trim();
+  return { kind: 'customerEmail', phone, targetId: phone, title: `Email ${S.one(name || 'this customer', 60)}`,
+    preview: { rows: [
+      { label: 'Who gets it', type: 'list', items: [`${S.one(name || 'A customer', 60)} · ${email}`] },
+      { label: 'The email (subject: ' + subject + ')', type: 'text', text: full },
+    ], footer: 'Press Approve to send this one email as Elite Kitchens (replies come to your inbox). It is sent exactly as written above. Nothing is sent before you press Approve.' },
+    payload: { phone, subject, body: full }, baseline: { lastInboundAt: ms0(c.lastInboundAt), emailInboundAt: ms0(c.emailInboundAt) } };
+}
+const ms0 = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : 0);
+
 const audit = (db, { nowMs, ...e }) => db.collection('auditLog').add({ action: 'aiProposal', ...e, at: Timestamp.fromMillis(nowMs) }).catch(() => {});          // never holds the text of a note
 async function propose({ db, actor, uid, model, nowMs = Date.now() }, name, input, settings) {
   const tool = TOOLS.find((t) => t.name === name);
@@ -188,7 +223,7 @@ async function propose({ db, actor, uid, model, nowMs = Date.now() }, name, inpu
   if (!available(settings)[tool.kind]) throw new T.ToolError('This kind of change is not switched on.');
   const mine = await db.collection('aiProposals').where('createdByUid', '==', uid).get();
   const pending = mine.docs.map((d) => d.data()).filter((p) => p.status === 'pending' && p.expiresAt.toMillis() > nowMs);
-  const built = name === 'propose_customer_note' ? await buildNote(db, input, nowMs) : name === 'propose_followup_emails' ? await buildFollowUps(db, input, nowMs) : name === 'propose_quote_followup_emails' ? await buildQuoteFollowUps(db, input, nowMs) : await buildProject(db, input, nowMs);
+  const built = name === 'propose_customer_note' ? await buildNote(db, input, nowMs) : name === 'propose_followup_emails' ? await buildFollowUps(db, input, nowMs) : name === 'propose_quote_followup_emails' ? await buildQuoteFollowUps(db, input, nowMs) : name === 'propose_customer_email' ? await buildCustomerEmail(db, input, nowMs) : await buildProject(db, input, nowMs);
   const same = pending.find((p) => p.kind === built.kind && p.targetId === built.targetId && JSON.stringify(p.payload) === JSON.stringify(built.payload));
   if (same) return { proposalId: same.id, title: same.title, reused: true };                       // the same change is already waiting: show that one, do not make a second
   if (pending.length >= MAX_PENDING) throw new T.ToolError('There are already several proposals waiting for a decision. Approve or reject them first.');
@@ -272,6 +307,20 @@ async function applyQuoteFollowUps(db, mailer, actor, p, nowMs) {
   return { status: ok === total ? 'applied' : ok ? 'partial' : 'failed', message: ok === total ? `${ok} email${ok === 1 ? ' was' : 's were'} sent.` : ok ? `${ok} of ${total} emails were sent. The others were skipped (see the list).` : 'No email was sent.', results };
 }
 
+// The approved email, exactly as the person read it. Sent by the same sender as every other email (one at a time per customer, the same words twice within two minutes refused, an answer we cannot confirm never retried),
+// and recorded in the customer's chat and in the Emails list. Refused when the customer wrote to you since it was prepared: the text was written for a situation that has changed.
+async function applyCustomerEmail(db, mailer, actor, p, nowMs) {
+  if (!mailer || !mailer.enabled || !mailer.sender) throw refused('Email sending is not switched on yet, so nothing was sent.');
+  const snap = await db.doc('conversations/' + p.payload.phone).get();
+  if (!snap.exists) throw new StaleError('This customer no longer exists.');
+  const c = snap.data(), name = S.one(c.name || 'the customer', 60);
+  if (ms0(c.lastInboundAt) > p.baseline.lastInboundAt || ms0(c.emailInboundAt) > p.baseline.emailInboundAt) throw new StaleError('They wrote to you after this was prepared, so check the chat first. Ask again if you still want to send it.');
+  try {
+    await Reply.send({ db, mailer }, actor, { phone: p.payload.phone, subject: p.payload.subject, body: p.payload.body }, { nowMs, thread: false, kind: 'assistant' });
+    return { status: 'applied', message: `The email was sent to ${name}.`, results: [{ label: name, ok: true }] };
+  } catch (e) { return { status: 'failed', message: e instanceof HttpsError ? e.message : 'It could not be sent.', results: [{ label: name, ok: false, message: e instanceof HttpsError ? e.message : 'It could not be sent.' }] }; }
+}
+
 async function decide({ db, mailer }, actor, uid, data, { nowMs = Date.now() } = {}, settings) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw bad('Missing details.');
   for (const k of Object.keys(data)) if (!['proposalId', 'decision'].includes(k)) throw bad(`Unknown field: ${k}`);
@@ -281,7 +330,7 @@ async function decide({ db, mailer }, actor, uid, data, { nowMs = Date.now() } =
   const pre = await ref.get();
   if (!pre.exists) throw new HttpsError('not-found', 'This proposal no longer exists.');
   if (data.decision === 'approve' && pre.data().status === 'pending' && !available(settings)[pre.data().kind]) throw refused('AI actions are switched off, so nothing can be applied.');
-  if (data.decision === 'approve' && pre.data().status === 'pending' && ['followUpEmails', 'quoteFollowUps'].includes(pre.data().kind) && (!mailer || !mailer.enabled || !mailer.sender)) throw refused('Email sending is not switched on yet, so nothing was sent. The proposal is still waiting.');
+  if (data.decision === 'approve' && pre.data().status === 'pending' && ['followUpEmails', 'quoteFollowUps', 'customerEmail'].includes(pre.data().kind) && (!mailer || !mailer.enabled || !mailer.sender)) throw refused('Email sending is not switched on yet, so nothing was sent. The proposal is still waiting.');
   const claimed = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new HttpsError('not-found', 'This proposal no longer exists.');
@@ -298,7 +347,7 @@ async function decide({ db, mailer }, actor, uid, data, { nowMs = Date.now() } =
     return { status: claimed.p.status, message: { expired: 'This proposal expired. Ask again.', rejected: 'Rejected. Nothing was changed.', applying: 'It is being applied. Check again in a moment.' }[claimed.p.status] || (claimed.p.result && claimed.p.result.message) || '', results: (claimed.p.result && claimed.p.result.results) || [] };
   }
   let result;
-  try { result = claimed.p.kind === 'customerNote' ? await applyNote(db, claimed.p, nowMs) : claimed.p.kind === 'followUpEmails' ? await applyFollowUps(db, mailer, actor, claimed.p, nowMs) : claimed.p.kind === 'quoteFollowUps' ? await applyQuoteFollowUps(db, mailer, actor, claimed.p, nowMs) : await applyProject(db, actor, claimed.p, nowMs); }
+  try { result = claimed.p.kind === 'customerNote' ? await applyNote(db, claimed.p, nowMs) : claimed.p.kind === 'followUpEmails' ? await applyFollowUps(db, mailer, actor, claimed.p, nowMs) : claimed.p.kind === 'quoteFollowUps' ? await applyQuoteFollowUps(db, mailer, actor, claimed.p, nowMs) : claimed.p.kind === 'customerEmail' ? await applyCustomerEmail(db, mailer, actor, claimed.p, nowMs) : await applyProject(db, actor, claimed.p, nowMs); }
   catch (e) { result = e instanceof StaleError ? { status: 'stale', message: e.message, results: [] } : { status: 'failed', message: messageOf(e), results: [] }; }
   await ref.update({ status: result.status, result: { message: result.message, results: result.results }, finishedAt: Timestamp.fromMillis(nowMs) });
   await audit(db, { event: result.status, proposalId: claimed.p.id, kind: claimed.p.kind, targetId: claimed.p.targetId, by: actor.id, nowMs });

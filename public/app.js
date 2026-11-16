@@ -738,7 +738,7 @@ function buildBubble(m) {
   const out = m.direction === 'out';
   if (m.type === 'email') {                                   // an email in the chat (docs/EMAIL_INBOX.md): its subject, what they wrote, and a link to Gmail when there are attachments
     const e = el('div', 'm em ' + (out ? 'out' : 'in'));
-    e.append(el('div', 'em-head', (out ? (m.kind === 'gmail' ? '\u2709 You emailed from Gmail' : '\u2709 You emailed') : '\u2709 Email') + ' \u00b7 ' + (m.subject || '(no subject)')));
+    e.append(el('div', 'em-head', (out ? (m.kind === 'gmail' ? '\u2709 You emailed from Gmail' : m.kind === 'assistant' ? '\u2709 You emailed (written by the Assistant)' : '\u2709 You emailed') : '\u2709 Email') + ' \u00b7 ' + (m.subject || '(no subject)')));
     if (m.body) e.append(el('div', 'body', m.body));
     if (m.attachments && m.attachments.length) { const a = el('a', 'em-att', '\ud83d\udcce ' + m.attachments.map((x) => x.name).join(', ') + ' (open in Gmail)'); a.href = 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(m.gmailId || ''); a.target = '_blank'; a.rel = 'noopener'; e.append(a); }
     const meta = el('div', 'meta'); meta.append(el('span', null, timeOf(m) + (out && m.confirmed === false ? ' \u00b7 not confirmed: check Gmail' : ''))); e.append(meta);

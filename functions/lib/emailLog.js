@@ -3,12 +3,13 @@
 //   emailLog/{id} = { phone, name, direction: 'in'|'out', kind, subject, snippet, email, at, confirmed, by?, quoteRef? }
 //   kind: customer (they wrote to us) · reply (you replied by email from their chat) · followup (the follow-up to a lead who never replied) · quotefollowup (the follow-up about a quote nobody answered) · quote (the quote itself, by email)
 //         gmail (you wrote to them from Gmail yourself: found in the Sent folder by the sweep, lib/emailInbound.js)
+//         assistant (the Assistant wrote it for you and you approved the exact text: lib/aiActions.js customerEmail)
 // It is a COPY made for looking at: a short preview (never the whole email, never an attachment). The full text of a received email, a reply and a follow-up stays in the customer's own chat
 // (conversations/{phone}/emails); a quote email's body is not kept beyond the preview. Writing it never changes whether an email was sent or recorded: a failure here is logged and ignored, because the
 // email already went (or arrived) and is recorded where it matters. Deleting a customer deletes their entries (store.js deleteCustomerData).
 const { Timestamp } = require('firebase-admin/firestore');
 
-const KINDS = ['customer', 'reply', 'followup', 'quotefollowup', 'quote', 'gmail'];
+const KINDS = ['customer', 'reply', 'followup', 'quotefollowup', 'quote', 'gmail', 'assistant'];
 const SNIPPET_MAX = 200, SUBJECT_MAX = 200, NAME_MAX = 80;
 const oneLine = (s, n) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n);
 
