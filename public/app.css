@@ -222,7 +222,7 @@ h1, h2, p { overflow-wrap: anywhere; }
 .m.out { align-self: flex-end; background: var(--out); color: var(--out-ink); border-bottom-right-radius: 2px; }
 .m .meta { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 5px; font-size: 11px; color: #596a78; font-variant-numeric: tabular-nums; }
 .tick { white-space: nowrap; }
-.tick.read { color: var(--ok); }
+.tick.read { color: #7a2fc0; font-size: 19px; font-weight: 700; line-height: 1; letter-spacing: -.06em; }          /* the customer READ it: purple and large, so it cannot be missed (it was a small teal tick) */
 .m.failed { outline: 1px solid var(--err); }
 .m .err { color: var(--err); font-size: 13px; margin-top: 4px; }
 .composer { display: flex; align-items: flex-end; gap: 9px; background: var(--panel); border-top: 1px solid var(--line); padding: 14px 18px max(14px,env(safe-area-inset-bottom)); }
