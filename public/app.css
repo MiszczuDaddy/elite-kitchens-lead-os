@@ -1399,7 +1399,20 @@ div.td-open { cursor: default; }
 .emp-d-meta dt { color: var(--muted); } .emp-d-meta dd { margin: 0; overflow-wrap: anywhere; }
 .emp-d-warn { margin: 0 0 14px; padding: 9px 12px; border-radius: 8px; background: #f8e3e1; color: #7a1f1b; font-size: 13.5px; }
 .emp-d-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+/* One conversation per customer (21 Nov 2026): the customer's emails, oldest first, newest at the bottom; received and sent are told apart by a coloured edge and the badge. */
+.ea-count { margin-left: auto; padding: 0 8px; border-radius: 9px; background: var(--hover); color: var(--muted); font-weight: 600; }
+/* the customer's name, the way back and Open chat stay in view while you read a long conversation (it opens at the newest email, at the bottom) */
+.emp-d-head { position: sticky; top: -22px; z-index: 2; margin: -22px -28px 0; padding: 22px 28px 10px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.emp-thread { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.emp-msg { padding: 12px 14px 14px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px; background: var(--panel); }
+.emp-msg.emp-in { border-left-color: var(--ok); } .emp-msg.emp-out { border-left-color: var(--accent); }
+.emp-msg-head { margin: 0 0 4px; } .emp-msg-when { margin-left: auto; color: var(--muted); font-weight: 400; }
+.emp-msg-subject { margin: 2px 0 2px; font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
+.emp-msg-meta { margin: 0 0 8px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; } .emp-msg-note { margin: 8px 0 0; }
+.emp-msg .emp-d-body { padding: 0; border: 0; background: transparent; margin-top: 6px; }
+.emp-msg .emp-d-warn { margin: 4px 0 8px; }
 @media (max-width: 899px) {
+  .emp-d-head { top: -14px; margin: -14px -14px 0; padding: 10px 14px 10px; }
   .emp-tools { padding: 10px 12px; } .emp-cols { grid-template-columns: minmax(0, 1fr); } .emp-listcol { border-right: 0; } .emp-readcol { padding: 14px 14px 28px; }
   .emails-pane[data-sub=list] .emp-readcol, .emails-pane[data-sub=read] .emp-listcol { display: none; }
   .emails-pane[data-sub=read] .emp-tools { display: none; }                                    /* reading an email: the search and filters are for the list */

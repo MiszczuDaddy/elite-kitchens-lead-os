@@ -81,14 +81,15 @@ const gmail = http.createServer((req, res) => {
   ok('the Inbox row shows "✉ You: subject" (your Gmail email is the newest), and only their email counts as unread');
 
   // ------------------------------------------------------------------ 3. the Emails tab
-  await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await page.$$('#emp-list .ea-open')).length === 2, 'two emails listed');
-  const kinds = await page.$$eval('#emp-list .ea-open', (els) => els.map((e) => [e.querySelector('.ea-kind').textContent, e.dataset.kind]));
-  assert.deepEqual(kinds, [['↗ Sent · from Gmail', 'gmail'], ['↙ Received', 'customer']], 'newest first: yours, then theirs');
-  await page.click('#emails .ea-chip[data-f="out"]'); assert.equal((await page.$$('#emp-list .ea-open')).length, 1, 'Sent includes the email you wrote from Gmail'); await page.click('#emails .ea-chip[data-f="followups"]'); assert.equal((await page.$$('#emp-list .ea-open')).length, 0, 'it is not a follow-up');
-  await page.click('#emails .ea-chip[data-f="all"]'); await page.click('#emp-list .ea-open[data-kind="gmail"]'); await until(async () => (await page.innerText('#emp-d-body')).includes('I will ring you tomorrow at 5.30pm'), 'the whole email');
-  assert.equal(await page.innerText('#emp-d-from'), 'Elite Kitchens'); assert.equal(await page.innerText('#emp-d-to'), 'anna@example.com'); assert.equal(await page.innerText('#emp-d-by'), 'Gmail');
+  await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await page.$$('#emp-list .ea-open')).length === 1, 'one customer listed');
+  const kinds = await page.$$eval('#emp-list .ea-open', (els) => els.map((e) => [e.querySelector('.ea-kind').textContent, e.dataset.kind, e.querySelector('.ea-count').textContent]));
+  assert.deepEqual(kinds, [['↗ Sent · from Gmail', 'gmail', '2 emails']], 'ONE row for Anna with both emails; it shows the newest, yours');
+  await page.click('#emails .ea-chip[data-f="out"]'); assert.equal((await page.$$('#emp-list .ea-open')).length, 1, 'Sent includes the email you wrote from Gmail'); assert.equal(await page.innerText('#emp-list .ea-count'), '1 email'); await page.click('#emails .ea-chip[data-f="followups"]'); assert.equal((await page.$$('#emp-list .ea-open')).length, 0, 'it is not a follow-up');
+  await page.click('#emails .ea-chip[data-f="all"]'); await page.click('#emp-list .ea-open[data-phone="' + P.anna + '"]'); await until(async () => (await page.innerText('#emp-thread')).includes('I will ring you tomorrow at 5.30pm'), 'the whole conversation');
+  const msgs = await page.$$eval('#emp-thread .emp-msg', (els) => els.map((e) => [e.dataset.kind, e.querySelector('.ea-kind').textContent, (e.querySelector('.emp-msg-meta') || {}).textContent]));
+  assert.deepEqual(msgs, [['customer', '↙ Received', 'From anna@example.com'], ['gmail', '↗ Sent · from Gmail', 'To anna@example.com · sent by Gmail']], 'their email, then yours, in ONE window, oldest first');
   await page.screenshot({ path: path.join(SHOTS, 'email-sent-list.png') });
-  ok('the Emails tab lists both, newest first: "Sent · from Gmail" (under Sent, not under Follow-ups) and "Received"; choosing yours shows the whole email, to Anna, sent by Gmail');
+  ok('the Emails tab shows ONE row for Anna (2 emails, the newest is yours: "Sent · from Gmail", under Sent and not under Follow-ups); choosing her opens the whole conversation: her email, then yours in full, to her, sent by Gmail');
 
   // ------------------------------------------------------------------ 4. once
   await page.click('#nav-inbox'); await page.evaluate((id) => { location.hash = '#c/' + id; }, P.anna); await page.waitForSelector('#email-btn', { state: 'visible' }); await page.click('#email-btn'); await page.waitForSelector('#em-dlg[open]');

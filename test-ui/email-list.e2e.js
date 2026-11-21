@@ -1,6 +1,6 @@
 'use strict';
-// The Emails page, in a REAL browser (docs/EMAIL_LIST.md): "Emails" in the menu opens its own page with one list of every email in and out, newest first (who, when, what kind, the subject and a short preview) and the chosen
-// email beside it; All / Received / Sent / Follow-ups / Not confirmed filter it and the search box finds a name, subject, address or quote number; the whole email is read on the page; a new email appears while it is open;
+// The Emails page, in a REAL browser (docs/EMAIL_LIST.md): "Emails" in the menu opens its own page with ONE ROW PER CUSTOMER, newest conversation first (who, when, how many emails, the newest one's kind, subject and a short preview)
+// and, beside it, the chosen customer's WHOLE conversation in one window (every email, sent and received, oldest first); All / Received / Sent / Follow-ups / Not confirmed filter it and the search box finds a name, subject, address or quote number; a new email appears while it is open;
 // it opens and closes like the other pages (menu, direct address, Back); customers' names are shown as text, never as code; and on a phone it is one thing at a time. The entries are written the way the server writes them
 // (the server paths are tested in functions/test/email-list.test.js). Every name and address is made up. Run: bash test-ui/run.sh email-list.e2e.js
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
@@ -61,66 +61,79 @@ const web = http.createServer((req, res) => {
   };
   console.log('EMAIL LIST E2E: real page + real functions + emulators');
   const { page } = await open({ width: 1360, height: 900 });
-  const rows = () => page.$$eval('#emp-list .ea-open', (els) => els.map((e) => ({ name: e.querySelector('.ea-name').textContent, kind: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.ea-subject').textContent, snip: e.querySelector('.ea-snip').textContent, warn: !!e.querySelector('.ea-warn'), ref: (e.querySelector('.ea-ref') || {}).textContent || null, id: e.dataset.kind })));
+  const rows = () => page.$$eval('#emp-list .ea-open', (els) => els.map((e) => ({ name: e.querySelector('.ea-name').textContent, kind: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.ea-subject').textContent, snip: e.querySelector('.ea-snip').textContent, warn: !!e.querySelector('.ea-warn'), ref: (e.querySelector('.ea-ref') || {}).textContent || null, id: e.dataset.kind, phone: e.dataset.phone, count: e.querySelector('.ea-count').textContent })));
   const ids = async () => (await rows()).map((r) => r.id);
   const view = () => page.evaluate(() => document.getElementById('app').dataset.view);
+  const cards = () => page.$$eval('#emp-thread .emp-msg', (els) => els.map((e) => ({ kind: e.dataset.kind, dir: e.classList.contains('emp-in') ? 'in' : 'out', badge: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.emp-msg-subject').textContent, meta: (e.querySelector('.emp-msg-meta') || {}).textContent || '', body: e.querySelector('.emp-d-body').textContent, note: (e.querySelector('.emp-msg-note') || {}).textContent || '', warn: !!e.querySelector('.emp-d-warn') })));
+  const thread = () => page.innerText('#emp-thread');
 
-  // ------------------------------------------------------------------ 1. its own page, from the menu; newest first
+  // ------------------------------------------------------------------ 1. its own page, from the menu; ONE ROW PER CUSTOMER, newest conversation first
   assert.equal(await page.locator('.pane-head .icon-btn').count(), 1, 'the Inbox header still has only the + button');
-  await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length === 6, 'six emails');
+  await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length === 3, 'three customers');
   assert.equal(await view(), 'emails'); assert.equal(await page.evaluate(() => location.hash), '#emails'); assert.equal(await page.isVisible('#list'), false, 'the Inbox list is not on screen: this is its own page');
   assert.equal(await page.getAttribute('#nav-emails', 'aria-current'), 'page'); assert.equal(await page.getAttribute('#nav-inbox', 'aria-current'), null, 'the menu shows where you are');
   const all = await rows();
-  assert.deepEqual(all.map((r) => r.id), ['reply', 'customer', 'customer', 'quotefollowup', 'followup', 'quote'], 'newest first: your reply (10 min ago), Anna (20 min), Cara (40 min), then the older follow-ups and the quote email');
-  assert.deepEqual(all.map((r) => r.kind), ['↗ Sent · your reply', '↙ Received', '↙ Received', '↗ Sent · quote follow-up', '↗ Sent · follow-up', '↗ Sent · quote']);
-  assert.equal(all[0].name, 'Anna Apple'); assert.equal(all[0].snip, 'Of course, I will ring you tomorrow at 5.'); assert.equal(all[3].ref, 'EK-0112');
-  ok('"Emails" in the menu opens its own page (the Inbox list is replaced and the menu shows where you are) with every email, newest first: who, what kind, the subject and a short preview');
+  assert.deepEqual(all.map((r) => r.name), ['Anna Apple', '"><script>window.__pwned=1</script>Cara <b>Cole</b>', 'Bob Byrne'], 'ONE row per customer (six emails, three customers), the customer with the newest email first: Anna (reply 10 min ago), Cara (40 min), Bob (3 days)');
+  assert.deepEqual(all.map((r) => r.count), ['3 emails', '1 email', '2 emails'], 'how many emails each customer has');
+  assert.deepEqual(all.map((r) => r.id), ['reply', 'customer', 'followup'], 'each row shows the customer\'s newest email'); assert.deepEqual(all.map((r) => r.kind), ['↗ Sent · your reply', '↙ Received', '↗ Sent · follow-up']);
+  assert.equal(all[0].snip, 'Of course, I will ring you tomorrow at 5.'); assert.equal(all[0].ref, null, 'Anna\'s newest email (her reply) has no quote number on it');
+  ok('"Emails" in the menu opens its own page (the Inbox list is replaced and the menu shows where you are) with ONE row per customer, newest conversation first: who, how many emails, and the newest one\'s kind, subject and preview');
 
-  // ------------------------------------------------------------------ 2. filters and search
-  assert.deepEqual(all.map((r) => r.warn), [false, false, false, false, false, true], 'only the quote email Google did not confirm carries the warning');
+  // ------------------------------------------------------------------ 2. filters and search (they pick customers; the row shows their newest matching email)
+  assert.deepEqual(all.map((r) => r.warn), [false, false, true], 'Bob has an email Google did not confirm (the older quote email): his row says so even though it is not his newest');
   assert.match(await page.locator('#emp-list .ea-warn').getAttribute('title'), /Google did not confirm/);
   const chip = (f) => page.click(`#emails .ea-chip[data-f="${f}"]`);
-  await chip('in'); assert.deepEqual(await ids(), ['customer', 'customer']); assert.equal(await page.getAttribute('#emails .ea-chip[data-f="in"]', 'aria-pressed'), 'true');
-  await chip('out'); assert.deepEqual(await ids(), ['reply', 'quotefollowup', 'followup', 'quote']);
-  await chip('followups'); assert.deepEqual(await ids(), ['quotefollowup', 'followup'], 'both kinds of follow-up');
-  await chip('unconfirmed'); assert.deepEqual(await ids(), ['quote'], 'only what Google did not confirm'); await chip('all'); assert.equal((await rows()).length, 6);
-  await page.fill('#emp-search', 'bob'); assert.deepEqual(await ids(), ['followup', 'quote'], 'a name'); await page.fill('#emp-search', 'EK-0112'); assert.deepEqual(await ids(), ['reply', 'customer', 'quotefollowup'], 'a quote number (in the subject or on the email)');
+  await chip('in'); assert.deepEqual(await ids(), ['customer', 'customer'], 'customers who have written to you'); assert.equal(await page.getAttribute('#emails .ea-chip[data-f="in"]', 'aria-pressed'), 'true');
+  await chip('out'); assert.deepEqual(await ids(), ['reply', 'followup'], 'Anna (newest sent: her reply) and Bob (his follow-up)'); assert.deepEqual((await rows()).map((r) => r.count), ['2 emails', '2 emails']);
+  await chip('followups'); assert.deepEqual(await ids(), ['quotefollowup', 'followup'], 'both kinds of follow-up'); assert.deepEqual((await rows()).map((r) => r.count), ['1 email', '1 email']);
+  await chip('unconfirmed'); assert.deepEqual(await ids(), ['quote'], 'only what Google did not confirm'); await chip('all'); assert.equal((await rows()).length, 3);
+  await page.fill('#emp-search', 'bob'); assert.deepEqual(await ids(), ['followup'], 'a name: one customer'); await page.fill('#emp-search', 'EK-0112'); assert.deepEqual(await ids(), ['reply'], 'a quote number (in the subject or on the email): Anna, with her three emails'); assert.equal((await rows())[0].count, '3 emails');
   await page.fill('#emp-search', 'six weeks'); assert.equal((await rows()).length, 0, 'the search looks at the preview, not the whole email: "six weeks" is only in the body of a reply'); assert.match(await page.innerText('#emp-note'), /No emails match/);
-  await page.fill('#emp-search', ''); await chip('out'); await page.fill('#emp-search', 'anna'); assert.deepEqual(await ids(), ['reply', 'quotefollowup'], 'filter and search together'); await page.fill('#emp-search', ''); await chip('all');
-  ok('Received / Sent / Follow-ups / Not confirmed filter the list; the search finds a name or a quote number, together with a filter; an email Google did not confirm says so');
+  await page.fill('#emp-search', ''); await chip('out'); await page.fill('#emp-search', 'anna'); assert.deepEqual(await ids(), ['reply'], 'filter and search together'); await page.fill('#emp-search', ''); await chip('all');
+  ok('Received / Sent / Follow-ups / Not confirmed pick the customers; the search finds a name or a quote number, together with a filter; a customer with an email Google did not confirm is flagged');
 
-  // ------------------------------------------------------------------ 3. reading an email on the page
-  const read = async (dataKind) => { await page.click(`#emp-list .ea-open[data-kind="${dataKind}"]`); await page.waitForSelector('#emp-detail', { state: 'visible' }); };
-  const body = () => page.innerText('#emp-d-body');
-  await page.click('#emp-list .ea-open[data-phone="' + P.anna + '"][data-kind="customer"]'); await page.waitForSelector('#emp-detail', { state: 'visible' });
-  await until(async () => (await body()).includes('island lighting'), 'the whole email arrives'); assert.equal(await page.innerText('#emp-d-subject'), 'Re: Your Elite Kitchens quote EK-0112'); assert.equal(await page.innerText('#emp-d-from'), P.anna + '@example.com'); assert.equal(await page.innerText('#emp-d-to'), 'Elite Kitchens');
-  assert.match(await body(), /Thanks, Anna$/); assert.match(await page.innerText('#emp-d-note'), /Attachments[\s\S]*plan\.pdf/); assert.equal(await page.isVisible('#emp-d-by'), false, 'a received email has no "sent by"');
-  assert.equal(await page.getAttribute('#emp-list .ea-open[data-phone="' + P.anna + '"][data-kind="customer"]', 'aria-current'), 'true', 'the chosen row is marked');
-  await read('followup'); await until(async () => (await body()).includes('in case my earlier message got lost'), 'the follow-up as it was sent'); assert.equal(await page.innerText('#emp-d-to'), P.bob + '@example.com'); assert.equal(await page.innerText('#emp-d-from'), 'Elite Kitchens'); assert.equal(await page.innerText('#emp-d-by'), 'staff@test.dev');
-  await read('reply'); await until(async () => (await body()).includes('about six weeks'), 'your reply in full');
-  await read('quote'); assert.equal(await body(), 'Dear Bob, Please find attached your quotation'); assert.match(await page.innerText('#emp-d-note'), /wording of a quote email and its PDF are not kept/); assert.equal(await page.isVisible('#emp-d-warn'), true, 'the not-confirmed email explains itself on the page');
+  // ------------------------------------------------------------------ 3. one customer, one window: the whole conversation, oldest first
+  await page.click('#emp-list .ea-open[data-phone="' + P.anna + '"]'); await page.waitForSelector('#emp-detail', { state: 'visible' });
+  await until(async () => { const t = await thread(); return t.includes('island lighting') && t.includes('about six weeks') && t.includes('any questions about it'); }, 'the whole text of all three emails arrives');
+  assert.equal(await page.innerText('#emp-d-name'), 'Anna Apple'); assert.equal(await page.innerText('#emp-d-sub'), `3 emails · ${P.anna}@example.com`);
+  const ac = await cards(); assert.equal(ac.length, 3, 'all of Anna\'s emails are in ONE window');
+  assert.deepEqual(ac.map((c) => c.kind), ['quotefollowup', 'customer', 'reply'], 'oldest first, the newest at the bottom (like the chat)'); assert.deepEqual(ac.map((c) => c.dir), ['out', 'in', 'out']); assert.deepEqual(ac.map((c) => c.badge), ['↗ Sent · quote follow-up', '↙ Received', '↗ Sent · your reply']);
+  assert.match(ac[0].body, /^Hi Anna,[\s\S]*any questions about it\./); assert.match(ac[1].body, /Thanks, Anna$/); assert.match(ac[2].body, /about six weeks/); assert.equal(ac[1].subject, 'Re: Your Elite Kitchens quote EK-0112');
+  assert.equal(ac[1].meta, `From ${P.anna}@example.com`); assert.equal(ac[2].meta, `To ${P.anna}@example.com · sent by staff@test.dev`); assert.match(ac[1].note, /Attachments[\s\S]*plan\.pdf/); assert.equal(ac[0].note, '');
+  assert.doesNotMatch(await thread(), /Bob|Dear Bob|Please find attached your quotation/, 'no one else\'s email is in her conversation');
+  assert.equal(await page.getAttribute('#emp-list .ea-open[data-phone="' + P.anna + '"]', 'aria-current'), 'true', 'the chosen customer is marked');
+  const last = await page.locator('#emp-thread .emp-msg').last().boundingBox(); assert.ok(last.y + last.height <= 900 + 1, 'the newest email is on screen');
+  await page.click('#emp-list .ea-open[data-phone="' + P.bob + '"]'); await until(async () => (await cards()).length === 2, 'Bob\'s conversation');
+  const bc = await cards(); assert.deepEqual(bc.map((c) => c.kind), ['quote', 'followup'], 'Bob: the quote email (5 days ago), then the follow-up (3 days ago)');
+  await until(async () => (await cards())[1].body.includes('in case my earlier message got lost'), 'the follow-up as it was sent'); assert.equal((await cards())[1].meta, `To ${P.bob}@example.com · sent by staff@test.dev`);
+  assert.equal(bc[0].body, 'Dear Bob, Please find attached your quotation'); assert.match(bc[0].note, /wording of a quote email and its PDF are not kept/); assert.equal(bc[0].warn, true, 'the not-confirmed quote email explains itself in the conversation'); assert.equal(bc[1].warn, false);
+  assert.doesNotMatch(await thread(), /island lighting|Anna/, 'a different customer: a different conversation');
   await page.click('#emp-chat'); await page.waitForSelector('#thread:not([hidden])'); await until(async () => (await page.evaluate(() => location.hash)).includes(P.bob), 'Bob\'s chat is open'); assert.match(await page.innerText('#t-name'), /Bob Byrne/); assert.equal(await view(), 'thread');
   assert.equal(await page.isVisible('#emails'), false, 'opening a chat closes the Emails page');
-  ok('choosing an email shows the whole thing beside the list (from the chat record: received, reply, follow-up), with from, to, when and who sent it; a quote email shows its preview and says the rest is not kept; "Open chat" opens the chat');
+  ok('choosing a customer shows ALL their emails in one window, oldest first and the newest at the bottom: sent and received told apart, the full text from the chat record, who sent it, attachments named; a quote email shows its preview and says the rest is not kept; another customer is another conversation; "Open chat" opens the chat');
 
   // ------------------------------------------------------------------ 4. names and subjects are text, never code
-  await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length === 6, 'back on the page');
-  const cara = (await rows())[2]; assert.ok(cara.name.includes('<script>') && cara.subject.startsWith('<img src=x'), 'shown literally: ' + JSON.stringify([cara.name, cara.subject]));
-  await page.click('#emp-list .ea-open[data-phone="' + P.cara + '"]'); await until(async () => (await body()).includes('<b>bold</b>'), 'the body, as text');
+  await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length === 3, 'back on the page');
+  const cara = (await rows())[1]; assert.ok(cara.name.includes('<script>') && cara.subject.startsWith('<img src=x'), 'shown literally: ' + JSON.stringify([cara.name, cara.subject]));
+  await page.click('#emp-list .ea-open[data-phone="' + P.cara + '"]'); await until(async () => (await thread()).includes('<b>bold</b>'), 'the body, as text');
   assert.equal(await page.evaluate(() => window.__pwned || 0), 0, 'nothing ran'); assert.equal(await page.locator('#emails script, #emails img, #emails b').count(), 0, 'no element was created from a name, subject or body');
   ok('a name, subject or body with code in it is shown as text: nothing runs, no element is created from it');
 
-  // ------------------------------------------------------------------ 5. live
+  // ------------------------------------------------------------------ 5. live: a new email moves the customer to the top, and appears at the bottom of an open conversation
+  await page.click('#emp-list .ea-open[data-phone="' + P.bob + '"]'); await until(async () => (await cards()).length === 2, 'Bob\'s conversation is open');
   await entry('g_3', P.bob, 'Bob Byrne', 'in', 'customer', 'Re: Your kitchen enquiry', 'Yes, I would love a consultation. Thursday works.', Date.now());
-  await until(async () => (await rows()).length === 7, 'the new email appears'); assert.equal((await rows())[0].snip, 'Yes, I would love a consultation. Thursday works.');
-  ok('a new email appears at the top while the page is open, without reloading');
+  await until(async () => (await cards()).length === 3, 'the new email appears in the open conversation'); const live = await cards(); assert.equal(live[2].kind, 'customer'); assert.match(live[2].body, /Thursday works/, 'at the bottom');
+  await until(async () => (await rows())[0].name === 'Bob Byrne', 'Bob moves to the top of the list'); const top = (await rows())[0]; assert.equal(top.count, '3 emails'); assert.equal(top.snip, 'Yes, I would love a consultation. Thursday works.'); assert.equal((await rows()).length, 3, 'still one row per customer');
+  assert.equal(await page.innerText('#emp-d-sub'), `3 emails · ${P.bob}@example.com`);
+  ok('a new email moves that customer to the top while the page is open and appears at the bottom of their open conversation, without reloading');
 
   // ------------------------------------------------------------------ 6. it opens and closes like the other pages
   await page.click('#nav-quotes'); await page.waitForSelector('#emails', { state: 'hidden' }); assert.equal(await view(), 'quotes'); assert.equal(await page.getAttribute('#nav-emails', 'aria-current'), null); assert.equal(await page.getAttribute('#nav-quotes', 'aria-current'), 'page');
   await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); assert.equal(await view(), 'emails'); assert.equal(await page.getAttribute('#nav-quotes', 'aria-current'), null);
+  assert.equal(await page.isVisible('#emp-detail'), false, 'coming back shows the list, not the last conversation');
   await page.click('#nav-assistant'); await page.waitForSelector('#emails', { state: 'hidden' }); assert.equal(await view(), 'assistant');
   await page.click('#nav-emails'); await page.click('#emp-back'); await page.waitForSelector('#emails', { state: 'hidden' }); assert.equal(await view(), 'list'); assert.equal(await page.getAttribute('#nav-inbox', 'aria-current'), 'page');
-  await page.goto(URL0 + '#emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length >= 6, 'the page opens from its address');
+  await page.goto(URL0 + '#emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length >= 3, 'the page opens from its address');
   ok('it opens and closes like the other pages: from the menu, to Quotes and the Assistant and back, Back returns to the Inbox, and the address #emails opens it directly');
 
   // ------------------------------------------------------------------ 7. empty, then clean data for the screenshots
@@ -128,8 +141,8 @@ const web = http.createServer((req, res) => {
   await until(async () => /No emails yet/.test(await page.innerText('#emp-note')), 'the empty message');
   await db.doc(`conversations/${P.cara}`).delete(); await db.doc(`conversations/${P.cara}/emails/g_2`).delete(); await customer(P.cara, 'Cara Cole');
   await seed(); await entry('g_9', P.bob, 'Bob Byrne', 'in', 'customer', 'Re: Your Elite Kitchens — Kitchen Quote EK-0118 v1, with a long subject that has to wrap properly on a small screen', 'Hi, the quote looks good, a couple of questions about the worktop and the timing of the fitting. '.repeat(3), NOW - 30 * MIN);
-  await until(async () => (await rows()).length === 6, 'six emails again');
-  await page.click('#emp-list .ea-open[data-kind="quotefollowup"]'); await until(async () => (await body()).includes('any questions about it'), 'the follow-up'); await page.screenshot({ path: path.join(SHOTS, 'email-list-desktop.png') });
+  await until(async () => (await rows()).length === 2, 'two customers again (Anna with three emails, Bob with three)');
+  await page.click('#emp-list .ea-open[data-phone="' + P.anna + '"]'); await until(async () => (await thread()).includes('any questions about it'), 'the conversation'); await page.screenshot({ path: path.join(SHOTS, 'email-list-desktop.png') });
   ok('empty: a plain message; with emails again the page is ready for a screenshot (computer)');
 
   // ------------------------------------------------------------------ 8. a phone: one thing at a time
@@ -140,11 +153,11 @@ const web = http.createServer((req, res) => {
   assert.equal(await m.page.isVisible('#emp-read'), false, 'on a phone: the list alone'); assert.equal(await m.page.isVisible('#emp-list'), true); await fits('list');
   const row = await m.page.locator('#emp-list .ea-open').first().boundingBox(); assert.ok(row.height >= 56 && row.x >= 0 && row.x + row.width <= 376, 'rows fit and are easy to tap: ' + JSON.stringify(row));
   assert.ok((await m.page.locator('#emails .ea-chip').first().boundingBox()).height >= 44, 'the filters are easy to tap'); await m.page.screenshot({ path: path.join(SHOTS, 'email-list-phone.png') });
-  await m.page.click('#emp-list .ea-open[data-kind="customer"]'); await m.page.waitForSelector('#emp-detail', { state: 'visible' }); assert.equal(await m.page.isVisible('#emp-list'), false, 'on a phone: the email alone'); await fits('email');
+  await m.page.click('#emp-list .ea-open[data-phone="' + P.bob + '"]'); await m.page.waitForSelector('#emp-detail', { state: 'visible' }); await until(async () => (await m.page.locator('#emp-thread .emp-msg').count()) === 3, 'Bob\'s three emails'); assert.equal(await m.page.isVisible('#emp-list'), false, 'on a phone: the conversation alone'); await fits('conversation'); const back = await m.page.locator('#emp-tolist').boundingBox(); assert.ok(back && back.y >= 0 && back.y < 300 && back.height >= 44, 'the way back stays in view while you read: ' + JSON.stringify(back)); assert.ok(await m.page.locator('#emp-chat').isVisible() && (await m.page.locator('#emp-d-name').boundingBox()).y >= 0, 'the customer\'s name and Open chat stay in view');
   await m.page.screenshot({ path: path.join(SHOTS, 'email-read-phone.png') });
   await m.page.click('#emp-tolist'); await m.page.waitForSelector('#emp-list', { state: 'visible' }); assert.equal(await m.page.isVisible('#emp-detail'), false);
   await m.page.click('#emp-back'); await m.page.waitForSelector('#emails', { state: 'hidden' });
-  ok('on a 375px phone: the Emails button is easy to tap; the page shows the list, choosing an email shows it alone with a way back to the list, and Back returns to the Inbox; no sideways scrolling');
+  ok('on a 375px phone: the Emails button is easy to tap; the page shows the list of customers, choosing one shows their whole conversation alone with a way back, and Back returns to the Inbox; no sideways scrolling');
 
   assert.deepEqual(errors, [], 'no page errors: ' + errors.join(' | ')); ok('no console or page errors');
   await browser.close(); web.close();

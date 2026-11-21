@@ -1,14 +1,14 @@
 # The Emails list (14 Nov 2026)
 
-One page that lists **every email Elite OS has sent to, or received from, a customer**, newest first. It answers "what went out, to whom, and did it arrive" without opening each chat.
+One page that lists **every email Elite OS has sent to, or received from, a customer**, **one row per customer**, the customer with the newest email first. It answers "what went out, to whom, and did it arrive" without opening each chat.
 
 ## What you see
 **Emails** is its own page (14 Nov 2026, as a tab rather than a pop-up): in the left menu on a computer, and among the section buttons (Pipeline, Calendar, Quotes...) at the top of the Inbox on a phone. The address `#emails` opens it directly.
 
-* **The list** (left): every email, newest first. Each row shows the customer, when, what kind of email it is, the subject and a short preview.
-* **The email** (right): choose a row and the whole email is shown beside the list: from, to, when, who sent it, and the full text. **Open chat** takes you to that customer's chat. On a phone the list and the email take turns: choose a row to read it, **All emails** (or Back) returns to the list.
+* **The list** (left): **one row per customer** (21 Nov 2026; before that it was one row per email, which was unusable with 200 emails). The customer with the newest email is first. Each row shows the customer, when their newest email was, **how many emails** they have ("3 emails"), the newest email's kind, subject and a short preview. A customer with an email Google did not confirm is flagged on their row, even when it is not their newest.
+* **The conversation** (right): choose a customer and **all their emails open in one window**, oldest at the top and the newest at the bottom (like the chat), sent and received together. Each email shows whether it was received or sent (and what kind), when, from or to which address, who sent it, the full text and any attachments' names. **Open chat** takes you to that customer's chat. A new email appears at the bottom while the window is open (unless you have scrolled up to read an older one). On a phone the list and the conversation take turns: choose a customer to read, **All customers** (or Back) returns to the list.
 * **Search** finds a name, a subject, an email address or a quote number (it looks at the preview, not the whole text).
-* **Filters:** **All**, **Received**, **Sent**, **Follow-ups** (to a lead and about a quote), **Not confirmed**. Filters and search work together.
+* **Filters:** **All**, **Received**, **Sent**, **Follow-ups** (to a lead and about a quote), **Not confirmed**. They choose which customers are listed (those with at least one such email; the row then shows their newest matching email and how many match). Search and filters work together. The conversation window always shows the customer's whole conversation.
 
 | Kind | Meaning |
 |---|---|
@@ -19,7 +19,7 @@ One page that lists **every email Elite OS has sent to, or received from, a cust
 | **Sent · quote** | The quote itself, sent by email, with the quote number (its wording is not kept: the page shows the start of it). |
 | **Sent · from Gmail** | An email you wrote to a customer from Gmail yourself, found in the mailbox's Sent folder (see docs/EMAIL_INBOX.md, "Both directions"). |
 
-A red **Not confirmed** means Google did not confirm the email was sent: check the Sent folder of the mailbox (Elite OS never resends it by itself); the email's page says so too. The list is live: a new email appears at the top while the page is open. **Show older** loads more (100 at a time, up to 500).
+A red **Not confirmed** means Google did not confirm the email was sent: check the Sent folder of the mailbox (Elite OS never resends it by itself); the email's page says so too. The list is live: a new email appears at the top while the page is open. **Show older** loads more (300 emails at a time, up to 1,500; the page starts with the newest 300). A customer's conversation window loads their own emails separately (up to 300), so it is complete even when the list has not loaded that far back; only the count on the row follows what the list has loaded.
 
 ## What is kept, and where
 `emailLog/{id}` (read by signed-in staff only; written only by the server): who (name, number, address), the direction and kind, the subject, **a preview of at most 200 characters**, when, whether it was confirmed, who sent it and the quote number. It is a copy made for looking at: never the whole email, never an attachment, never the quote PDF. The full text of a received email, a reply and an automatic follow-up stays in the customer's own chat (`conversations/{phone}/emails`).
@@ -36,4 +36,4 @@ A red **Not confirmed** means Google did not confirm the email was sent: check t
 Go back: redeploy the earlier code for those functions; the list simply stops filling. Nothing else depends on it.
 
 ## Tests
-`functions/test/email-list.test.js` (7: received, reply, lead follow-up, quote follow-up, "never stops an email", erasure, the catch-up), `functions/test/quote-email.test.js` (the quote email is listed, marked not confirmed, then follows staff's decision), `test-ui/email-list.e2e.js` (9: the page in a real browser: it opens and closes like the other pages, filters and search, reading an email, not confirmed, names and bodies shown as text, live updates, an empty list, a 375px phone one thing at a time).
+`functions/test/email-list.test.js` (7: received, reply, lead follow-up, quote follow-up, "never stops an email", erasure, the catch-up), `functions/test/quote-email.test.js` (the quote email is listed, marked not confirmed, then follows staff's decision), `test-ui/email-list.e2e.js` (9: the page in a real browser: it opens and closes like the other pages, one row per customer, filters and search, a customer's whole conversation in one window, not confirmed, names and bodies shown as text, live updates, an empty list, a 375px phone one thing at a time).

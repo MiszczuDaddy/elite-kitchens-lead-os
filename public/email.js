@@ -71,11 +71,13 @@ window.EMAILBOX = (() => {
   return { onSelect, items, sync, open };
 })();
 
-// The Emails page (docs/EMAIL_LIST.md): every email in and out, newest first, from the server's list (emailLog: a short preview of each, written only by the server). Choose one to read the whole email beside the list
-// (the full text of a received email, a reply and a follow-up is in the customer's own chat records; a quote email's wording is not kept). Live while the page is open; nothing is written from here.
+// The Emails page (docs/EMAIL_LIST.md): ONE ROW PER CUSTOMER (21 Nov 2026), newest conversation first, built from the server's list of emails (emailLog: a short preview of each, written only by the server). Choose a customer
+// and the whole conversation opens in one window, oldest email at the top and the newest at the bottom, sent and received together (the full text of a received email, a reply and a follow-up is in the customer's own
+// chat records; a quote email's wording is not kept). Live while the page is open; nothing is written from here.
 window.EMAILS = (() => {
-  const L = { active: false, unsub: null, items: [], filter: 'all', query: '', limit: 100, loaded: false, error: null, sel: null, seq: 0 };
-  const MAX = 500, BASE = ['nav-inbox', 'nav-pipeline', 'nav-appointments', 'nav-quotes', 'nav-projects', 'nav-assistant'];
+  const L = { active: false, unsub: null, items: [], filter: 'all', query: '', limit: 300, loaded: false, error: null, sel: null };
+  const T = { phone: null, unsub: null, items: [], bodies: {}, loading: false, failed: false, stick: true, seq: 0 };
+  const MAX = 1500, BASE = ['nav-inbox', 'nav-pipeline', 'nav-appointments', 'nav-quotes', 'nav-projects', 'nav-assistant'];
   const KIND = { customer: 'Received', reply: 'Sent · your reply', followup: 'Sent · follow-up', quotefollowup: 'Sent · quote follow-up', quote: 'Sent · quote', gmail: 'Sent · from Gmail', assistant: 'Sent · written by the Assistant' };
   const DAY_F = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin' }), TIME_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), DATE_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' });
   const FULL_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -88,25 +90,35 @@ window.EMAILS = (() => {
   const norm = (x) => String(x == null ? '' : x).toLowerCase();
   const matches = (m, q) => !q || [m.name, m.subject, m.snippet, m.email, m.quoteRef, m.phone].some((v) => norm(v).includes(q));
   const byFilter = (m) => L.filter === 'all' || (L.filter === 'in' || L.filter === 'out' ? m.direction === L.filter : L.filter === 'followups' ? (m.kind === 'followup' || m.kind === 'quotefollowup') : m.confirmed === false);
-  const shown = () => L.items.filter((m) => byFilter(m) && matches(m, norm(L.query).trim()));
-  const kindText = (m) => (m.direction === 'in' ? '\u2199 ' : '\u2197 ') + (KIND[m.kind] || (m.direction === 'in' ? 'Received' : 'Sent'));
-  function badges(m, host) {
+  const kindText = (m) => (m.direction === 'in' ? '↙ ' : '↗ ') + (KIND[m.kind] || (m.direction === 'in' ? 'Received' : 'Sent'));
+  const plural = (n) => n + ' email' + (n === 1 ? '' : 's');
+  function badges(m, host, warn) {
     host.append(el('span', 'ea-kind ' + (m.direction === 'in' ? 'ea-in' : 'ea-out'), kindText(m)));
-    if (m.confirmed === false) { const w = el('span', 'ea-warn', 'Not confirmed'); w.title = 'Google did not confirm this email was sent. Check the Sent folder of the mailbox.'; host.append(w); }
+    if (m.confirmed === false || warn) { const w = el('span', 'ea-warn', 'Not confirmed'); w.title = 'Google did not confirm this email was sent. Check the Sent folder of the mailbox.'; host.append(w); }
     if (m.quoteRef) host.append(el('span', 'ea-ref', m.quoteRef));
   }
+  // One entry per customer: their emails that match the filter and the search (the list is newest first, so the first one seen is the newest), and how many.
+  function groups() {
+    const q = norm(L.query).trim(), by = new Map();
+    for (const m of L.items) {
+      if (!byFilter(m) || !matches(m, q)) continue;
+      let g = by.get(m.phone); if (!g) { g = { phone: m.phone, name: m.name || '', newest: m, count: 0, unconfirmed: 0 }; by.set(m.phone, g); }
+      g.count++; if (m.confirmed === false) g.unconfirmed++; if (!g.name && m.name) g.name = m.name;
+    }
+    return [...by.values()];
+  }
   function renderList() {
-    const ul = $('emp-list'), rows = shown(); ul.replaceChildren();
+    const ul = $('emp-list'), rows = groups(); ul.replaceChildren();
     const filtering = L.filter !== 'all' || norm(L.query).trim();
     $('emp-note').textContent = L.error ? 'The list could not be loaded just now. Open this page again in a moment.' : !L.loaded ? 'Loading…'
       : rows.length ? '' : filtering ? 'No emails match. Clear the search or choose All.' : 'No emails yet. Emails you send from Elite OS, and customers\' replies, will appear here.';
-    for (const m of rows) {
-      const li = el('li', 'ea-row'), b = el('button', 'ea-open'); b.type = 'button'; b.dataset.phone = m.phone; b.dataset.kind = m.kind; b.dataset.id = m.id;
-      if (m.id === L.sel) b.setAttribute('aria-current', 'true');
-      const top = el('div', 'ea-top'); top.append(el('span', 'ea-name', m.name || 'Customer'), el('span', 'ea-when', whenText(ms(m.at))));
-      const sub = el('div', 'ea-sub'); badges(m, sub);
+    for (const g of rows) {
+      const m = g.newest, li = el('li', 'ea-row'), b = el('button', 'ea-open'); b.type = 'button'; b.dataset.phone = g.phone; b.dataset.kind = m.kind; b.dataset.id = m.id;
+      if (g.phone === L.sel) b.setAttribute('aria-current', 'true');
+      const top = el('div', 'ea-top'); top.append(el('span', 'ea-name', g.name || 'Customer'), el('span', 'ea-when', whenText(ms(m.at))));
+      const sub = el('div', 'ea-sub'); badges(m, sub, g.unconfirmed > 0); sub.append(el('span', 'ea-count', plural(g.count)));          // a customer with any email Google did not confirm is flagged, even when it is not the newest
       b.append(top, sub, el('div', 'ea-subject', m.subject || '(no subject)'), el('div', 'ea-snip', m.snippet || ''));
-      b.onclick = () => select(m.id);
+      b.onclick = () => select(g.phone);
       li.append(b); ul.append(li);
     }
     $('emp-more').hidden = !!L.error || L.items.length < L.limit || L.limit >= MAX;
@@ -114,30 +126,61 @@ window.EMAILS = (() => {
   }
   // The email's own record in the customer's chat holds the whole text (not for a quote email: only its preview is kept).
   const docIdOf = (m) => (m.kind === 'quote' ? null : m.id.startsWith('g_') ? m.id : m.id.slice(String(m.phone).length + 1));
-  async function select(id) {
-    const m = L.items.find((x) => x.id === id); if (!m) return;
-    L.sel = id; const mine = ++L.seq; renderList();
-    $('emails').dataset.sub = 'read'; $('emp-empty').hidden = true; $('emp-detail').hidden = false;
-    $('emp-d-name').textContent = m.name || 'Customer'; $('emp-d-kind').replaceChildren(); badges(m, $('emp-d-kind'));
-    $('emp-d-subject').textContent = m.subject || '(no subject)'; $('emp-d-when').textContent = m.at ? FULL_F.format(new Date(ms(m.at))) : '';
-    const inbound = m.direction === 'in';
-    $('emp-d-from').textContent = inbound ? (m.email || '') : 'Elite Kitchens'; $('emp-d-to').textContent = inbound ? 'Elite Kitchens' : (m.email || '');
-    $('emp-d-by').textContent = m.by || ''; $('emp-d-by').hidden = $('emp-d-by-t').hidden = inbound || !m.by;
-    $('emp-d-warn').hidden = m.confirmed !== false; $('emp-d-note').hidden = true;
-    $('emp-d-body').textContent = m.snippet || '';                                                           // the preview at once; the whole email replaces it when it arrives
-    $('emp-chat').onclick = () => { location.hash = '#c/' + m.phone; };
-    const docId = docIdOf(m);
-    if (!docId) { $('emp-d-note').hidden = false; $('emp-d-note').textContent = 'The wording of a quote email and its PDF are not kept here: this is the start of it. Open the chat or the quote to see the quote itself.'; return; }
-    try {
-      const d = await db.collection('conversations').doc(m.phone).collection('emails').doc(docId).get();
-      if (mine !== L.seq) return;
-      if (d.exists && typeof d.data().body === 'string') {
-        $('emp-d-body').textContent = d.data().body;
-        const att = d.data().attachments || []; if (att.length) { $('emp-d-note').hidden = false; $('emp-d-note').textContent = 'Attachments (open the email in Gmail to see them): ' + att.map((a) => a.name).join(', '); }
-      } else { $('emp-d-note').hidden = false; $('emp-d-note').textContent = 'The whole email is no longer in the chat, so this is the preview.'; }
-    } catch (e) { if (mine === L.seq) { $('emp-d-note').hidden = false; $('emp-d-note').textContent = 'The whole email could not be loaded just now, so this is the preview.'; } }
+  function stopThread() { if (T.unsub) { T.unsub(); T.unsub = null; } T.phone = null; T.seq++; }
+  const nearBottom = (box) => box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  // The whole conversation with one customer: every email, oldest first, newest at the bottom (like the chat). The text of each comes from the customer's chat records when it has arrived (the preview until then).
+  function renderThread(forceBottom) {
+    const box = $('emp-read'), host = $('emp-thread'), mine = T.items;
+    host.replaceChildren();
+    for (const m of mine) {
+      const card = el('article', 'emp-msg ' + (m.direction === 'in' ? 'emp-in' : 'emp-out')); card.dataset.kind = m.kind; card.dataset.id = m.id;
+      const head = el('div', 'ea-sub emp-msg-head'); badges(m, head); head.append(el('span', 'emp-msg-when', m.at ? FULL_F.format(new Date(ms(m.at))) : '')); card.append(head);
+      card.append(el('h3', 'emp-msg-subject', m.subject || '(no subject)'));
+      const who = m.direction === 'in' ? (m.email ? 'From ' + m.email : '') : ['To ' + (m.email || ''), m.by ? 'sent by ' + m.by : ''].filter(Boolean).join(' · '); if (who) card.append(el('div', 'emp-msg-meta', who));
+      if (m.confirmed === false) card.append(el('div', 'emp-d-warn', 'Google did not confirm this email was sent. Check the Sent folder of the mailbox; Elite OS never sends it again by itself.'));
+      const docId = docIdOf(m), got = docId && T.bodies[docId];
+      card.append(el('div', 'emp-d-body', got && typeof got.body === 'string' ? got.body : (m.snippet || '')));
+      const note = !docId ? 'The wording of a quote email and its PDF are not kept here: this is the start of it. Open the chat or the quote to see the quote itself.'
+        : got && got.attachments && got.attachments.length ? 'Attachments (open the email in Gmail to see them): ' + got.attachments.map((a) => a.name).join(', ')
+        : docId in T.bodies && !got ? 'The whole email is no longer in the chat, so this is the preview.' : T.failed ? 'The whole email could not be loaded just now, so this is the preview.' : '';
+      if (note) card.append(el('p', 'hint emp-msg-note', note));
+      host.append(card);
+    }
+    if (forceBottom || T.stick) box.scrollTop = box.scrollHeight;
   }
-  function toList() { L.sel = null; L.seq++; $('emails').dataset.sub = 'list'; $('emp-detail').hidden = true; $('emp-empty').hidden = false; renderList(); }
+  // The full text of every email in this customer's chat, fetched once for the conversation (and again when a new email arrives).
+  async function loadBodies(phone, mine) {
+    if (T.loading) return;
+    const missing = T.items.some((m) => { const d = docIdOf(m); return d && !(d in T.bodies); }); if (!missing) return;
+    T.loading = true;
+    try {
+      const snap = await db.collection('conversations').doc(phone).collection('emails').limit(300).get();
+      if (mine !== T.seq) return;
+      const have = {}; for (const d of snap.docs) have[d.id] = { body: d.data().body, attachments: d.data().attachments || [] };
+      for (const m of T.items) { const d = docIdOf(m); if (d) T.bodies[d] = have[d] || null; }
+      T.failed = false;
+    } catch (e) { if (mine === T.seq) T.failed = true; }
+    if (mine === T.seq) { T.loading = false; renderThread(false); } else T.loading = false;
+  }
+  function openThread(phone) {
+    stopThread(); T.phone = phone; T.items = []; T.bodies = {}; T.loading = false; T.failed = false; T.stick = true; const mine = ++T.seq;
+    const first = L.items.find((x) => x.phone === phone);
+    $('emp-d-name').textContent = (first && first.name) || 'Customer'; $('emp-d-sub').textContent = ''; $('emp-chat').onclick = () => { location.hash = '#c/' + phone; };
+    T.items = L.items.filter((x) => x.phone === phone).sort((a, b) => ms(a.at) - ms(b.at)); renderThread(true);                       // what the list already has, at once
+    T.unsub = db.collection('emailLog').where('phone', '==', phone).limit(300).onSnapshot((snap) => {
+      if (mine !== T.seq) return;
+      T.items = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => ms(a.at) - ms(b.at));
+      const named = T.items.find((x) => x.name), addr = T.items.slice().reverse().find((x) => x.email);
+      $('emp-d-name').textContent = (named && named.name) || 'Customer'; $('emp-d-sub').textContent = [plural(T.items.length), addr ? addr.email : ''].filter(Boolean).join(' · ');
+      renderThread(false); loadBodies(phone, mine);
+    }, () => { if (mine === T.seq) { T.failed = true; renderThread(false); } });
+  }
+  function select(phone) {
+    L.sel = phone; renderList();
+    $('emails').dataset.sub = 'read'; $('emp-empty').hidden = true; $('emp-detail').hidden = false;
+    openThread(phone);
+  }
+  function toList() { L.sel = null; stopThread(); $('emails').dataset.sub = 'list'; $('emp-detail').hidden = true; $('emp-empty').hidden = false; renderList(); }
   function setNav(on) {
     const n = $('nav-emails');
     n.classList.toggle('active', on);
@@ -151,15 +194,16 @@ window.EMAILS = (() => {
   }
   function show() {
     L.active = true; setNav(true);
-    L.filter = 'all'; L.query = ''; L.limit = 100; L.loaded = false; L.items = []; $('emp-search').value = ''; toList(); start(); setView();
+    L.filter = 'all'; L.query = ''; L.limit = 300; L.loaded = false; L.items = []; $('emp-search').value = ''; toList(); start(); setView();
   }
-  function hide() { L.active = false; stop(); setNav(false); setView(); }
+  function hide() { L.active = false; stop(); stopThread(); setNav(false); setView(); }
   function init() {
     if (!$('emails')) return;
     $('emp-back').onclick = () => { location.hash = ''; };
     $('emp-tolist').onclick = toList;
-    $('emp-more').onclick = () => { L.limit = Math.min(MAX, L.limit + 100); start(); };
+    $('emp-more').onclick = () => { L.limit = Math.min(MAX, L.limit + 300); start(); };
     $('emp-search').addEventListener('input', () => { L.query = $('emp-search').value; renderList(); });
+    $('emp-read').addEventListener('scroll', () => { T.stick = nearBottom($('emp-read')); });                  // scrolled up to read an older email: a new email does not pull the page down
     for (const c of document.querySelectorAll('#emails .ea-chip')) c.onclick = () => { L.filter = c.dataset.f; renderList(); };
   }
   init();

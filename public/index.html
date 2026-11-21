@@ -281,28 +281,26 @@
   <main id="emails" class="emails-pane" aria-label="Emails" data-sub="list">
     <header class="quotes-head">
       <button id="emp-back" class="icon-btn" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
-      <div class="quotes-titles"><h1>Emails</h1><div class="q-subtitle">Every email sent to or received from your customers, newest first.</div></div>
+      <div class="quotes-titles"><h1>Emails</h1><div class="q-subtitle">Every email sent to or received from your customers, one conversation per customer, newest first.</div></div>
     </header>
     <div class="emp-tools">
       <input id="emp-search" type="search" class="emp-search" placeholder="Search name, subject, email address, quote number…" aria-label="Search the emails" autocomplete="off" maxlength="80">
       <div class="emp-filters" role="group" aria-label="Show"><button type="button" class="ea-chip" data-f="all" aria-pressed="true">All</button><button type="button" class="ea-chip" data-f="in" aria-pressed="false">Received</button><button type="button" class="ea-chip" data-f="out" aria-pressed="false">Sent</button><button type="button" class="ea-chip" data-f="followups" aria-pressed="false">Follow-ups</button><button type="button" class="ea-chip" data-f="unconfirmed" aria-pressed="false">Not confirmed</button></div>
     </div>
     <div class="emp-cols">
-      <section class="emp-listcol" aria-label="Emails">
+      <section class="emp-listcol" aria-label="Customers">
         <p id="emp-note" class="hint emp-note" role="status"></p>
         <ul id="emp-list" class="ea-list"></ul>
         <div class="emp-more"><button type="button" id="emp-more" class="btn btn-ghost btn-sm" hidden>Show older</button></div>
       </section>
-      <section id="emp-read" class="emp-readcol" aria-label="The email" aria-live="polite">
-        <div id="emp-empty" class="emp-empty"><p>Choose an email to read it here.</p></div>
+      <section id="emp-read" class="emp-readcol" aria-label="The conversation">
+        <div id="emp-empty" class="emp-empty"><p>Choose a customer to read all their emails here.</p></div>
         <article id="emp-detail" class="emp-detail" hidden>
-          <button type="button" id="emp-tolist" class="btn btn-ghost btn-sm emp-tolist">&larr; All emails</button>
-          <div class="emp-d-top"><div><div id="emp-d-name" class="emp-d-name"></div><div id="emp-d-kind" class="ea-sub"></div></div><button type="button" id="emp-chat" class="btn btn-ghost btn-sm">Open chat</button></div>
-          <h2 id="emp-d-subject" class="emp-d-subject"></h2>
-          <dl class="emp-d-meta"><dt>From</dt><dd id="emp-d-from"></dd><dt>To</dt><dd id="emp-d-to"></dd><dt>When</dt><dd id="emp-d-when"></dd><dt id="emp-d-by-t">Sent by</dt><dd id="emp-d-by"></dd></dl>
-          <div id="emp-d-warn" class="emp-d-warn" hidden>Google did not confirm this email was sent. Check the Sent folder of the mailbox; Elite OS never sends it again by itself.</div>
-          <div id="emp-d-body" class="emp-d-body"></div>
-          <p id="emp-d-note" class="hint" hidden></p>
+          <div class="emp-d-head">
+            <button type="button" id="emp-tolist" class="btn btn-ghost btn-sm emp-tolist">&larr; All customers</button>
+            <div class="emp-d-top"><div><div id="emp-d-name" class="emp-d-name"></div><div id="emp-d-sub" class="ea-sub"></div></div><button type="button" id="emp-chat" class="btn btn-ghost btn-sm">Open chat</button></div>
+          </div>
+          <div id="emp-thread" class="emp-thread"></div>
         </article>
       </section>
     </div>
