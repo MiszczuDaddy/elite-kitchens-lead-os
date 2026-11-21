@@ -25,6 +25,9 @@ const web = http.createServer((req, res) => {
   const m = /^\/__\/firebase\/[\d.]+\/(.+)$/.exec(u), f = m ? path.join(ROOT, 'node_modules/firebase', m[1]) : path.join(ROOT, 'public', u === '/' ? 'index.html' : u);
   fs.readFile(f, (e, d) => { if (e) { res.statusCode = 404; return res.end('nf'); } res.setHeader('content-type', TYPES[path.extname(f)] || 'application/octet-stream'); res.setHeader('cache-control', 'no-store'); res.end(d); });
 }).listen(5072);
+// the fake Gmail (the functions emulator is told to use it: MAIL_API_BASE in test-ui/run.sh): it records what would be sent
+const mails = [];
+const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => { try { mails.push(Buffer.from(JSON.parse(Buffer.concat(c).toString()).raw, 'base64url').toString('utf8')); } catch (e) { /* ignore */ } res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ id: 'gsent' + mails.length, threadId: 't' + mails.length })); }); }).listen(9913);
 
 (async () => {
   initializeApp({ projectId: 'demo-leados' }); const db = getFirestore(), T = (ms) => Timestamp.fromMillis(ms), NOW = Date.now(), MIN = 60000, DAY = 86400000;
@@ -112,6 +115,23 @@ const web = http.createServer((req, res) => {
   assert.equal(await page.isVisible('#emails'), false, 'opening a chat closes the Emails page');
   ok('choosing a customer shows ALL their emails in one window, oldest first and the newest at the bottom: sent and received told apart, the full text from the chat record, who sent it, attachments named; a quote email shows its preview and says the rest is not kept; another customer is another conversation; "Open chat" opens the chat');
 
+  // ------------------------------------------------------------------ 3b. write a reply by email from the conversation (the same window as in the chat)
+  await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length === 3, 'back on the page');
+  await page.click('#emp-list .ea-open[data-phone="' + P.bob + '"]'); await until(async () => (await cards()).length === 2, 'Bob\'s conversation');
+  assert.equal((await page.innerText('#emp-reply')).trim(), 'Write an email', 'Bob has never written: a new email, not a reply');
+  await page.click('#emp-reply'); await page.waitForSelector('#em-dlg[open]'); assert.equal(await page.innerText('#em-title'), 'Email Bob Byrne'); assert.equal(await page.innerText('#em-to'), `To: ${P.bob}@example.com`); assert.equal(await page.isVisible('#em-last'), false, 'no email of theirs to show'); assert.equal(await page.inputValue('#em-subject'), '');
+  await page.click('#em-cancel'); await page.waitForFunction(() => !document.getElementById('em-dlg').open); assert.equal(mails.length, 0, 'closing the window sends nothing');
+  await page.click('#emp-list .ea-open[data-phone="' + P.anna + '"]'); await until(async () => { const t = await thread(); return t.includes('island lighting') && t.includes('about six weeks'); }, 'Anna\'s conversation, in full');
+  assert.equal((await page.innerText('#emp-reply')).trim(), 'Reply by email', 'Anna wrote to you: a reply');
+  await page.click('#emp-reply'); await page.waitForSelector('#em-dlg[open]');
+  assert.equal(await page.innerText('#em-title'), 'Email Anna Apple'); assert.equal(await page.innerText('#em-to'), `To: ${P.anna}@example.com`); assert.equal(await page.inputValue('#em-subject'), 'Re: Your Elite Kitchens quote EK-0112');
+  const lastBox = await page.innerText('#em-last'); assert.match(lastBox, /Their last email · Re: Your Elite Kitchens quote EK-0112/); assert.match(lastBox, /island lighting/, 'their newest email, in full, is above the box you write in');
+  await page.fill('#em-body', 'Thanks Anna, the delivery is about six weeks. I will ring you at 5.'); await page.screenshot({ path: path.join(SHOTS, 'email-reply-window.png') }); await page.click('#em-send'); await page.waitForFunction(() => !document.getElementById('em-dlg').open);
+  assert.equal(mails.length, 1, 'one email was sent'); assert.match(mails[0], new RegExp('^To: ' + P.anna + '@example\\.com', 'm')); assert.match(mails[0], /^Subject: Re: Your Elite Kitchens quote EK-0112/m); assert.match(mails[0], /I will ring you at 5\./);
+  await until(async () => (await cards()).length === 4, 'the email you sent appears in her conversation'); const sent = (await cards())[3]; assert.deepEqual([sent.kind, sent.dir], ['reply', 'out'], 'at the bottom, as your reply'); assert.match(sent.body, /about six weeks\. I will ring you at 5\./); assert.equal(sent.meta, `To ${P.anna}@example.com · sent by staff@test.dev`);
+  await until(async () => (await rows()).find((r) => r.name === 'Anna Apple').count === '4 emails', 'her row counts it'); assert.equal((await rows())[0].name, 'Anna Apple');
+  ok('"Reply by email" sits at the bottom of every conversation ("Write an email" when they have never written): it opens the same reply window as in the chat, with their newest email above it; sending delivers it, and it appears at the bottom of their conversation and in the count on their row; closing the window sends nothing');
+
   // ------------------------------------------------------------------ 4. names and subjects are text, never code
   await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length === 3, 'back on the page');
   const cara = (await rows())[1]; assert.ok(cara.name.includes('<script>') && cara.subject.startsWith('<img src=x'), 'shown literally: ' + JSON.stringify([cara.name, cara.subject]));
@@ -154,12 +174,13 @@ const web = http.createServer((req, res) => {
   const row = await m.page.locator('#emp-list .ea-open').first().boundingBox(); assert.ok(row.height >= 56 && row.x >= 0 && row.x + row.width <= 376, 'rows fit and are easy to tap: ' + JSON.stringify(row));
   assert.ok((await m.page.locator('#emails .ea-chip').first().boundingBox()).height >= 44, 'the filters are easy to tap'); await m.page.screenshot({ path: path.join(SHOTS, 'email-list-phone.png') });
   await m.page.click('#emp-list .ea-open[data-phone="' + P.bob + '"]'); await m.page.waitForSelector('#emp-detail', { state: 'visible' }); await until(async () => (await m.page.locator('#emp-thread .emp-msg').count()) === 3, 'Bob\'s three emails'); assert.equal(await m.page.isVisible('#emp-list'), false, 'on a phone: the conversation alone'); await fits('conversation'); const back = await m.page.locator('#emp-tolist').boundingBox(); assert.ok(back && back.y >= 0 && back.y < 300 && back.height >= 44, 'the way back stays in view while you read: ' + JSON.stringify(back)); assert.ok(await m.page.locator('#emp-chat').isVisible() && (await m.page.locator('#emp-d-name').boundingBox()).y >= 0, 'the customer\'s name and Open chat stay in view');
+  const rb = await m.page.locator('#emp-reply').boundingBox(); assert.ok(rb && rb.y >= 0 && rb.y + rb.height <= 812 && rb.width >= 300 && rb.height >= 44, 'on a phone the reply button is on screen, full width and easy to tap: ' + JSON.stringify(rb));
   await m.page.screenshot({ path: path.join(SHOTS, 'email-read-phone.png') });
   await m.page.click('#emp-tolist'); await m.page.waitForSelector('#emp-list', { state: 'visible' }); assert.equal(await m.page.isVisible('#emp-detail'), false);
   await m.page.click('#emp-back'); await m.page.waitForSelector('#emails', { state: 'hidden' });
   ok('on a 375px phone: the Emails button is easy to tap; the page shows the list of customers, choosing one shows their whole conversation alone with a way back, and Back returns to the Inbox; no sideways scrolling');
 
   assert.deepEqual(errors, [], 'no page errors: ' + errors.join(' | ')); ok('no console or page errors');
-  await browser.close(); web.close();
+  await browser.close(); web.close(); gmail.close();
   console.log(`\nALL ${n} CHECKS PASSED`); process.exit(0);
-})().catch((e) => { console.error('\nFAILED:', e && e.stack || e, '\nPAGE ERRORS:', global.__errors); web.close(); process.exit(1); });
+})().catch((e) => { console.error('\nFAILED:', e && e.stack || e, '\nPAGE ERRORS:', global.__errors); web.close(); gmail.close(); process.exit(1); });

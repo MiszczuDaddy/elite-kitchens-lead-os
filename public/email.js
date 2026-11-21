@@ -35,20 +35,27 @@ window.EMAILBOX = (() => {
   // what the chat merges into its thread
   const items = (id) => (E.id && E.id === id ? E.items : []);
 
-  function open() {
-    if (!E.id || E.busy) return;
-    const to = addressOf(); if (!to) { toast('There is no email address for ' + nameOf() + '. Add one in their Details first.'); return; }
-    const l = lastIn();
-    $('em-title').textContent = 'Email ' + nameOf(); $('em-to').textContent = 'To: ' + to;
+  // The reply window works from a small description of who it is for, so it opens from a chat (below) and from the Emails page (reply(), further down): { id: their number, name, to: the address, last: their newest email { subject, body } or null }.
+  function openWith(ctx) {
+    if (E.busy) return;
+    if (!ctx || !ctx.id) return;
+    if (!ctx.to) { toast('There is no email address for ' + ctx.name + '. Add one in their Details first.'); return; }
+    E.ctx = ctx; const l = ctx.last;
+    $('em-title').textContent = 'Email ' + ctx.name; $('em-to').textContent = 'To: ' + ctx.to;
     const box = $('em-last'); box.hidden = !l; box.replaceChildren();
     if (l) { box.append(el('div', 'em-last-h', 'Their last email · ' + (l.subject || '(no subject)')), el('div', 'em-last-b', String(l.body || '').slice(0, 600) + (String(l.body || '').length > 600 ? '…' : ''))); }
     $('em-subject').value = l ? reSubject(l.subject) : ''; $('em-body').value = ''; $('em-err').textContent = '';
     $('em-send').disabled = false; $('em-send').textContent = 'Send email'; $('em-check').disabled = false;
     showDialog($('em-dlg')); ($('em-subject').value ? $('em-body') : $('em-subject')).focus();
   }
+  function open() {
+    if (!E.id || E.busy) return;
+    const l = lastIn();
+    openWith({ id: E.id, name: nameOf(), to: addressOf(), last: l ? { subject: l.subject, body: l.body } : null });
+  }
   async function send() {
-    if (E.busy) return; E.busy = true; $('em-send').disabled = true; $('em-send').textContent = 'Sending…'; $('em-err').textContent = '';
-    const id = E.id, name = nameOf();
+    if (E.busy || !E.ctx) return; E.busy = true; $('em-send').disabled = true; $('em-send').textContent = 'Sending…'; $('em-err').textContent = '';
+    const id = E.ctx.id, name = E.ctx.name;
     try { await call('sendEmailReply')({ phone: id, subject: $('em-subject').value, body: $('em-body').value }); }
     catch (e) { E.busy = false; $('em-err').textContent = errText(e); $('em-send').disabled = false; $('em-send').textContent = 'Send email'; return; }
     E.busy = false; hideDialog($('em-dlg')); toast('Email sent to ' + name + '.');
@@ -68,7 +75,7 @@ window.EMAILBOX = (() => {
     $('email-btn').onclick = open; $('em-send').onclick = send; $('em-check').onclick = check; $('em-cancel').onclick = () => { if (!E.busy) hideDialog($('em-dlg')); };
   }
   init();
-  return { onSelect, items, sync, open };
+  return { onSelect, items, sync, open, reply: openWith };
 })();
 
 // The Emails page (docs/EMAIL_LIST.md): ONE ROW PER CUSTOMER (21 Nov 2026), newest conversation first, built from the server's list of emails (emailLog: a short preview of each, written only by the server). Choose a customer
@@ -146,6 +153,7 @@ window.EMAILS = (() => {
       if (note) card.append(el('p', 'hint emp-msg-note', note));
       host.append(card);
     }
+    $('emp-reply').textContent = mine.some((x) => x.direction === 'in') ? 'Reply by email' : 'Write an email';          // they wrote to us: a reply; otherwise a new email to them
     if (forceBottom || T.stick) box.scrollTop = box.scrollHeight;
   }
   // The full text of every email in this customer's chat, fetched once for the conversation (and again when a new email arrives).
@@ -161,6 +169,18 @@ window.EMAILS = (() => {
       T.failed = false;
     } catch (e) { if (mine === T.seq) T.failed = true; }
     if (mine === T.seq) { T.loading = false; renderThread(false); } else T.loading = false;
+  }
+  // "Reply by email": the same reply window as in the chat, for this customer. The server picks where it goes (the address they last wrote from, else the one on their record), keeps it in their conversation and lists it here.
+  async function replyTo() {
+    const phone = T.phone, btn = $('emp-reply'); if (!phone || !window.EMAILBOX || btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const ins = T.items.filter((x) => x.direction === 'in'), last = ins[ins.length - 1] || null;
+      let to = (last && last.email) || ''; if (!to) { const any = T.items.slice().reverse().find((x) => x.email); to = any ? any.email : ''; }
+      if (!to) { try { const c = await db.collection('contacts').doc(phone).get(); to = c.exists ? String(c.data().email || '').trim() : ''; } catch (e) { /* no address known */ } }
+      const named = T.items.find((x) => x.name), got = last && docIdOf(last) ? T.bodies[docIdOf(last)] : null;
+      EMAILBOX.reply({ id: phone, name: (named && named.name) || 'the customer', to, last: last ? { subject: last.subject, body: got && typeof got.body === 'string' ? got.body : last.snippet } : null });
+    } finally { btn.disabled = false; }
   }
   function openThread(phone) {
     stopThread(); T.phone = phone; T.items = []; T.bodies = {}; T.loading = false; T.failed = false; T.stick = true; const mine = ++T.seq;
@@ -200,7 +220,7 @@ window.EMAILS = (() => {
   function init() {
     if (!$('emails')) return;
     $('emp-back').onclick = () => { location.hash = ''; };
-    $('emp-tolist').onclick = toList;
+    $('emp-tolist').onclick = toList; $('emp-reply').onclick = replyTo;
     $('emp-more').onclick = () => { L.limit = Math.min(MAX, L.limit + 300); start(); };
     $('emp-search').addEventListener('input', () => { L.query = $('emp-search').value; renderList(); });
     $('emp-read').addEventListener('scroll', () => { T.stick = nearBottom($('emp-read')); });                  // scrolled up to read an older email: a new email does not pull the page down
