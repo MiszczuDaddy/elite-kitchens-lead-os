@@ -257,7 +257,7 @@ test('READ-ONLY CHAT: the chat code never writes customer data itself; only deci
   const proposeSrc = actions.slice(actions.indexOf('async function propose('), actions.indexOf('const messageOf'));
   assert.equal(/tx\.|runTransaction|PR\.(save|setStep)|doc\('(?:contacts|projects|conversations)[^)]*\)\.(?:set|update)/.test(proposeSrc), false, 'proposing never writes customer data');
   assert.equal(/wa\.|sendText|fetch\(|bucket/.test(actions), false, 'no WhatsApp message or web request is ever made from here');
-  assert.equal((actions.match(/sendRaw|FU\.send\(|QF\.send\(|Reply\.send\(/g) || []).length, 3, 'the ONLY things that can send are the follow-up email to a lead (lib/followUp.js), the follow-up email about a quote (lib/quoteFollowUp.js) and the one email the Assistant wrote for one customer (lib/emailReply.js), each through the server rules and only after Approve');
+  assert.equal((actions.match(/sendRaw|FU\.send\(|QF\.send\(|Reply\.send\(/g) || []).length, 5, 'the ONLY things that can send are the follow-up email to a lead (lib/followUp.js: the all-leads action and the tick-box list), the follow-up email about a quote (lib/quoteFollowUp.js: the all-quotes action and the tick-box list) and the one email the Assistant wrote for one customer (lib/emailReply.js), each through the server rules and only after Approve');
   assert.equal(/\.delete\s*\(/.test(actions), false, 'nothing is ever deleted');
   const idx = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
   assert.match(idx, /exports\.aiDecide = onCall\(\{ timeoutSeconds: 180 \}, \(req\) => h\.aiDecide\(req\.auth, req\.data, \{ \.\.\.quoteDeps\(\), mailer: followUpMailer\(\) \}\)\)/, 'approving needs no model key (it gets the mailer for the follow-up emails)');

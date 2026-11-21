@@ -1406,3 +1406,13 @@ div.td-open { cursor: default; }
   .emp-tolist { display: inline-flex; min-height: 44px; } .ea-chip { min-height: 44px; } .emp-search { min-height: 44px; font-size: 16px; }
   .emails-pane .quotes-head { padding: max(14px,env(safe-area-inset-top)) 12px 12px; gap: 6px; }
 }
+
+/* The Assistant's follow-up list: tick boxes with how long it has been, and "when to send" (21 Nov 2026). */
+.as-pick-tools { display: flex; gap: 14px; margin: 2px 0 4px; }
+.as-pick-list { max-height: clamp(140px, 24vh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; background: var(--bg); }
+.as-pick-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; padding: 6px 0; min-height: 34px; font-size: 13.5px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.as-pick-row:last-child { border-bottom: 0; } .as-pick-row input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
+.as-pick-text { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; } .as-pick-note { flex: none; padding: 0 8px; border-radius: 9px; background: #f8efdc; color: #5f3f08; font-size: 12px; font-weight: 600; }
+.as-when { margin: 10px 0 0; } .as-when-row { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 13.5px; cursor: pointer; } .as-when-row input { width: 18px; height: 18px; accent-color: var(--accent); }
+.as-when-time { margin: 2px 0 4px 26px; min-height: 38px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+@media (max-width: 899px) { .as-pick-row { min-height: 44px; align-items: center; } .as-when-row { min-height: 44px; } .as-pick-list { max-height: clamp(110px, 20vh, 260px); } .as-when-time { font-size: 16px; min-height: 44px; } }

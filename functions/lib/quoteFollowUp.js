@@ -22,9 +22,10 @@ const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : 0);
 const when = (t) => new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' }).format(new Date(t));
 
 // Why this quote may not be followed up by email now, in plain words; null when it may.
-function refusal(c, quoteId, sentMs, nowMs) {
+// allowEarly: the person ticked this quote themselves (the Assistant's follow-up list): the two-week wait is skipped, but never the one-day floor and never any other rule.
+function refusal(c, quoteId, sentMs, nowMs, { allowEarly = false } = {}) {
   if (c.doNotContact && c.doNotContact.on === true) return 'They asked not to be contacted.';
-  if (nowMs - sentMs < MIN_AGE_MS) return 'This quote was sent less than 2 weeks ago. Give them a little longer.';
+  if (nowMs - sentMs < (allowEarly ? DAY : MIN_AGE_MS)) return allowEarly ? 'This quote was sent less than a day ago. Give them a little longer.' : 'This quote was sent less than 2 weeks ago. Give them a little longer.';
   if (ms(c.lastInboundAt) > sentMs || ms(c.emailInboundAt) > sentMs) return 'They have written to you since the quote was sent, so check the chat and reply there.';          // by WhatsApp or by email
   const m = (c.quoteMail && c.quoteMail[quoteId]) || null;
   if (m && ms(m.sendingUntil) > nowMs) return 'An email is being sent about this quote right now.';
@@ -34,7 +35,7 @@ function refusal(c, quoteId, sentMs, nowMs) {
 }
 
 // mailer: { enabled, sender, replyTo, fromName, gmail }
-async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
+async function send({ db, mailer }, actor, data, { nowMs = Date.now(), allowEarly = false } = {}) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw bad('Missing details.');
   for (const k of Object.keys(data)) if (!['quoteId', 'subject', 'body'].includes(k)) throw bad(`Unknown field: ${k}`);
   if (typeof data.quoteId !== 'string' || !QUOTE_ID.test(data.quoteId)) throw bad('Missing quote.');
@@ -51,7 +52,7 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
   const c = conv.data(), k = contact.exists ? contact.data() : {}, to = String(k.email || '').trim();
   if (!to) throw refuse('This customer has no email address. Add one in their Details first.');
   if (!Gmail.EMAIL_RE.test(to)) throw refuse('The email address on this customer does not look right. Check it in their Details.');
-  const why = refusal(c, quoteId, sentMs, nowMs); if (why) throw refuse(why);
+  const why = refusal(c, quoteId, sentMs, nowMs, { allowEarly }); if (why) throw refuse(why);
 
   const first = Text.firstNameOf(k.name || c.name || q.customerName), ref = typeof q.ref === 'string' ? q.ref.slice(0, 40) : '';
   const subject = data.subject == null || data.subject === '' ? Text.quoteSubject(ref) : data.subject, body = data.body == null || data.body === '' ? Text.quoteBodyFor({ first, ref }) : data.body;
@@ -63,7 +64,7 @@ async function send({ db, mailer }, actor, data, { nowMs = Date.now() } = {}) {
   await db.runTransaction(async (tx) => {
     const s = await tx.get(cRef);
     if (!s.exists) throw new HttpsError('not-found', 'That customer is no longer there.');
-    const again = refusal(s.data(), quoteId, sentMs, nowMs); if (again) throw refuse(again);
+    const again = refusal(s.data(), quoteId, sentMs, nowMs, { allowEarly }); if (again) throw refuse(again);
     tx.update(cRef, { [path('sendingUntil')]: Timestamp.fromMillis(nowMs + CLAIM_MS), [path('sendBy')]: actor.id });
   });
 

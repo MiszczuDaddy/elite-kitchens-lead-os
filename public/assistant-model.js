@@ -88,15 +88,28 @@
     return { disabled: false, hint: '' };
   }
   // A proposal card: what the server stored, as the screen shows it. The words come from the server (built by code); this only decides which state to show.
-  const STATE_LABEL = { pending: 'Waiting for your approval', applying: 'Saving…', applied: 'Done', partial: 'Partly saved', stale: 'Out of date: nothing was changed', expired: 'Expired: nothing was changed', rejected: 'Rejected: nothing was changed', failed: 'Not saved', gone: 'No longer available: ask again' };
+  const STATE_LABEL = { pending: 'Waiting for your approval', applying: 'Saving…', scheduled: 'Scheduled', cancelled: 'Cancelled: nothing was sent', applied: 'Done', partial: 'Partly saved', stale: 'Out of date: nothing was changed', expired: 'Expired: nothing was changed', rejected: 'Rejected: nothing was changed', failed: 'Not saved', gone: 'No longer available: ask again' };
   function proposalView(p, nowMs) {
     if (!p) return null;
     const exp = p.expiresAt && typeof p.expiresAt.toMillis === 'function' ? p.expiresAt.toMillis() : (typeof p.expiresAt === 'number' ? p.expiresAt : null);
     const status = p.status === 'pending' && exp != null && nowMs > exp ? 'expired' : String(p.status || '');
     const pv = p.preview || {};
-    return { id: p.id, kind: String(p.kind || ''), title: String(p.title || ''), rows: Array.isArray(pv.rows) ? pv.rows : [], footer: String(pv.footer || ''), status, label: STATE_LABEL[status] || status, canDecide: status === 'pending',
+    return { id: p.id, kind: String(p.kind || ''), title: String(p.title || ''), rows: Array.isArray(pv.rows) ? pv.rows : [], footer: String(pv.footer || ''), status, label: STATE_LABEL[status] || status, canDecide: status === 'pending', scheduled: status === 'scheduled', scheduledFor: p.scheduledFor && typeof p.scheduledFor.toMillis === 'function' ? p.scheduledFor.toMillis() : null,
       minutes: exp != null && status === 'pending' ? Math.max(1, Math.ceil((exp - nowMs) / 60000)) : null, message: (p.result && p.result.message) || '', results: (p.result && Array.isArray(p.result.results)) ? p.result.results : [] };
   }
+  // "When to send" for a follow-up list (Irish time, summer and winter handled by the clock itself): the next 09:00 (this morning if it is not yet 09:00, otherwise tomorrow), and a typed date and time.
+  const TZ_ = 'Europe/Dublin';
+  const parts = (t) => Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: TZ_, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t)).filter((x) => x.type !== 'literal').map((x) => [x.type, Number(x.value)]));
+  function dublinMs(y, m, d, h, min) {                                                          // Irish wall-clock time -> milliseconds, correct in summer and winter
+    const guess = Date.UTC(y, m - 1, d, h, min); let t = guess;
+    for (let i = 0; i < 2; i++) { const p = parts(t); t += Date.UTC(y, m - 1, d, h, min) - Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute); }
+    return t;
+  }
+  function nextMorning(nowMs, hour = 9) { const p = parts(nowMs), add = p.hour >= hour ? 1 : 0, d = new Date(Date.UTC(p.year, p.month - 1, p.day + add)); return dublinMs(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), hour, 0); }
+  const isNight = (nowMs) => { const h = parts(nowMs).hour; return h >= 21 || h < 7; };       // the card suggests the morning when it is opened late in the evening or at night
+  const fromLocalInput = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(v || '')); return m ? dublinMs(+m[1], +m[2], +m[3], +m[4], +m[5]) : null; };
+  const toLocalInput = (t) => { const p = parts(t), z = (n) => String(n).padStart(2, '0'); return `${p.year}-${z(p.month)}-${z(p.day)}T${z(p.hour)}:${z(p.minute)}`; };
+  const whenLabel = (t) => new Intl.DateTimeFormat('en-IE', { timeZone: TZ_, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(t));
   // AI actions in Settings: only the owner account can change them (the server enforces it too).
   function actionsGate(status) {
     if (!status) return { disabled: true, hint: '' };
@@ -109,5 +122,5 @@
   const friendlyError = (e) => String((e && e.message) || e || 'Something went wrong.').replace(/^(functions\/)?[\w-]+:\s*/, '').slice(0, 300);
   const SUGGESTIONS = ['Which quotes are waiting for an answer?', 'Who are the newest leads?', 'What is booked this week?', 'Which projects still need doors ordered?'];
 
-  return { STATE_LABEL, proposalView, actionsGate, MODEL_KEYS, chosenModel, modelOf, canRetry, dataGate, modelLine, MAX_TURNS, MAX_TURN_CHARS, MAX_TOTAL_CHARS, historyOf, contextOf, blocks, inline, eur, budget, notice, friendlyError, SUGGESTIONS };
+  return { nextMorning, isNight, fromLocalInput, toLocalInput, whenLabel, dublinMs, STATE_LABEL, proposalView, actionsGate, MODEL_KEYS, chosenModel, modelOf, canRetry, dataGate, modelLine, MAX_TURNS, MAX_TURN_CHARS, MAX_TOTAL_CHARS, historyOf, contextOf, blocks, inline, eur, budget, notice, friendlyError, SUGGESTIONS };
 });

@@ -46,6 +46,7 @@
 #   ./scripts/deploy-quote-sending.sh nighthold [on|off]  No welcome message at night (docs/WELCOME_QUIET_HOURS.md): a lead that arrives between midnight and 07:00 Irish time gets its welcome at 07:00. No argument: deploys leadIntake and the new welcomeSweep; "off" turns the wait off, "on" back on. Nothing is sent by this stage.
 #   ./scripts/deploy-quote-sending.sh pdfshare   Share PDF (docs/QUOTES.md, "Share PDF"): ONE function that already exists (quotePdfUrl) now also hands the phone the PDF file itself. Nothing is sent to anyone. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh emaillist  The Emails list on the Inbox (docs/EMAIL_LIST.md): the functions that send or receive an email now also add it to the list (all exist already; nothing is sent, nothing made public). Run it BEFORE "live". Optional afterwards: node scripts/backfill-email-log.js.
+#   ./scripts/deploy-quote-sending.sh followuplist  The Assistant's follow-up LIST with tick boxes and a send time (docs/FOLLOW_UP_EMAIL.md): aiChat, aiDecide, sendQuoteFollowUp (exist already) and ONE new scheduled function, followUpSweep, that sends a list you approved for later (never in the Irish night). Nothing is sent by this stage.
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -96,6 +97,7 @@ ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                       
 EMAILIN_NEW="emailSweep sendEmailReply checkEmail"                                                                      # the email inbox: the five-minute sweep (scheduled), the reply and the manual check (staff only, made public: each checks the signed-in staff account itself)
 EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"                                                      # + the three that decide who "never wrote": an email reply now counts
 EMAILLIST_FUNCS="emailSweep checkEmail sendEmailReply sendFollowUpEmail sendQuoteFollowUp aiDecide deliverQuote retryQuoteDelivery resolveQuoteDelivery deleteCustomer"          # the Emails list: everything that sends, receives or erases an email now also writes (or erases) its list entry
+FOLLOWLIST_FUNCS="followUpSweep aiChat aiDecide sendQuoteFollowUp"                                                           # the follow-up list: the new five-minute timer (scheduled, first on purpose: it has no web address) + the Assistant and the quote follow-up that share the new code
 PDFSHARE_FUNCS="quotePdfUrl"                                                                                           # Share PDF: the existing PDF link function can also return the file itself (the screen's Share button asks for it)
 NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                             # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
@@ -111,7 +113,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,59p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,60p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -537,6 +539,18 @@ case "${1:-}" in
     install; save_revisions $EMAILLIST_FUNCS; deploy_functions $EMAILLIST_FUNCS
     check_reachable "${EMAILLIST_FUNCS#emailSweep }"                                # emailSweep runs on a schedule and has no web address to ask: only the callable ones are checked
     echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:<each name above> --project $PROJECT (the list simply stops filling; nothing else is affected)."
+    ;;
+  followuplist)
+    grep -q "propose_follow_ups" functions/lib/aiActions.js || { echo "This checkout has no follow-up list code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision aidecide)" ] || { echo "The Assistant is not deployed yet: run $0 ai first."; exit 1; }
+    [ -n "$(serving_revision sendquotefollowup)" ] || { echo "The quote follow-up is not deployed yet: run $0 followup first."; exit 1; }
+    check_settings; check_access; check_routing $FOLLOWLIST_FUNCS
+    echo "Functions: $FOLLOWLIST_FUNCS (aiChat, aiDecide and sendQuoteFollowUp exist already; followUpSweep is new and runs on a timer: nothing made public)."
+    echo "Asking the Assistant to follow up shows ONE list: who got a quote and never answered, and leads who never replied, each with how long it has been and a tick box. Quotes over two weeks old start ticked; younger ones start unticked and you can tick them yourself. You also choose WHEN to send (now, 09:00 tomorrow, or a time): a later send waits on the timer, is checked again when it goes, can be cancelled, and never goes out between midnight and 07:00. Uses the same two Settings tickboxes as before; no new switch. Nothing is sent by this stage."
+    confirm "Deploy the follow-up list to the LIVE project?"
+    install; save_revisions aiChat aiDecide sendQuoteFollowUp; deploy_functions $FOLLOWLIST_FUNCS
+    check_reachable "${FOLLOWLIST_FUNCS#followUpSweep }"                            # followUpSweep runs on a timer and has no web address to ask: only the callable ones are checked
+    echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:aiChat,functions:aiDecide,functions:sendQuoteFollowUp --project $PROJECT and firebase functions:delete followUpSweep --region $REGION --project $PROJECT (the Assistant then goes back to its old follow-up cards)."
     ;;
   pdfshare)
     grep -q "SHARE_MAX" functions/lib/quotes.js || { echo "This checkout has no Share PDF code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }

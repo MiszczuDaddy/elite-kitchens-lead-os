@@ -238,6 +238,11 @@ exports.emailSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe
   try { const r = await require('./lib/emailInbound').sweep({ db: getFirestore(), reader: inbox.reader, mailbox: inbox.mailbox }); console.log(JSON.stringify({ level: 'info', msg: 'email sweep', ...r })); }
   catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'email sweep failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
 });
+// A follow-up list the owner approved for LATER (21 Nov 2026, lib/aiActions.js sweepScheduled): every five minutes, sends each one whose time has come, never in the Irish night.
+exports.followUpSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', timeoutSeconds: 300, retryCount: 0 }, async () => {
+  try { const r = await require('./lib/aiActions').sweepScheduled({ db: getFirestore(), mailer: followUpMailer() }); if (r.due) console.log(JSON.stringify({ level: 'info', msg: 'scheduled follow-ups', ...r })); }
+  catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'scheduled follow-ups failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
+});
 exports.sendEmailReply = onCall({}, (req) => h.sendEmailReply(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: replyMailer() }));
 exports.checkEmail = onCall({ timeoutSeconds: 120 }, (req) => h.checkEmail(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, inbox: inboxReader() }));
 exports.sendQuoteFollowUp = onCall({}, (req) => h.sendQuoteFollowUp(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));          // the same mailbox as the lead follow-ups
