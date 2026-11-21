@@ -193,7 +193,7 @@ test('AFTER THE SEND (finding 4): if the run dies after WhatsApp accepted the me
   const real = ai.draftOutcome; let broken = true; ai.draftOutcome = async (...a) => { if (broken && a[2] && a[2].outcome === 'used_unchanged') throw new Error('database hiccup'); return real(...a); };
   try {
     const w = waFake(), p = pushFake(), m = model(d);
-    assert.equal(await run(m, w, p), 'error', 'the run died after the send'); assert.equal(w.sent.length, 1, 'the customer got the message'); assert.equal(w.sent[0], L.acknowledge);
+    assert.equal(await run(m, w, p), 'error', 'the run died after the send'); assert.equal(w.sent.length, 1, 'the customer got the message'); assert.equal(w.sent[0], L.acknowledge + '\n' + L.see_our_work);
     let c = await conv(); assert.equal(c.consult.needsBooking, undefined, 'the request for the owner is not there yet'); assert.equal(c.receptionist.handledMs, 0);
     const cl = (await claims())[0]; assert.deepEqual([cl.state, cl.effectsDone], ['sent', false]);
     broken = false; const calls = m.calls;

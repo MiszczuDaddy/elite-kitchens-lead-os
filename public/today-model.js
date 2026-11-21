@@ -12,7 +12,7 @@
   const AMBER_MIN = 30, RED_MIN = 120;                  // a message waiting: amber after 30, red after 120 WORKING minutes (08:00 to 20:00 Irish time)
   const WORK_FROM = 8, WORK_TO = 20;
   const REPLY_WINDOW_MS = 60 * DAY, HANDOVER_WINDOW_MS = 14 * DAY, QUOTE_WINDOW_MS = 60 * DAY;
-  const QUOTE_AMBER_DAYS = 5, QUOTE_RED_DAYS = 10;
+  const QUOTE_AMBER_DAYS = 5, QUOTE_RED_DAYS = 10, QUOTE_EMAIL_DAYS = 14;          // the card appears at 5 days (a nudge to phone); the follow-up EMAIL is offered only from 14 days (functions/lib/quoteFollowUp.js MIN_AGE_DAYS, a test keeps them equal)
   const ms = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : typeof t === 'number' && isFinite(t) ? t : null);
   const clip = (s, n) => { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t; };
 
@@ -94,11 +94,17 @@
   const dnc = (c) => !!(c && c.doNotContact && c.doNotContact.on === true);
   const receptionistHandling = (c) => !!(c && c.receptionist && c.receptionist.on === true && !c.receptionist.paused);
 
+  // "Dismiss" on a reply alert stores the customer's lastInboundAt as the mark's basis: hidden until they write again.
+  const replyDismissedOf = (c, marks) => {
+    const mk = (marks || {})['reply|' + c.id];
+    return !!(mk && ms(c.lastInboundAt) && Number(mk.basis) >= ms(c.lastInboundAt));
+  };
+
   // ---- one chat -> its reasons ----
   // Priority when a customer has several (the card's heading): fix the lead, then book the visit, then the hand-over, then the reply.
   const PRIORITY = ['leadfix', 'booking', 'handover', 'reply'];
   function reasonsOf(c, ctx) {
-    const { now, booked, today, leadFailed } = ctx, out = [];
+    const { now, booked, today, leadFailed, replyDismissed } = ctx, out = [];
     if (!c || dnc(c)) return out;
     const rec = c.receptionist || {}, lastIn = ms(c.lastInboundAt);
     if (leadFailed) out.push({ type: 'leadfix', text: leadFailed.text, since: leadFailed.at || null, urgency: 2 });
@@ -111,7 +117,7 @@
     if (why && pausedAt && now - pausedAt <= HANDOVER_WINDOW_MS && !(ms(rec.humanAt) > pausedAt) && !(why.consult && booked && booked.has(String(c.id)))) {
       out.push({ type: 'handover', text: why.text, since: pausedAt, urgency: why.red ? 2 : urgencyOf(workMinutes(pausedAt, now)), alertFailed: !!rec.notifyFailed });
     }
-    if (c.lastMessageDirection === 'in' && lastIn && now - lastIn <= REPLY_WINDOW_MS && !['closed', 'won'].includes(stageOf(c)) && !isPleasantry(c.lastMessage)) {
+    if (c.lastMessageDirection === 'in' && lastIn && now - lastIn <= REPLY_WINDOW_MS && !['closed', 'won'].includes(stageOf(c)) && !isPleasantry(c.lastMessage) && !replyDismissed) {
       const wm = workMinutes(lastIn, now);
       // the receptionist answers new messages itself: it is given the same 30 working minutes as a person before the message counts as waiting
       if (!(receptionistHandling(c) && wm < AMBER_MIN)) out.push({ type: 'reply', text: receptionistHandling(c) ? 'The receptionist has not answered yet' : 'Waiting for your reply', since: lastIn, urgency: urgencyOf(wm), windowClosed: now - lastIn >= DAY });
@@ -130,8 +136,8 @@
       if (days < QUOTE_AMBER_DAYS) continue;
       const mk = (marks || {})[quoteKey(q.id)];
       if (mk && mk.basis === sent && ms(mk.snoozeUntil) > now) continue;       // snoozed: only for THIS send of the quote
-      const conv = convById.get(String(q.phone)) || {};
-      out.push({ key: quoteKey(q.id), kind: 'quote', quoteId: q.id, phone: String(q.phone || ''), name: q.customerName || conv.name || '', ref: q.ref || '', price: q.summary && q.summary.dearest ? q.summary.dearest.incVat : null,
+      const conv = convById.get(String(q.phone)) || {}, qm = (conv.quoteMail && conv.quoteMail[q.id]) || null, emailedAt = qm && Number(qm.basis) === sent ? ms(qm.at) : 0;      // emailed about THIS sending of the quote
+      out.push({ key: quoteKey(q.id), kind: 'quote', quoteId: q.id, emailedAt, emailable: now - sent >= QUOTE_EMAIL_DAYS * DAY, phone: String(q.phone || ''), name: q.customerName || conv.name || '', ref: q.ref || '', price: q.summary && q.summary.dearest ? q.summary.dearest.incVat : null,
         reasons: [{ type: 'quote', text: `Sent ${days} days ago, no answer${q.validUntil && q.validUntil < today ? ' (expired)' : ''}`, since: sent, urgency: days >= QUOTE_RED_DAYS ? 2 : 1 }], urgency: days >= QUOTE_RED_DAYS ? 2 : 1, since: sent, primary: 'quote' });
     }
     return out;
@@ -200,10 +206,10 @@
     // customers
     const cards = [];
     for (const c of convs) {
-      const rs = reasonsOf(c, { now, booked, today, leadFailed: failureOf(c.id, c) });
+      const rs = reasonsOf(c, { now, booked, today, leadFailed: failureOf(c.id, c), replyDismissed: replyDismissedOf(c, input.marks) });
       if (!rs.length) continue;
       const head = rs[0], urgency = Math.max(...rs.map((r) => r.urgency));
-      cards.push({ key: 'c|' + c.id, kind: 'customer', phone: String(c.id), name: c.name || '', facts: [c.projectType, c.location].filter(Boolean).join(' · '), reasons: rs, urgency, since: head.since, primary: head.type,
+      cards.push({ key: 'c|' + c.id, kind: 'customer', phone: String(c.id), name: c.name || '', asap: c.asap === true, facts: [c.projectType, c.location].filter(Boolean).join(' · '), reasons: rs, urgency, since: head.since, primary: head.type,
         last: { text: preview(c.lastMessage), mine: c.lastMessageDirection === 'out' } });
     }
     cards.push(...quoteCards(input.quotes, input.marks, convById, now));
@@ -223,7 +229,8 @@
       cards.push({ key: 'l|' + (li.leadId || li.id), kind: 'lead', leadId: li.leadId || li.id, phone: '', name: li.name || 'A lead with no name', email: li.email || null, phoneTyped: li.phoneTyped || null, location: li.location || null,
         reasons: [{ type: 'leadfix', text: li.reasonText || 'The lead could not be added', since: ms(li.receivedAt), urgency: 2 }], urgency: 2, since: ms(li.receivedAt), primary: 'leadfix', lead: li });
     }
-    for (const [id, mk] of Object.entries(input.marks || {})) {      // quotes followed up or snoozed today (so the action can be undone)
+    for (const [id, mk] of Object.entries(input.marks || {})) {      // quotes followed up or snoozed today, and reply alerts dismissed today (so the action can be undone)
+      if (id.startsWith('reply|') && ms(mk.at) && dateKey(ms(mk.at)) === today) { const rc = convById.get(id.slice(6)); if (rc && Number(mk.basis) >= ms(rc.lastInboundAt)) doneToday.push({ kind: 'reply', id: id.slice(6), title: 'Reply alert: ' + (rc.name || 'a customer'), at: ms(mk.at) }); }
       if (id.startsWith('quote|') && ms(mk.at) && dateKey(ms(mk.at)) === today && ms(mk.snoozeUntil) > now) doneToday.push({ kind: 'quote', id: id.slice(6), title: mk.ref ? 'Quote ' + mk.ref : 'A quote', at: ms(mk.at) });
     }
     cards.sort((a, b) => (b.urgency - a.urgency) || ((a.since == null) - (b.since == null)) || ((a.since || 0) - (b.since || 0)));
@@ -231,12 +238,12 @@
     doneToday.sort((a, b) => b.at - a.at);
     const counts = { reply: 0, handover: 0, booking: 0, notice: 0, quote: 0, reminder: 0, leadfix: 0 }, red = { reply: 0, handover: 0, booking: 0, notice: 0, quote: 0, reminder: 0, leadfix: 0 };
     for (const c of cards) for (const t of new Set(c.reasons.map((r) => r.type))) { counts[t]++; if (c.reasons.some((r) => r.type === t && r.urgency === 2)) red[t]++; }
-    return { cards, counts, red, redTotal: cards.filter((c) => c.urgency === 2).length, later, doneToday, upcoming: upcoming(input.appts, convById, now), newLeads: newLeads({ convs, convById, contacts, ledger, leadIssues: input.leadIssues, now, today, t0, booked }) };
+    return { cards, counts, red, redTotal: cards.filter((c) => c.urgency === 2).length, later, doneToday, upcoming: upcoming(input.appts, convById, now), newLeads: newLeads({ convs, convById, contacts, ledger, leadIssues: input.leadIssues, marks: input.marks, now, today, t0, booked }) };
   }
 
   // ---- New Leads Today: every lead that arrived today, with ONE status ----
   const LEAD_ORDER = ['failed', 'needs', 'ai', 'contacted'];
-  function newLeads({ convs, convById, contacts, ledger, leadIssues, now, today, t0, booked }) {
+  function newLeads({ convs, convById, contacts, ledger, leadIssues, marks, now, today, t0, booked }) {
     const phones = new Set();
     for (const c of convs) if (ms(c.createdAt) >= t0) phones.add(String(c.id));
     for (const [id, ct] of contacts) if (ct.metaLead && ms(ct.metaLead.receivedAt) >= t0) phones.add(id);
@@ -244,15 +251,16 @@
     for (const phone of phones) {
       const c = convById.get(phone), ct = contacts.get(phone) || {}, ml = ct.metaLead || null, led = ml && ledger[ml.leadId], w = led && led.welcome && led.welcome.state;
       if (!c) continue;
-      const at = (ml && ms(ml.receivedAt)) || ms(c.createdAt) || ms(ct.createdAt), rs = reasonsOf(c, { now, booked, today, leadFailed: null }), rec = c.receptionist || {};
+      const at = (ml && ms(ml.receivedAt)) || ms(c.createdAt) || ms(ct.createdAt), rs = reasonsOf(c, { now, booked, today, leadFailed: null, replyDismissed: replyDismissedOf(c, marks) }), rec = c.receptionist || {};
       let status, text;
       if (w && ['failed', 'unknown'].includes(w) && !(ms(rec.humanAt) > at) && !(ms(c.lastInboundAt) > at)) { status = 'failed'; text = w === 'failed' ? 'The welcome message was refused' : 'Could not confirm the welcome message went'; }
       else if (dnc(c)) { status = 'needs'; text = 'Asked not to be contacted'; }
       else if (rs.length) { status = 'needs'; text = rs[0].text; }
+      else if (w === 'held') { status = 'ai'; text = 'The welcome message goes out at 07:00'; }          // arrived in quiet hours (midnight to 07:00): nobody is messaged at night
       else if (!c.lastMessageDirection && !ms(c.lastInboundAt)) { status = 'needs'; text = 'No message has been sent to them yet'; }
       else if (receptionistHandling(c)) { status = 'ai'; text = 'The receptionist is handling it'; }
       else { status = 'contacted'; text = w === 'blocked' ? 'Welcome message held back' : ms(rec.humanAt) > at || c.lastMessageDirection === 'out' ? 'Contacted' : 'Welcome message sent'; }
-      items.push({ phone, name: c.name || ct.name || '', facts: [c.projectType || ct.projectType, c.location || ct.location].filter(Boolean).join(' · '), source: ml ? 'Meta form' : (ct.source || 'WhatsApp'), at, status, text });
+      items.push({ phone, asap: c.asap === true, name: c.name || ct.name || '', facts: [c.projectType || ct.projectType, c.location || ct.location].filter(Boolean).join(' · '), source: ml ? 'Meta form' : (ct.source || 'WhatsApp'), at, status, text });
     }
     for (const li of leadIssues || []) {                  // a lead with no usable phone number: there is no customer, only the saved form
       if (!li || li.status !== 'open' || !(ms(li.receivedAt) >= t0)) continue;

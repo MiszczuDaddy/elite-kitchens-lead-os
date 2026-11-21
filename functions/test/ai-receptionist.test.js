@@ -103,7 +103,7 @@ test('SCOPE: only chats the owner switched on are read; only messages after it w
 
 test('HAND-OVER: a preference is acknowledged in the fixed words, the request is left for the owner to book, the owner gets a push, and the receptionist then stays out', async () => {
   await on(); await arm(NOW, 'Tuesday afternoon would suit me'); const m = fake([decision({ schedule: PREF })]), w = fakeWa(), p = fakePush();
-  assert.equal(await REC.processChat(deps(m, w, p), PH, NOW), 'sent:acknowledge'); assert.deepEqual(w.sent.map((x) => x.body), [SCH.LINES.acknowledge]);
+  assert.equal(await REC.processChat(deps(m, w, p), PH, NOW), 'sent:acknowledge'); assert.deepEqual(w.sent.map((x) => x.body), [SCH.LINES.acknowledge + '\n' + SCH.LINES.see_our_work]);
   const c = await consult(); assert.deepEqual([c.stage, c.needsBooking, c.preference.firstDate], ['preference_given', true, '2026-10-20']);
   assert.deepEqual(p.events.map((e) => [e.kind, e.phone]), [['handover', PH]]); assert.equal((await rec()).paused, 'consultation passed to you');
   await db.collection(`conversations/${PH}/messages`).add({ direction: 'in', type: 'text', body: 'Thanks, what time?', createdAt: ts(NOW + 60e3) }); await db.doc('conversations/' + PH).update({ lastInboundAt: ts(NOW + 60e3) });

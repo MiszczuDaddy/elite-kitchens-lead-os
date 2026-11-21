@@ -39,6 +39,8 @@
         stageDates: { booked: toMs(sd.booked), quoted: toMs(sd.quoted), won: toMs(sd.won), closed: toMs(sd.closed) },
         quoteValue: typeof q === 'number' && isFinite(q) && q > 0 ? q : null,
         unread: cv.unreadCount > 0,
+        asap: cv.asap === true,
+        contactTime: typeof cv.contactTime === 'string' ? cv.contactTime : '',          // the lead form's "best time to contact" (functions/lib/contactTime.js)
       };
     });
   }

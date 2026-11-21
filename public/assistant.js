@@ -106,6 +106,12 @@ window.ASSIST = (() => {
 
   // ---------- proposal cards (Phase 9.2a): an exact before/after preview with Approve and Reject. The words are the server's (built by code); nothing is saved until Approve. ----------
   const cards = new Map(), cardNote = new Map(), cardBusy = new Set();
+  // A follow-up list (tick boxes): who is ticked and when to send are kept here, per card, so a redraw of the box (a card changing, the half-minute tick) never loses them.
+  const picks = new Map(), sendOpts = new Map();
+  const itemsOf = (p) => ((p.preview && p.preview.rows) || []).filter((r) => r.type === 'pick').flatMap((r) => (Array.isArray(r.items) ? r.items : []));
+  const picksOf = (p) => { if (!picks.has(p.id)) picks.set(p.id, new Set(itemsOf(p).filter((i) => i.checked).map((i) => i.id))); return picks.get(p.id); };
+  const sendOf = (p) => { if (!sendOpts.has(p.id)) sendOpts.set(p.id, { mode: M.isNight(Date.now()) ? 'morning' : 'now', custom: '' }); return sendOpts.get(p.id); };
+  const sendAtOf = (p) => { const o = sendOf(p); return o.mode === 'now' ? undefined : o.mode === 'morning' ? M.nextMorning(Date.now()) : M.fromLocalInput(o.custom); };
   async function loadCard(id) {
     try { const s = await db.doc('aiProposals/' + id).get(); cards.set(id, s.exists ? { id, ...s.data() } : { id, status: 'gone', title: 'This proposal no longer exists', preview: { rows: [] } }); }
     catch (e) { cards.set(id, { id, status: 'gone', title: 'Cannot load this proposal', preview: { rows: [] } }); }
@@ -119,19 +125,48 @@ window.ASSIST = (() => {
     if (v.canDecide && !tray) { d.append(el('div', 'as-card-state', 'Waiting for your approval: use Approve or Reject in the box below.')); return d; }          // the buttons live in ONE place, the tray
     for (const r of v.rows) {
       const row = el('div', 'as-card-row'); row.append(el('div', 'as-card-label', r.label || ''));
-      if (r.type === 'append') { if (r.existing) row.append(el('div', 'as-card-old', r.existing)); row.append(el('div', 'as-card-new', '+ ' + (r.added || ''))); }
+      if (r.type === 'pick') {
+        const items = Array.isArray(r.items) ? r.items : [];
+        if (!v.canDecide) { const ul = el('ul', 'as-card-list'); for (const it of items) ul.append(el('li', '', String(it.text))); row.append(ul); }          // decided: just the people
+        else {
+          const sel = picksOf(p), tools = el('div', 'as-pick-tools'), all = el('button', 'linkbtn', 'Tick all'), none = el('button', 'linkbtn', 'Tick none'), box = el('div', 'as-pick-list');
+          all.type = none.type = 'button'; all.onclick = () => { for (const it of items) sel.add(it.id); renderTray(); }; none.onclick = () => { for (const it of items) sel.delete(it.id); renderTray(); };
+          tools.append(all, none); row.append(tools);
+          for (const it of items) {
+            const lab = el('label', 'as-pick-row'), cb = el('input'); cb.type = 'checkbox'; cb.checked = sel.has(it.id); cb.dataset.id = it.id; cb.disabled = cardBusy.has(id);
+            cb.onchange = () => { if (cb.checked) sel.add(it.id); else sel.delete(it.id); renderTray(); };
+            lab.append(cb, el('span', 'as-pick-text', String(it.text))); if (it.note) lab.append(el('span', 'as-pick-note', it.note)); box.append(lab);
+          }
+          row.append(box);
+        }
+      }
+      else if (r.type === 'list') { const ul = el('ul', 'as-card-list'); for (const it of (Array.isArray(r.items) ? r.items : [])) ul.append(el('li', '', String(it))); row.append(ul); }
+      else if (r.type === 'text') row.append(el('div', 'as-card-text', r.text || ''));
+      else if (r.type === 'append') { if (r.existing) row.append(el('div', 'as-card-old', r.existing)); row.append(el('div', 'as-card-new', '+ ' + (r.added || ''))); }
       else { row.append(el('div', 'as-card-old before', 'Before: ' + (r.before == null ? '' : r.before))); row.append(el('div', 'as-card-new', 'After: ' + (r.after == null ? '' : r.after))); }
       d.append(row);
     }
     if (v.footer) d.append(el('p', 'as-card-foot', v.footer));
+    if (v.canDecide && v.kind === 'followUpList') {                                          // when to send: now, the next 09:00, or a time of your choice (the Irish night is never used)
+      const o = sendOf(p), when = el('div', 'as-when'); when.append(el('div', 'as-card-label', 'When to send'));
+      const choice = (mode, text) => { const lab = el('label', 'as-when-row'), rb = el('input'); rb.type = 'radio'; rb.name = 'as-when-' + id; rb.checked = o.mode === mode; rb.value = mode; rb.disabled = cardBusy.has(id); rb.onchange = () => { o.mode = mode; renderTray(); }; lab.append(rb, el('span', '', text)); return lab; };
+      when.append(choice('now', 'Send now'), choice('morning', 'Send ' + M.whenLabel(M.nextMorning(Date.now()))), choice('custom', 'Send at a time I choose'));
+      if (o.mode === 'custom') { const inp = el('input', 'as-when-time'); inp.type = 'datetime-local'; inp.value = o.custom || M.toLocalInput(M.nextMorning(Date.now())); o.custom = inp.value; inp.min = M.toLocalInput(Date.now()); inp.max = M.toLocalInput(Date.now() + 3 * 86400000); inp.onchange = () => { o.custom = inp.value; }; when.append(inp); }
+      if (o.mode !== 'now') when.append(el('p', 'as-card-foot', 'Elite OS sends them at that time (never between midnight and 07:00), checks each person again just before, and you can cancel until then.'));
+      d.append(when);
+    }
     if (v.canDecide) {
-      const bar = el('div', 'as-card-actions'), ok = el('button', 'btn btn-primary btn-sm', cardBusy.has(id) ? 'Working…' : 'Approve'), no = el('button', 'btn btn-ghost btn-sm', 'Reject');
-      ok.type = 'button'; no.type = 'button'; ok.disabled = no.disabled = cardBusy.has(id);
+      const nSel = v.kind === 'followUpList' ? picksOf(p).size : null, nAll = v.kind === 'followUpList' ? itemsOf(p).length : null;
+      const bar = el('div', 'as-card-actions'), ok = el('button', 'btn btn-primary btn-sm', cardBusy.has(id) ? 'Working…' : nSel == null ? 'Approve' : `Approve (${nSel} of ${nAll})`), no = el('button', 'btn btn-ghost btn-sm', 'Reject');
+      ok.type = 'button'; no.type = 'button'; ok.disabled = no.disabled = cardBusy.has(id); if (nSel === 0) ok.disabled = true;
       ok.onclick = () => decideCard(id, 'approve'); no.onclick = () => decideCard(id, 'reject');
       bar.append(ok, no); if (v.minutes != null) bar.append(el('span', 'as-card-exp', 'Expires in ' + v.minutes + ' min')); d.append(bar);
+    } else if (v.scheduled) {
+      const n = (p.selected || []).length; d.append(el('div', 'as-card-state', `Scheduled for ${v.scheduledFor ? M.whenLabel(v.scheduledFor) : 'later'}: ${n} email${n === 1 ? '' : 's'}. Elite OS sends them then.`));
+      if (tray) { const bar = el('div', 'as-card-actions'), no = el('button', 'btn btn-ghost btn-sm', cardBusy.has(id) ? 'Working…' : 'Cancel'); no.type = 'button'; no.disabled = cardBusy.has(id); no.onclick = () => decideCard(id, 'reject'); bar.append(no); d.append(bar); }
     } else {
       d.append(el('div', 'as-card-state', v.label + (v.message && v.status !== 'rejected' && v.status !== 'expired' ? ': ' + v.message : '')));
-      if (v.status === 'partial' && v.results.length) { const ul = el('ul', 'as-card-res'); for (const x of v.results) ul.append(el('li', x.ok ? '' : 'bad', (x.ok ? 'Saved: ' : 'Not saved: ') + (x.label || ''))); d.append(ul); }
+      if ((v.status === 'partial' || (v.status === 'failed' && ['followUpEmails', 'quoteFollowUps', 'customerEmail', 'followUpList'].includes(v.kind))) && v.results.length) { const ul = el('ul', 'as-card-res'); for (const x of v.results) ul.append(el('li', x.ok ? '' : 'bad', (x.ok ? (v.kind === 'followUpEmails' ? 'Sent: ' : 'Saved: ') : (v.kind === 'followUpEmails' ? 'Not sent: ' : 'Not saved: ')) + (x.label || '') + (!x.ok && x.message ? ' (' + x.message + ')' : ''))); d.append(ul); }
     }
     if (note && v.canDecide) d.append(el('div', 'as-card-state', note));
     return d;
@@ -139,25 +174,37 @@ window.ASSIST = (() => {
   // The tray: every proposal of this person that is still waiting, always on screen above the question box, read from the database (so it survives a refresh, a closed tab and a lost chat).
   function renderTray() {
     const box = $('as-tray'), now = Date.now(), me = uid();
+    const keep = box.scrollTop, sched = [...cards.values()].filter((p) => p.createdByUid === me && M.proposalView(p, now).scheduled);
     const wait = [...cards.values()].filter((p) => p.createdByUid === me && M.proposalView(p, now).canDecide).sort((a, b) => ((b.createdAt && b.createdAt.toMillis && b.createdAt.toMillis()) || 0) - ((a.createdAt && a.createdAt.toMillis && a.createdAt.toMillis()) || 0));
-    box.hidden = !wait.length; box.replaceChildren();
-    if (!wait.length) return;
-    box.append(el('div', 'as-tray-head', 'Waiting for your approval (' + wait.length + ')'));
-    for (const p of wait) box.append(card(p.id, true));
+    box.hidden = !wait.length && !sched.length; box.replaceChildren();
+    if (box.hidden) return;
+    if (wait.length) { box.append(el('div', 'as-tray-head', 'Waiting for your approval (' + wait.length + ')')); for (const p of wait) box.append(card(p.id, true)); }
+    if (sched.length) { box.append(el('div', 'as-tray-head', 'Scheduled (' + sched.length + ')')); for (const p of sched) box.append(card(p.id, true)); }
+    box.scrollTop = keep;
   }
   function listenProposals() {
     if (A.unsubProps || !uid()) return;
-    A.unsubProps = db.collection('aiProposals').where('createdByUid', '==', uid()).where('status', '==', 'pending').limit(100).onSnapshot((snap) => {
-      for (const ch of snap.docChanges()) { if (ch.type === 'removed') loadCard(ch.doc.id); else cards.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() }); }          // one that left 'pending' is re-read to show how it ended
+    const onSnap = (snap) => {
+      for (const ch of snap.docChanges()) { if (ch.type === 'removed') loadCard(ch.doc.id); else cards.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() }); }          // one that left 'pending' or 'scheduled' is re-read to show how it ended
       if (A.active) render();
-    }, () => {});
+    };
+    const subs = ['pending', 'scheduled'].map((st) => db.collection('aiProposals').where('createdByUid', '==', uid()).where('status', '==', st).limit(100).onSnapshot(onSnap, () => {}));          // two plain equality queries (no composite index needed), one for waiting and one for scheduled
+    A.unsubProps = () => subs.forEach((u) => u());
     A.tick = setInterval(() => { if (A.active) renderTray(); }, 30000);
   }
   function unlistenProposals() { if (A.unsubProps) { A.unsubProps(); A.unsubProps = null; } if (A.tick) { clearInterval(A.tick); A.tick = null; } }
   async function decideCard(id, decision) {
     if (cardBusy.has(id)) return;
     cardBusy.add(id); cardNote.delete(id); render();
-    try { const r = (await call('aiDecide')({ proposalId: id, decision })).data; if (r && r.message && r.status === 'pending') cardNote.set(id, r.message); }
+    try {
+      const p = cards.get(id), extra = {};
+      if (decision === 'approve' && p && p.kind === 'followUpList') {
+        extra.selected = [...picksOf(p)]; const at = sendAtOf(p);
+        if (at === null) { cardNote.set(id, 'Choose a date and time to send.'); cardBusy.delete(id); render(); return; }
+        if (at !== undefined) extra.sendAt = at;
+      }
+      const r = (await call('aiDecide')({ proposalId: id, decision, ...extra })).data; if (r && r.message && r.status === 'pending') cardNote.set(id, r.message);
+    }
     catch (e) { cardNote.set(id, M.friendlyError(e)); }
     cardBusy.delete(id); await loadCard(id);
   }

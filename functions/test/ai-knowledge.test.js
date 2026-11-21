@@ -181,7 +181,7 @@ test('ANSWER FIRST, THEN STEP A: a question is answered from the knowledge and t
   // an answer and a preference in one message: the preference is recorded, the answer comes first
   await chat([['in', 'Tuesday works. Is the deposit 30%?']], { state: 'asked_days' });
   ({ r } = await ask(dec({ visit: 'agreed', schedule: { preference: { status: 'available', weeks: 'next', days: ['tuesday'], text: 'Tuesday works' }, opener: '' } }, 'Yes, 30% when you accept the quote.')));
-  assert.equal(r.schedule.step, 'acknowledge'); assert.equal(r.draft, 'Yes, 30% when you accept the quote. ' + L.acknowledge); assert.equal(r.schedule.preference.days[0], 'tuesday');
+  assert.equal(r.schedule.step, 'acknowledge'); assert.equal(r.draft, 'Yes, 30% when you accept the quote. ' + L.acknowledge + '\n' + L.see_our_work); assert.equal(r.schedule.preference.days[0], 'tuesday');
 });
 
 test('NEVER A GUESS: a question the knowledge does not answer, an open item, an answer the checker rejects, or a half answer gets the owner\'s holding line and a person; nothing invented is sent', async () => {

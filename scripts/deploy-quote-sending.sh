@@ -40,6 +40,14 @@
 #   ./scripts/deploy-quote-sending.sh today      Phase 11 (docs/PHASE11_TODAY.md): the 2 functions behind the Today tab (saveReminder, snoozeQuote) and deleteCustomer (it now also erases reminders). Run it BEFORE "live". Does NOT deploy the webhook.
 #   ./scripts/deploy-quote-sending.sh bookings   Phase 12 (docs/PHASE12_BOOKINGS.md): the evening-before visit reminder (bookingReminderSweep, resolveBookingNotice), the Installation visit (appointment, project and calendar functions) and deleteCustomer. Run it BEFORE "live". The evening reminder stays OFF.
 #   ./scripts/deploy-quote-sending.sh reminders on|off   switch the automatic evening-before reminder ON or OFF (writes BOOKING_REMINDERS to the settings file and redeploys bookingReminderSweep). Needs the reminder template (elite_kitchens_consultation_reminder) approved by Meta first.
+#   ./scripts/deploy-quote-sending.sh followup   Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md): TWO new staff functions (sendFollowUpEmail for leads, sendQuoteFollowUp for quotes nobody answered). Needs email sending on (it is for the quotes). Run it BEFORE "live". Sends nothing by itself.
+#   ./scripts/deploy-quote-sending.sh assistantmail  The Assistant's "email all leads who never replied" (docs/FOLLOW_UP_EMAIL.md): aiChat, aiStatus, setAiSettings, aiDecide (all exist already). OFF until the owner ticks it in Assistant > Settings; then it emails only after you press Approve. Run it after "followup" and BEFORE "live".
+#   ./scripts/deploy-quote-sending.sh emailin [on|off]  The email inbox (docs/EMAIL_INBOX.md): customers' email replies come into their chat and "Email" answers them. No argument: deploys emailSweep, sendEmailReply, checkEmail (and the 3 functions that now count an email reply as "they wrote"); reading stays OFF. "on" switches reading ON after the one Google Workspace approval (gmail.readonly); "off" is the kill switch. Run it BEFORE "live".
+#   ./scripts/deploy-quote-sending.sh nighthold [on|off]  No welcome message at night (docs/WELCOME_QUIET_HOURS.md): a lead that arrives between midnight and 07:00 Irish time gets its welcome at 07:00. No argument: deploys leadIntake and the new welcomeSweep; "off" turns the wait off, "on" back on. Nothing is sent by this stage.
+#   ./scripts/deploy-quote-sending.sh pdfshare   Share PDF (docs/QUOTES.md, "Share PDF"): ONE function that already exists (quotePdfUrl) now also hands the phone the PDF file itself. Nothing is sent to anyone. Run it BEFORE "live".
+#   ./scripts/deploy-quote-sending.sh emaillist  The Emails list on the Inbox (docs/EMAIL_LIST.md): the functions that send or receive an email now also add it to the list (all exist already; nothing is sent, nothing made public). Run it BEFORE "live". Optional afterwards: node scripts/backfill-email-log.js.
+#   ./scripts/deploy-quote-sending.sh followuplist  The Assistant's follow-up LIST with tick boxes and a send time (docs/FOLLOW_UP_EMAIL.md): aiChat, aiDecide, sendQuoteFollowUp (exist already) and ONE new scheduled function, followUpSweep, that sends a list you approved for later (never in the Irish night). Nothing is sent by this stage.
+#   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
 #   ./scripts/deploy-quote-sending.sh safety     Phase 10 (docs/PHASE10_SAFETY_NET.md): "do not contact" in every send, problems and rejected leads in "Needs attention", the 10-minute health check
@@ -81,8 +89,17 @@ AI_FUNCS="$AI_NEW"
 SAFETY_NEW="setDoNotContact attentionAction healthSweep healthOnMessageWrite"                                       # Phase 10: new. The two callables are made public (each checks the signed-in staff account); healthSweep (every 10 minutes) and healthOnMessageWrite (a trigger) cannot be called from outside
 SAFETY_CHANGED="sendReply sendMedia startConversation reopenConversation deliverQuote retryQuoteDelivery sendQuote leadIntake receptionistSweep receptionistOnMessage pushReceipt"   # Phase 10: "do not contact" in every send, the WhatsApp outcome, rejected leads, the receptionist's heartbeat
 SAFETY_FUNCS="$SAFETY_NEW $SAFETY_CHANGED"
-TODAY_NEW="saveReminder snoozeQuote"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
+TODAY_NEW="saveReminder snoozeQuote dismissReply"                                                                                 # Phase 11: new staff-only callables (made public: each checks the signed-in staff account)
 WELCOME_FUNCS="leadIntake receptionistOnMessage receptionistSweep setAiSettings aiStatus aiSuggestReply"                # the welcome switch: the intake sends the chosen welcome, the receptionist knows both, the settings save and show the choice (all exist already)
+ASAP_FUNCS="leadIntake updateContact"                                                                                      # the ⭐ "wants it as soon as possible": a new lead gets it from its form answer, editing the Notes keeps it in step (both exist already)
+FOLLOWUP_FUNCS="sendFollowUpEmail sendQuoteFollowUp"                                                              # follow-up emails: to leads who never replied, and about quotes nobody answered (new staff functions, made public: each checks the signed-in staff account itself)
+ASSISTMAIL_FUNCS="aiChat aiStatus setAiSettings aiDecide"                                                          # the Assistant's follow-up emails: it prepares them (aiChat), shows the switch (aiStatus, setAiSettings) and sends after Approve (aiDecide); all exist already
+EMAILIN_NEW="emailSweep sendEmailReply checkEmail"                                                                      # the email inbox: the five-minute sweep (scheduled), the reply and the manual check (staff only, made public: each checks the signed-in staff account itself)
+EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"                                                      # + the three that decide who "never wrote": an email reply now counts
+EMAILLIST_FUNCS="emailSweep checkEmail sendEmailReply sendFollowUpEmail sendQuoteFollowUp aiDecide deliverQuote retryQuoteDelivery resolveQuoteDelivery deleteCustomer"          # the Emails list: everything that sends, receives or erases an email now also writes (or erases) its list entry
+FOLLOWLIST_FUNCS="followUpSweep aiChat aiDecide sendQuoteFollowUp"                                                           # the follow-up list: the new five-minute timer (scheduled, first on purpose: it has no web address) + the Assistant and the quote follow-up that share the new code
+PDFSHARE_FUNCS="quotePdfUrl"                                                                                           # Share PDF: the existing PDF link function can also return the file itself (the screen's Share button asks for it)
+NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                             # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
 BOOKING_NEW="resolveBookingNotice bookingReminderSweep"                                                                # Phase 12: resolveBookingNotice is a staff-only callable (made public: it checks the signed-in staff account; it sends nothing); bookingReminderSweep runs every 15 minutes and is not callable from outside
 BOOKING_CHANGED="updateAppointment cancelAppointment saveProject removeProject deleteCustomer calendarSweep"            # Phase 12: an installation date is a calendar entry; deleteCustomer also erases the message records; calendarSweep labels the entry "Installation"
@@ -96,7 +113,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,52p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,60p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -414,16 +431,148 @@ case "${1:-}" in
     [ -n "$(serving_revision attentionaction)" ] || { echo "Deploy the safety net first: $0 safety"; exit 1; }
     check_settings; check_access; check_routing $TODAY_FUNCS
     echo "Functions: $TODAY_FUNCS"
-    echo "New: saveReminder (add, done, undo, snooze, delete a reminder) and snoozeQuote (follow-up snooze): staff only, they send nothing to anyone."
+    echo "New: saveReminder (add, done, undo, snooze, delete a reminder), snoozeQuote (follow-up snooze) and dismissReply (hide a \"Waiting for your reply\" alert until the customer writes again): staff only, they send nothing to anyone."
     echo "Changed: deleteCustomer (it now also erases the customer's reminders and quote notes). NOT deployed: the WhatsApp webhook."
     confirm "Deploy the Phase 11 (Today) backend to the LIVE project?"
     install; save_revisions deleteCustomer; deploy_functions $TODAY_FUNCS
-    echo "==> making the 2 new staff functions reachable (each checks the signed-in staff account itself)"
+    echo "==> making the new staff functions reachable (each checks the signed-in staff account itself)"
     for f in $TODAY_NEW; do
       gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
     done
     check_reachable "$TODAY_FUNCS"
     echo "Done. Next: $0 live (the Today screen). To go back: git checkout 5244e73 -- functions, then firebase deploy --only functions:deleteCustomer, and firebase functions:delete $TODAY_NEW --region $REGION --project $PROJECT"
+    ;;
+  followup)
+    [ -f functions/lib/followUp.js ] || { echo "This checkout has no follow-up email code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    check_settings; check_access; check_routing $FOLLOWUP_FUNCS
+    echo "Functions: $FOLLOWUP_FUNCS"
+    echo "New: sendFollowUpEmail (one follow-up email to a lead who never replied) and sendQuoteFollowUp (one follow-up email about a quote nobody answered), each written on screen and sent only when you press Send; staff only. It uses the same email sending as the quotes (MAIL_SEND). No existing function changes. NOT deployed: the WhatsApp webhook."
+    confirm "Deploy the follow-up email backend to the LIVE project?"
+    install; deploy_functions $FOLLOWUP_FUNCS
+    echo "==> making the new staff function reachable (it checks the signed-in staff account itself)"
+    for f in $FOLLOWUP_FUNCS; do
+      gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+    done
+    check_reachable "$FOLLOWUP_FUNCS"
+    echo "Done. Next: $0 live (the screen). To go back: firebase functions:delete $FOLLOWUP_FUNCS --region $REGION --project $PROJECT and roll the screen back in Firebase console > Hosting."
+    ;;
+  assistantmail)
+    [ -f functions/lib/followUpText.js ] || { echo "This checkout has no follow-up email code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    grep -q "propose_followup_emails" functions/lib/aiActions.js || { echo "This checkout has no Assistant follow-up email code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision aidecide)" ] || { echo "The Assistant is not deployed yet: run $0 ai first."; exit 1; }
+    check_settings; check_access; check_routing $ASSISTMAIL_FUNCS
+    echo "Functions: $ASSISTMAIL_FUNCS (all exist already; no new function, nothing made public)."
+    echo "You will be able to tick \"Follow-up emails to leads who never replied\" in Assistant > Settings (it is OFF until you do). Then asking the Assistant to follow up the leads who did not reply prepares ONE card; emails go out only when you press Approve. Same email sending as the quotes (MAIL_SEND). NOT deployed: the WhatsApp webhook. Nothing is sent by this stage."
+    confirm "Deploy the Assistant follow-up emails to the LIVE project?"
+    install; save_revisions $ASSISTMAIL_FUNCS; deploy_functions $ASSISTMAIL_FUNCS
+    echo "Done. Next: $0 live (the screen), then tick the new box in Assistant > Settings. To go back: untick it there (instant). Full undo: git checkout <the earlier commit> -- functions, then firebase deploy --only $(echo $ASSISTMAIL_FUNCS | sed 's/[^ ]*/functions:&/g; s/ /,/g') --project $PROJECT"
+    ;;
+  emailin)
+    [ -f functions/lib/emailInbound.js ] || { echo "This checkout has no email inbox code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    case "${2:-}" in
+      on|off)
+        [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
+        check_routing emailSweep checkEmail
+        [ -n "$(serving_revision emailsweep)" ] || { echo "Deploy the email inbox backend first: $0 emailin"; exit 1; }
+        if [ "$2" = on ]; then
+          echo "Elite OS will read the business mailbox (read-only, every 5 minutes). It looks at WHO wrote; only an email from a customer or lead it already knows is read and kept, in that customer's chat. Nothing else is stored; nothing is sent, deleted or marked as read."
+          echo "This needs ONE approval in Google Workspace first (docs/EMAIL_INBOX.md):"
+          echo "  1. admin.google.com > Security > Access and data control > API controls > Manage domain-wide delegation"
+          echo "  2. Edit the entry for the mailer service account $MAIL_SA (the one already used for sending)"
+          echo "  3. Add the scope  https://www.googleapis.com/auth/gmail.readonly  (keep the gmail.send scope) and save"
+          confirm "Is that approved, and do you want email replies read into Elite OS?"
+        else confirm "Switch reading customers' emails off for the live project?"; fi
+        setting "$ENVF" EMAIL_IN "$2"
+        install; save_revisions emailSweep checkEmail; deploy_functions emailSweep checkEmail
+        echo "Reading customers' emails is $2. Kill switch: $0 emailin off"
+        if [ "$2" = on ]; then echo "Wait up to 5 minutes, or open a customer's chat > Email > Check for new email. If it says Google has not allowed Elite OS to read the mailbox, the Workspace step above is not finished yet."; fi
+        ;;
+      "")
+        check_settings; check_access; check_routing $EMAILIN_FUNCS
+        echo "Functions: $EMAILIN_FUNCS"
+        echo "New: emailSweep (every 5 minutes), sendEmailReply and checkEmail (staff only). Reading customers' emails stays OFF until you run: $0 emailin on (after the Google Workspace approval, see docs/EMAIL_INBOX.md). Existing: sendFollowUpEmail, sendQuoteFollowUp and aiChat now count an email reply as 'they wrote'. NOT deployed: the WhatsApp webhook."
+        confirm "Deploy the email inbox backend to the LIVE project?"
+        install; save_revisions sendFollowUpEmail sendQuoteFollowUp aiChat; deploy_functions $EMAILIN_FUNCS
+        echo "==> making the new staff functions reachable (each checks the signed-in staff account itself)"
+        for f in sendEmailReply checkEmail; do
+          gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+        done
+        check_reachable "sendEmailReply checkEmail"
+        echo "Done. Next: $0 live (the screen), then the Google Workspace approval, then $0 emailin on. To go back: firebase functions:delete $EMAILIN_NEW --region $REGION --project $PROJECT"
+        ;;
+      *) usage ;;
+    esac
+    ;;
+  nighthold)
+    [ -f functions/lib/welcomeHold.js ] || { echo "This checkout has no night-hold code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    case "${2:-}" in
+      on|off)
+        [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
+        check_routing leadIntake
+        [ -n "$(serving_revision welcomesweep)" ] || { echo "Deploy the night-hold backend first: $0 nighthold"; exit 1; }
+        if [ "$2" = off ]; then echo "A lead that arrives at night will get its welcome message AT ONCE again (any hour)."; else echo "A lead that arrives between midnight and 07:00 Irish time will get its welcome message at 07:00."; fi
+        confirm "Switch the night wait $2 for the live project?"
+        setting "$ENVF" WELCOME_NIGHT_HOLD "$([ "$2" = on ] && echo on || echo off)"
+        install; save_revisions leadIntake; deploy_functions leadIntake
+        echo "The night wait is $2. $0 nighthold $([ "$2" = on ] && echo off || echo on) undoes it."
+        ;;
+      "")
+        check_settings; check_access; check_routing $NIGHTHOLD_FUNCS
+        echo "Functions: $NIGHTHOLD_FUNCS"
+        echo "leadIntake (the live endpoint Make calls; it exists already) now holds a NEW lead's welcome message when the lead arrives between midnight and 07:00 Irish time; welcomeSweep (new, every 5 minutes) sends the held ones from 07:00, after checking the customer has not written, been contacted or been deleted. The team is still alerted at once. Nothing is sent to any customer by this stage. NOT deployed: the WhatsApp webhook."
+        confirm "Deploy the night hold to the LIVE project?"
+        install; save_revisions leadIntake; deploy_functions $NIGHTHOLD_FUNCS
+        check_reachable "leadIntake"
+        echo "Done. Switch it off at any time: $0 nighthold off. To go back fully: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:leadIntake --project $PROJECT and firebase functions:delete welcomeSweep --region $REGION --project $PROJECT"
+        ;;
+      *) usage ;;
+    esac
+    ;;
+  emaillist)
+    [ -f functions/lib/emailLog.js ] || { echo "This checkout has no Emails list code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision sendemailreply)" ] || { echo "The email inbox is not deployed yet: run $0 emailin first."; exit 1; }
+    [ -n "$(serving_revision deliverquote)" ] || { echo "The quote functions are not deployed yet: run $0 backend first."; exit 1; }
+    check_settings; check_access; check_routing $EMAILLIST_FUNCS
+    echo "Functions: $EMAILLIST_FUNCS (all exist already; no new function, nothing made public). Each answers exactly as before; it also adds the email to the list."
+    echo "After this, run $0 live: the Emails button (left rail, or the section buttons on a phone) opens the Emails list. Optional: node scripts/backfill-email-log.js (adds the emails already in chats)."
+    confirm "Deploy the Emails list functions to the LIVE project?"
+    install; save_revisions $EMAILLIST_FUNCS; deploy_functions $EMAILLIST_FUNCS
+    check_reachable "${EMAILLIST_FUNCS#emailSweep }"                                # emailSweep runs on a schedule and has no web address to ask: only the callable ones are checked
+    echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:<each name above> --project $PROJECT (the list simply stops filling; nothing else is affected)."
+    ;;
+  followuplist)
+    grep -q "propose_follow_ups" functions/lib/aiActions.js || { echo "This checkout has no follow-up list code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision aidecide)" ] || { echo "The Assistant is not deployed yet: run $0 ai first."; exit 1; }
+    [ -n "$(serving_revision sendquotefollowup)" ] || { echo "The quote follow-up is not deployed yet: run $0 followup first."; exit 1; }
+    check_settings; check_access; check_routing $FOLLOWLIST_FUNCS
+    echo "Functions: $FOLLOWLIST_FUNCS (aiChat, aiDecide and sendQuoteFollowUp exist already; followUpSweep is new and runs on a timer: nothing made public)."
+    echo "Asking the Assistant to follow up shows ONE list: who got a quote and never answered, and leads who never replied, each with how long it has been and a tick box. Quotes over two weeks old start ticked; younger ones start unticked and you can tick them yourself. You also choose WHEN to send (now, 09:00 tomorrow, or a time): a later send waits on the timer, is checked again when it goes, can be cancelled, and never goes out between midnight and 07:00. Uses the same two Settings tickboxes as before; no new switch. Nothing is sent by this stage."
+    confirm "Deploy the follow-up list to the LIVE project?"
+    install; save_revisions aiChat aiDecide sendQuoteFollowUp; deploy_functions $FOLLOWLIST_FUNCS
+    check_reachable "${FOLLOWLIST_FUNCS#followUpSweep }"                            # followUpSweep runs on a timer and has no web address to ask: only the callable ones are checked
+    echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:aiChat,functions:aiDecide,functions:sendQuoteFollowUp --project $PROJECT and firebase functions:delete followUpSweep --region $REGION --project $PROJECT (the Assistant then goes back to its old follow-up cards)."
+    ;;
+  pdfshare)
+    grep -q "SHARE_MAX" functions/lib/quotes.js || { echo "This checkout has no Share PDF code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision quotepdfurl)" ] || { echo "The quote functions are not deployed yet: run $0 backend first."; exit 1; }
+    check_settings; check_access; check_routing $PDFSHARE_FUNCS
+    echo "Functions: $PDFSHARE_FUNCS (exists already; no new function, nothing made public). It keeps answering exactly as before unless the screen asks for the file."
+    echo "After this, run $0 live: Sent versions get a Share button, and the Send box a Share PDF button, which open the phone's share sheet with the PDF named EliteKitchens-EK-0110-v1.pdf."
+    confirm "Deploy Share PDF (quotePdfUrl) to the LIVE project?"
+    install; save_revisions $PDFSHARE_FUNCS; deploy_functions $PDFSHARE_FUNCS
+    check_reachable "$PDFSHARE_FUNCS"
+    echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:quotePdfUrl --project $PROJECT (the screen's Share button then says it could not get the file; everything else is unaffected)."
+    ;;
+  asap)
+    [ -f functions/lib/asap.js ] || { echo "This checkout has no asap code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    check_settings; check_access; check_routing $ASAP_FUNCS
+    echo "Functions: $ASAP_FUNCS (both exist already; no new function, nothing made public)."
+    echo "leadIntake gives a NEW lead the star when its lead-form answer says asap; updateContact keeps the star in step when someone edits the Notes. NOT deployed: the WhatsApp webhook. Nothing is sent to any customer."
+    confirm "Deploy the asap star to the LIVE project?"
+    install; save_revisions $ASAP_FUNCS; deploy_functions $ASAP_FUNCS
+    if [ -f functions/lib/contactTime.js ]; then echo "The same two functions also keep each lead's \"best time to contact\" (shown on the Pipeline's New lead card). For the leads you already have, run node scripts/mark-contact-times.js (shows what it would change), then the same with --apply, before $0 live."; fi
+    echo "Done. Next: node scripts/mark-asap-leads.js (shows what it would change), then the same with --apply for the existing leads, then $0 live (the screen)."
+    echo "To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:leadIntake,functions:updateContact --project $PROJECT"
     ;;
   welcome)
     [ -f functions/lib/welcome.js ] || { echo "This checkout has no welcome switch code. Update it first: git checkout main && git pull --ff-only"; exit 1; }
@@ -547,6 +696,10 @@ case "${1:-}" in
     if [ -f functions/lib/directory.js ] && [ -z "$(serving_revision customerdirectory)" ]; then echo "Deploy the Inbox search backend first: $0 search"; exit 1; fi        # the Inbox All tab and search call customerDirectory
     if [ -f functions/lib/bookingNotices.js ] && [ -z "$(serving_revision resolvebookingnotice)" ]; then echo "Deploy the bookings backend first: $0 bookings"; exit 1; fi        # Phase 12: the screen calls resolveBookingNotice
     if [ -f functions/lib/today.js ] && [ -z "$(serving_revision savereminder)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # Phase 11: the screen calls saveReminder and snoozeQuote
+    if [ -f functions/lib/followUp.js ] && [ -z "$(serving_revision sendfollowupemail)" ]; then echo "Deploy the follow-up email backend first: $0 followup"; exit 1; fi        # the Email button calls sendFollowUpEmail
+    if [ -f functions/lib/quoteFollowUp.js ] && [ -z "$(serving_revision sendquotefollowup)" ]; then echo "Deploy the follow-up email backend first: $0 followup"; exit 1; fi        # the Email button on a Today quote card calls sendQuoteFollowUp
+    if [ -f functions/lib/emailInbound.js ] && [ -z "$(serving_revision sendemailreply)" ]; then echo "Deploy the email inbox backend first: $0 emailin"; exit 1; fi        # the Email button calls sendEmailReply and checkEmail
+    if grep -q dismissReply functions/index.js && [ -z "$(serving_revision dismissreply)" ]; then echo "Deploy the Today backend first: $0 today"; exit 1; fi        # the Dismiss button on a reply alert calls dismissReply
     if [ -f functions/lib/health.js ] && [ -z "$(serving_revision attentionaction)" ]; then echo "Deploy the safety net backend first: $0 safety"; exit 1; fi        # Phase 10: the screen calls attentionAction and setDoNotContact
     if [ -f functions/lib/aiReceptionist.js ] && [ -z "$(serving_revision receptionistsweep)" ]; then echo "Deploy the receptionist backend first: $0 receptionist"; exit 1; fi        # Phase 9 R3: the chat button calls setReceptionist; the check itself runs in receptionistSweep        # Phase 9: the Assistant screen calls these functions
     no_test_folders

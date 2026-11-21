@@ -66,7 +66,7 @@ test('JOURNEY: a new Meta lead replies to the welcome template; nobody switches 
   // they give a day
   await says(PH, 'Tuesday afternoon would suit me', NOW + 1500e3);
   const m3 = fake([decision({ intent: 'scheduling', visit: 'agreed', schedule: PREF })]), r3 = await REC.sweep(deps(m3, w, p), NOW + 1680e3);
-  assert.equal(r3['sent:acknowledge'], 1); assert.equal(w.sent[2].body, SCH.LINES.acknowledge);
+  assert.equal(r3['sent:acknowledge'], 1); assert.equal(w.sent[2].body, SCH.LINES.acknowledge + '\n' + SCH.LINES.see_our_work);
   const c = await conv(); assert.deepEqual([c.consult.stage, c.consult.needsBooking, c.consult.preference.firstDate, c.receptionist.paused], ['preference_given', true, '2026-10-20', 'consultation passed to you']);
   assert.deepEqual(p.events.map((e) => [e.kind, e.phone]), [['handover', PH]], 'the owner gets a push');
   // and it stays out from here
@@ -128,7 +128,7 @@ test('PER-CHAT CONTROL: switching a chat off stays off (it is never switched on 
   await ai.setReceptionist({ db, owners: OWNERS }, owner, { phone: PH, on: false }, { nowMs: NOW + 100e3 });
   await says(PH, 'Still there?', NOW + 200e3); const r = await REC.sweep(deps(m, w, pushFake()), NOW + 400e3); assert.equal(w.sent.length, 1, 'off stays off'); assert.equal(r.activated, undefined); assert.equal((await conv()).receptionist.on, false);
   await ai.setReceptionist({ db, owners: OWNERS }, owner, { phone: PH, on: true }, { nowMs: NOW + 500e3 }); assert.equal((await REC.sweep(deps(m, w, pushFake()), NOW + 520e3)).nothing_new, 1, 'what the customer wrote before it was switched on again is not answered');
-  await says(PH, 'Any day next week is fine', NOW + 600e3); await REC.sweep(deps(fake([decision({ intent: 'scheduling', wantsConsultation: true, schedule: { preference: { status: 'available', weeks: 'next', anyDay: true, text: 'any day' } } })]), w, pushFake()), NOW + 700e3); assert.equal(w.sent[1].body, SCH.LINES.acknowledge);
+  await says(PH, 'Any day next week is fine', NOW + 600e3); await REC.sweep(deps(fake([decision({ intent: 'scheduling', wantsConsultation: true, schedule: { preference: { status: 'available', weeks: 'next', anyDay: true, text: 'any day' } } })]), w, pushFake()), NOW + 700e3); assert.equal(w.sent[1].body, SCH.LINES.acknowledge + '\n' + SCH.LINES.see_our_work);
 });
 
 test('MANUAL TAKE-OVER: anything a person sends stops the automatic replies for good until the owner reactivates the chat; our own welcome template is not a take-over', async () => {

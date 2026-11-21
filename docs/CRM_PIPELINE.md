@@ -8,6 +8,8 @@ A simple pipeline on top of the existing customers and conversations. No new col
 
 New lead → Booked → Quoted → Won → Closed.
 
+> **10 Nov 2026: no Closed column.** The Pipeline board and the phone tabs now show New lead, Booked, Quoted and Won only. **Closed is still a stage**: it stays in each card's Move menu (that is how a dead lead is cleared; the date is stamped and the 5-minute correction works as before) and in the Inbox's status selector, a closed customer is still found in Inbox > All and by searching, and the overview figures are unchanged. A card moved to Closed simply leaves the board. Test: `test-ui/pipeline-closed.e2e.js`.
+
 | Shown as | Stored as `conversations/{phone}.inboxStatus` |
 |---|---|
 | New lead | `inbox` (or missing) |

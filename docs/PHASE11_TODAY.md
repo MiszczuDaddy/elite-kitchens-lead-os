@@ -29,7 +29,7 @@ Every card is **worked out from live data**, so it cannot be duplicated and it l
 | **Reply waiting** | The customer wrote last, within 60 days; the customer is not Closed or Won; not "do not contact"; the message is not just a thank-you; and the receptionist, if on, has had 30 working minutes | A reply goes out through Elite OS (or the customer's chat changes stage to Closed/Won) | Amber at 30, red at 120 **working** minutes (08:00 to 20:00 Irish time) |
 | **Receptionist handover** | The receptionist passed the chat to you in the last 14 days (the reason is shown in plain words) | A person writes after the hand-over; or, for "gave days for a visit", a visit is booked | Red at once for a complaint; otherwise as for a reply |
 | **Book a visit** | The customer gave days and no visit is booked | The visit is booked, or you press "Not needed" | Amber after 2 working hours, red after a day |
-| **Quote follow-up** | A sent, unanswered quote older than 5 days (within 60 days) | Accepted or declined; or you press **Followed up** (back in 5 days) or **Snooze** (1, 3 or 7 days). The snooze is tied to the date the quote was sent, so sending it again brings it back. | Amber at 5 days, red at 10 |
+| **Quote follow-up** | A sent, unanswered quote older than 5 days (within 60 days) | Accepted or declined; or you press **Followed up** (back in 5 days) or press **Email** (8 Nov 2026: a follow-up email about the quote, once per sending; see FOLLOW_UP_EMAIL.md), or **Dismiss** (7 Nov 2026: it replaced Snooze on quote cards; hidden for good). Both are tied to the date the quote was sent, so sending the quote again brings the follow-up back, and Undo in "Done today" removes either. | Amber at 5 days, red at 10 |
 | **Reminder** | You added it, and it is due today or earlier | **Done**, **Snooze** (tomorrow, 3 days, next week, or pick a day), or Delete | Red when its day or time has passed |
 | **Lead to fix** | A rejected Meta lead (Phase 10) or a welcome message that did not go | Added as a customer or Dismissed (same buttons as Needs attention); a failed welcome clears once a person or the customer has been in touch | Red |
 
@@ -57,7 +57,9 @@ If several are true the most serious wins, in the order above. A lead that is **
 - `reminders/{r_…}`: your own reminders (title, optional customer, day and optional time, open/done). A reminder's id comes from the request id, so pressing Add twice makes one.
 - `todayMarks/quote_{id}`: "do not show this quote's follow-up until…", with the quote's sent time (read by the server, never the screen).
 
-Both are written only by two staff-only functions (`saveReminder`, `snoozeQuote`) and read by the screen. **"Delete customer" erases the customer's reminders and quote notes.** No security rule changed.
+- `todayMarks/reply_{phone}`: "I have dealt with this reply alert" (the **Dismiss** button on a *Waiting for your reply* card, for example when the customer only wrote "Ok perfect"). It stores the time of the customer's last message, read by the server. The alert stays hidden until the customer writes again, and the dismissal is listed under *Done today* with **Undo**.
+
+All are written only by three staff-only functions (`saveReminder`, `snoozeQuote`, `dismissReply`) and read by the screen. **"Delete customer" erases the customer's reminders, quote notes and dismissed reply alerts.** No security rule changed.
 
 ## Cost, settings and security
 - **No new Google Cloud setting and no new database index.** Every question the screen asks is a single-field one.

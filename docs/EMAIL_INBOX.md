@@ -1,0 +1,39 @@
+# Email in Elite OS: customers' replies, and "Email" to answer them
+
+When a customer replies to a quote email or a follow-up email, the reply lands in the business mailbox (info@). From 10 Nov 2026 Elite OS brings that reply into **their chat**, next to the WhatsApp messages, and the **Email** button answers it by email, in the same email conversation.
+
+## What you see
+- **In the chat:** the email as a bubble marked "✉ Email · subject", with only what they wrote this time (the quoted history is cut off), and, if there are attachments, their names with a link that opens the email in Gmail. Your replies show as "✉ You emailed". Emails sit in time order with the WhatsApp messages.
+- **In the Inbox:** the chat moves to the top, with the same unread badge as WhatsApp, and the row says "✉ subject" while an email is the newest thing in it.
+- **"They wrote to us":** a lead who replied by email is **not** "never replied": they leave the No reply tab, are not chased by a follow-up email, and a quote is not followed up by email after they wrote. The Assistant's counting follows the same rule.
+- **Reply by email** (a button right under the newest email from them that has not been answered yet, and an envelope in the chat header, shown in any chat that has an email address or an email from them, and highlighted once they have written; it is not in the message box area, which stays uncluttered on a phone): opens a reply to the address they wrote from, "Re: their subject", with their last email shown above for reference. **Send email** sends it from the business address, in the same Gmail conversation (threadId, In-Reply-To, References), and keeps it in the chat. The very same words sent twice within two minutes are refused (a double press), a customer who asked not to be contacted is refused, and an answer from Google that cannot be confirmed is kept as "not confirmed: check Gmail" and never retried by itself.
+- **Check for new email** (in that dialog) runs the five-minute check now.
+
+## What it reads, and what it never does
+- It signs in to the business mailbox with a **read-only** permission (`gmail.readonly`), separate from the sending permission (`gmail.send`); sending never gets the read permission.
+- Every five minutes (`emailSweep`) it lists the newest inbox messages and looks **only at the sender** of each new one. The **text is read and kept only when the sender's address is a customer or lead Elite OS already has** (matched in lower case; an address on two customers goes to the chat that was active most recently). A stranger's email (the accountant, a supplier, anything personal) is never read and nothing about it is stored. It looks back 3 days the first time, then from just before the last check; each message is handled once.
+- It never sends, deletes, labels or marks anything in Gmail. Attachments are not downloaded (the Gmail link opens them).
+- The emails are kept in `conversations/{phone}/emails`, **not** in `messages`, so the automatic receptionist, the WhatsApp 24-hour window ("last message", "last inbound") and the Reopen rules never see them; the chat's `emailInboundAt`, `lastEmailAt`, `lastEmailSubject` and `lastEmailDir` carry what the Inbox and the "never wrote" rule need. **Deleting a customer deletes their emails** with the rest of the chat.
+- The Assistant does not read emails yet.
+
+## Switching it on (one Google Workspace step)
+1. `./scripts/deploy-quote-sending.sh emailin` deploys the backend (reading stays **off**), then `./scripts/deploy-quote-sending.sh live` for the screen.
+2. In **admin.google.com > Security > Access and data control > API controls > Manage domain-wide delegation**, edit the entry for the mailer service account (`ek-mailer@elite-kitchens-lead-os.iam.gserviceaccount.com`, the one already used for sending) and add the scope `https://www.googleapis.com/auth/gmail.readonly`, keeping `gmail.send`.
+3. `./scripts/deploy-quote-sending.sh emailin on` switches reading on (it asks first). Kill switch: `./scripts/deploy-quote-sending.sh emailin off`.
+4. Open a chat > **Email** > **Check for new email**. If it says Google has not allowed Elite OS to read the mailbox, step 2 is not finished (it can take a few minutes to apply).
+
+## Not built yet (ideas)
+Showing email replies on the Today screen as a reply alert; a push notification for an email reply; the Assistant reading emails; attachments saved into the customer's Documents; emails from customers who are not yet in Elite OS (they are ignored on purpose).
+
+## Tests
+`functions/test/email-inbox.test.js` (12, emulator): reading a message, the Gmail reader and its scope, the sweep (a customer's email kept, a stranger's never read, read once, unread count, "wrote to us"), who is a customer, Google refusing and big mailboxes, the replies (thread, headers, once, rules, refusals), staff only, erasure. `test-ui/email-inbox.e2e.js` (8): the button, check for new email, the thread, the Inbox row and the No reply tab, the reply, a double press, the phone.
+
+## Both directions: emails you write from Gmail are tracked too (15 Nov 2026)
+Elite OS now also looks in the mailbox's **Sent** folder. An email **you** write to a customer from Gmail (a reply, or one you start) is kept in their chat as **"You emailed from Gmail"** and listed in the Emails tab as **Sent · from Gmail**, so a conversation is tracked whether you answer from Gmail or from Elite OS.
+* **Same rules, same permission:** the mailbox is still read through the read-only sign-in already approved (no new Workspace step). Only an email **to** an address on a customer or lead record (To or Cc) is read in full and kept; for any other sent email only the recipients are looked at and nothing is stored. Nothing is ever sent, changed or labelled in Gmail.
+* **Not listed twice:** emails Elite OS sends itself (a reply from a chat, a follow-up, the quote email) also land in Sent. They are recognised by Google's message id, or (older ones) by the same subject to the same customer within ten minutes, and are not added again. A new email waits two minutes before it is looked at, so Elite OS has finished recording its own send first.
+* **What it changes:** the customer's earlier email no longer looks unanswered (no **Reply by email** waiting under it); the chat shows your email as its newest and the Inbox row says "✉ You: subject"; the Assistant counts them as **emailed**. It does **not** change the unread count and does **not** count as "they wrote to us".
+* **It stops Elite OS chasing:** a lead you emailed from Gmail (or from their chat) is not sent the follow-up for two weeks, and a quote you emailed about **well after it was sent** (more than 10 minutes after, so the quote's own email never counts) is not followed up by email: the message says "You emailed them on ..., so check the chat first". The batch from the Assistant skips them the same way.
+* **Newest means by the email's own time** (both directions): an older email found late never moves "newest" or the Inbox order back. (Received emails used to be stamped with the time they were found; they now use their own time.)
+* **Limits:** only the business mailbox is watched (a reply from a different Gmail account is not seen); new emails appear within about five minutes ("Check for new email" does it now); the first run looks back three days.
+* **Deploy:** `./scripts/deploy-quote-sending.sh emaillist` (the sweep and the functions that decide who may be chased; all exist already, nothing is sent) then `live` (the label on the screen). Tests: `functions/test/email-sent.test.js` (9), `test-ui/email-sent.e2e.js` (5).

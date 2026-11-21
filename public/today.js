@@ -36,7 +36,7 @@ window.TODAY = (() => {
     listen(T.unsubs, 'booking', db.collection('conversations').where('consult.needsBooking', '==', true).limit(200), (s) => { T.booking = new Map(s.docs.map((d) => [d.id, { id: d.id, ...d.data() }])); });
     listen(T.unsubs, 'quotes', db.collection('quotes').where('status', '==', 'sent').limit(300), (s) => { T.quotes = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
     listen(T.unsubs, 'reminders', db.collection('reminders').where('status', '==', 'open').limit(300), (s) => { T.reminders = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
-    listen(T.unsubs, 'marks', db.collection('todayMarks').orderBy('at', 'desc').limit(300), (s) => { T.marks = {}; for (const d of s.docs) { const x = d.data(); if (x.kind === 'quote' && x.quoteId) T.marks['quote|' + x.quoteId] = x; } });
+    listen(T.unsubs, 'marks', db.collection('todayMarks').orderBy('at', 'desc').limit(300), (s) => { T.marks = {}; for (const d of s.docs) { const x = d.data(); if (x.kind === 'quote' && x.quoteId) T.marks['quote|' + x.quoteId] = x; else if (x.kind === 'reply' && x.phone) T.marks['reply|' + x.phone] = x; } });
     listen(T.unsubs, 'appts', db.collection('appointments').where('start', '>=', TS.fromMillis(now - 8 * 3600e3)).orderBy('start').limit(400), (s) => { T.appts = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
     listen(T.unsubs, 'issues', db.collection('healthIssues').where('status', '==', 'open'), (s) => { T.issues = s.size; });
     listen(T.unsubs, 'leadIssues', db.collection('leadIssues').where('status', '==', 'open').limit(100), (s) => { T.leadIssues = s.docs.map((d) => ({ id: d.id, ...d.data() })); });
@@ -120,6 +120,8 @@ window.TODAY = (() => {
   }
   const reminder = (data) => call('saveReminder')(data);
   const snoozeQuote = (id, days) => call('snoozeQuote')({ id, days });
+  const dismissQuote = (id) => call('snoozeQuote')({ id, dismiss: true });
+  const dismissReply = (phone, undo) => call('dismissReply')(undo ? { phone, undo: true } : { phone });
   function snoozeChoices(c) {
     const today = M.dateKey(Date.now()), row = el('div', 'td-snooze'); row.append(el('span', 'td-snooze-l', 'Snooze until'));
     const pick = (label, n) => btn(label, 'btn-ghost', () => { T.snoozeFor = null;
@@ -133,6 +135,7 @@ window.TODAY = (() => {
     const row = el('div', 'td-actions'), open = target(c);
     if (c.kind === 'customer') {
       row.append(btn('Open chat', 'btn-primary', open, null));
+      if (c.reasons.some((r) => r.type === 'reply')) row.append(btn('Dismiss', 'btn-ghost', () => act('d' + c.phone, () => dismissReply(c.phone), 'Dismissed. It comes back only if they write again.', () => dismissReply(c.phone, true)), 'd' + c.phone));      // e.g. they only said "Ok perfect"
       const bk = c.reasons.find((r) => r.type === 'booking');
       if (bk) { const b = btn('Book visit', 'btn-ghost', () => window.APPT && APPT.openBook && APPT.openBook(c.phone, bk.bookOn, bk.bookAt), null); b.disabled = !window.APPT; row.append(b,
         btn('Not needed', 'btn-link', () => act('n' + c.phone, () => call('aiDismissConsult')({ phone: c.phone }), 'Cleared. Nothing was sent.'), 'n' + c.phone)); }
@@ -142,8 +145,8 @@ window.TODAY = (() => {
         row.append(btn('Open chat', 'btn-primary', open, null), btn('It arrived', 'btn-ghost', say('arrived'), 'n' + c.apptId), btn('It did not arrive', 'btn-ghost', say('notArrived'), 'n' + c.apptId));
       } else row.append(btn('Open chat', 'btn-primary', open, null));              // WhatsApp refused the reminder: message the customer yourself
     } else if (c.kind === 'quote') {
-      row.append(btn('Open quote', 'btn-primary', open, null), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
-        btn('Snooze', 'btn-ghost', () => { T.snoozeFor = T.snoozeFor === c.key ? null : c.key; schedule(); }, null));
+      row.append(btn('Open quote', 'btn-primary', open, null), ...(c.emailedAt || !c.emailable || !window.FOLLOWUP ? [] : [btn('Email', 'btn-ghost', () => FOLLOWUP.openQuote(c), null)]), btn('Followed up', 'btn-ghost', () => act('q' + c.quoteId, () => snoozeQuote(c.quoteId, 5), `${c.ref || 'Quote'}: followed up. It comes back in 5 days if there is no answer.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId),
+        btn('Dismiss', 'btn-ghost', () => act('q' + c.quoteId, () => dismissQuote(c.quoteId), `${c.ref || 'Quote'} dismissed. It comes back only if you send the quote again.`, () => snoozeQuote(c.quoteId, 0)), 'q' + c.quoteId));
     } else if (c.kind === 'reminder') {
       row.append(btn('Done', 'btn-primary', () => act('r' + c.reminderId, () => reminder({ action: 'done', id: c.reminderId }), 'Reminder done.', () => reminder({ action: 'undo', id: c.reminderId })), 'r' + c.reminderId),
         btn('Snooze', 'btn-ghost', () => { T.snoozeFor = T.snoozeFor === c.key ? null : c.key; schedule(); }, null));
@@ -159,10 +162,11 @@ window.TODAY = (() => {
     const open = target(c), main = el(open ? 'button' : 'div', 'td-open'); if (open) { main.type = 'button'; main.onclick = open; }
     const top = el('div', 'td-top'), title = c.kind === 'reminder' ? c.title : nameOf(c);
     top.append(el('span', 'td-dot'), el('strong', 'td-name', title));
+    if (c.asap) top.append(asapStar());
     const tags = el('span', 'td-tags'); for (const t of new Set(c.reasons.map((r) => r.type))) tags.append(el('span', 'td-tag t-' + t, UTYPE[t])); top.append(tags);
     main.append(top);
     if (c.kind === 'reminder' && c.name) main.append(el('div', 'td-meta', 'About ' + c.name));
-    if (c.kind === 'quote') main.append(el('div', 'td-meta', [c.ref ? 'Quote ' + c.ref : '', c.name, c.price ? '€' + Number(c.price).toLocaleString('en-IE') : ''].filter(Boolean).join(' · ')));
+    if (c.kind === 'quote') main.append(el('div', 'td-meta', [c.ref ? 'Quote ' + c.ref : '', c.name, c.price ? '€' + Number(c.price).toLocaleString('en-IE') : '', c.emailedAt ? 'emailed ' + new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' }).format(new Date(c.emailedAt)) : ''].filter(Boolean).join(' · ')));
     if (c.kind === 'lead') main.append(el('div', 'td-meta', ['Number as typed: ' + (c.phoneTyped || 'none'), c.email, c.location].filter(Boolean).join(' · ')));
     for (const r of c.reasons) main.append(reasonLine(c, r, now));
     if (c.kind === 'customer') { if (c.facts) main.append(el('div', 'td-meta', c.facts)); if (c.last && c.last.text) main.append(el('div', 'td-meta td-last', (c.last.mine ? 'You: ' : 'Customer: ') + c.last.text)); }
@@ -173,7 +177,9 @@ window.TODAY = (() => {
   function leadRow(l) {
     const open = l.phone ? () => go('#c/' + l.phone) : () => window.ATTN && ATTN.addLead(l.lead);
     const b = el('button', 'td-lead s-' + l.status); b.type = 'button'; b.onclick = open; b.dataset.status = l.status; if (l.phone) b.dataset.phone = l.phone;
-    const top = el('div', 'td-top'); top.append(el('strong', 'td-name', l.name || (l.phone ? formatPhone(l.phone) : 'Lead')), el('span', 'td-status st-' + l.status, M.STATUS_LABEL[l.status]));
+    const top = el('div', 'td-top'); top.append(el('strong', 'td-name', l.name || (l.phone ? formatPhone(l.phone) : 'Lead')));
+    if (l.asap) top.append(asapStar());
+    top.append(el('span', 'td-status st-' + l.status, M.STATUS_LABEL[l.status]));
     b.append(top, el('div', 'td-reason', l.text), el('div', 'td-meta', [l.at ? hhmm(l.at) : '', l.source, l.facts].filter(Boolean).join(' · ')));
     return b;
   }
@@ -222,7 +228,7 @@ window.TODAY = (() => {
     const lt = $('today-later'); lt.hidden = !r.later.length; $('today-later-n').textContent = r.later.length ? '(' + r.later.length + ')' : ''; $('today-later-list').replaceChildren(...r.later.map((c) => cardNode(c, now)));
     const dn = $('today-done'); dn.hidden = !r.doneToday.length; $('today-done-n').textContent = r.doneToday.length ? '(' + r.doneToday.length + ')' : '';
     $('today-done-list').replaceChildren(...r.doneToday.map((d) => { const row = el('div', 'td-done'); row.append(el('span', 'td-done-t', d.title + ' · ' + hhmm(d.at)),
-      btn('Undo', 'btn-ghost', () => act('u' + d.id, () => (d.kind === 'quote' ? snoozeQuote(d.id, 0) : reminder({ action: 'undo', id: d.id })), 'Back on your list.'), 'u' + d.id)); return row; }));
+      btn('Undo', 'btn-ghost', () => act('u' + d.id, () => (d.kind === 'quote' ? snoozeQuote(d.id, 0) : d.kind === 'reply' ? dismissReply(d.id, true) : reminder({ action: 'undo', id: d.id })), 'Back on your list.'), 'u' + d.id)); return row; }));
   }
   function toast(text, undo, error) {
     const t = $('today-toast'); clearTimeout(T.toastTimer); t.replaceChildren(); t.hidden = !text; t.className = 'toast q-toast' + (error ? ' err' : '');
@@ -257,5 +263,5 @@ window.TODAY = (() => {
   $('remind-btn').onclick = () => { const c = S.selected && S.convs.find((x) => x.id === S.selected); openReminder({ phone: S.selected, name: c ? c.name : '' }); };
   $('today-back').onclick = () => { history.replaceState(null, '', location.pathname + location.search); routeFromHash(); };
 
-  return Object.assign(T, { start, stop, handles, show, hide, render, schedule, openReminder });
+  return Object.assign(T, { start, stop, handles, show, hide, render, schedule, openReminder, toast });
 })();

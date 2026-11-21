@@ -503,10 +503,10 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   for (const status of ['quoted', 'won', 'closed', 'inbox']) {
     await page.selectOption('#conversation-status', status); await statusSaved(A, status);
     await page.waitForFunction(() => !document.getElementById('conversation-status').disabled);
-    await filter(page, status).click(); await page.waitForSelector(`.conv[data-phone="${A}"]`);
+    await filter(page, status === 'closed' ? 'all' : status).click(); await page.waitForSelector(`.conv[data-phone="${A}"]`);          // Closed has no tab of its own any more: a Closed customer is found under All
     await mp.waitForFunction(s => document.getElementById('conversation-status').value === s, status);
   }
-  ok('statuses: all five filters work, a search finds customers in every stage, and another open client updates its selector');
+  ok('statuses: the stage filters work (a Closed customer is found under All), a search finds customers in every stage, and another open client updates its selector');
 
   await page.route('**/setConversationStatus', route => route.fulfill({ status: 400,
     headers: { 'access-control-allow-origin': '*', 'content-type': 'application/json' },
@@ -516,22 +516,22 @@ const status = (wamid, to, st) => hook({ entry: [{ changes: [{ field: 'messages'
   assert.equal(await page.inputValue('#conversation-status'), 'inbox');
   assert.equal((await getFirestore().doc('conversations/' + A).get()).data().inboxStatus, 'inbox');
   await page.unroute('**/setConversationStatus');
-  await page.selectOption('#conversation-status', 'closed'); await statusSaved(A, 'closed');
+  await page.selectOption('#conversation-status', 'won'); await statusSaved(A, 'won');
   await page.waitForFunction(() => !document.getElementById('conversation-status').disabled);
   await mp.click('#back'); await filter(mp, 'inbox').click();
   await conv(B).click();
-  await text(A, 'Anna M. Murphy', 'A new message while Closed');
-  await page.waitForSelector('#status-filters [data-status="closed"] .status-unread:not([hidden])');
-  assert.equal((await getFirestore().doc('conversations/' + A).get()).data().inboxStatus, 'closed');
-  await filter(page, 'closed').click();
+  await text(A, 'Anna M. Murphy', 'A new message while Won');
+  await page.waitForSelector('#status-filters [data-status="won"] .status-unread:not([hidden])');
+  assert.equal((await getFirestore().doc('conversations/' + A).get()).data().inboxStatus, 'won');
+  await filter(page, 'won').click();
   await page.waitForSelector(`.conv.unread[data-phone="${A}"]`);
   await conv(A).click();
-  await page.waitForFunction(() => /A new message while Closed/.test(document.getElementById('msgs').innerText));
+  await page.waitForFunction(() => /A new message while Won/.test(document.getElementById('msgs').innerText));
   assert(await page.locator('#text').isEnabled());
   await page.screenshot({ path: path.join(SHOTS, 'statuses-desktop.png') });
-  ok('statuses: failed saves recover; incoming messages stay Closed and signal unread activity in that filter');
+  ok('statuses: failed saves recover; incoming messages stay Won and signal unread activity in that filter');
 
-  await filter(mp, 'closed').click(); await mp.waitForSelector(`.conv[data-phone="${A}"]`);
+  await filter(mp, 'won').click(); await mp.waitForSelector(`.conv[data-phone="${A}"]`);
   await mp.screenshot({ path: path.join(SHOTS, 'statuses-mobile-list.png') });
   await mp.locator(`.conv[data-phone="${A}"]`).click();
   await mp.selectOption('#conversation-status', 'quoted'); await statusSaved(A, 'quoted');

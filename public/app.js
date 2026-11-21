@@ -11,6 +11,7 @@ const call = (name) => fns.httpsCallable(name);
 const TZ = 'Europe/Dublin';
 const INBOX_STATUSES = { inbox: 'New lead', booked: 'Booked', quoted: 'Quoted', won: 'Won', closed: 'Closed' };
 const inboxStatus = (c) => Object.hasOwn(INBOX_STATUSES, c.inboxStatus) ? c.inboxStatus : 'inbox';
+const filterLabel = (f) => (f === 'noreply' ? 'No reply' : INBOX_STATUSES[f]);       // the status tabs, plus "No reply" (leads who never wrote back: not a stage, so it is not in INBOX_STATUSES)
 const statusRequests = new Map();
 const statusErrors = new Map();
 
@@ -105,6 +106,7 @@ function dayLabel(d) {
 const PLACEHOLDERS = { '[image]': '📷 Photo', '[document]': '📄 Document', '[video]': '🎥 Video', '[audio]': '🎤 Voice message', '[sticker]': 'Sticker' };
 const TYPE_ICON = { image: '📷 ', video: '🎥 ', audio: '🎤 ', document: '📄 ' };
 function previewOf(c) {
+  if (c.lastEmailAt && ms(c.lastEmailAt) >= ms(c.updatedAt)) return '\u2709 ' + (c.lastEmailDir === 'out' ? 'You: ' : '') + (c.lastEmailSubject || 'Email');          // the newest thing in this chat is an email
   let t = String(c.lastMessage || '').replace(/^\[template:[^\]]*\]\s*/, '');
   if (PLACEHOLDERS[t]) t = PLACEHOLDERS[t];
   else if (TYPE_ICON[c.lastMessageType]) t = TYPE_ICON[c.lastMessageType] + t;
@@ -238,6 +240,7 @@ function stopListening() {
   if (window.PROJ) PROJ.stop();
   if (window.ASSIST) ASSIST.stop();
   if (window.REPLY) REPLY.stop();
+  if (window.EMAILBOX) EMAILBOX.onSelect(null);
   if (window.CONSULT) CONSULT.stop();
   if (window.ATTN) ATTN.stop();
   if (window.TODAY) TODAY.stop();
@@ -307,12 +310,14 @@ async function ensureDirectory(force) {
   renderList();
 }
 const PAGE = 100;
+const listScroller = () => (getComputedStyle($('list')).overflowY === 'visible' ? document.querySelector('.list-pane') : $('list'));      // the whole pane scrolls on a phone (the Today card and buttons slide away), the list itself on a desktop
 function renderList() {
   const q = S.query.trim().toLowerCase();
   const allTab = S.statusFilter === 'all';
-  const stage = allTab ? 'All' : INBOX_STATUSES[S.statusFilter];
+  const stage = allTab ? 'All' : filterLabel(S.statusFilter);
+  const noReply = S.statusFilter === 'noreply' && !q;
   const list = $('list');
-  const keep = list.scrollTop;
+  const scroller = listScroller(), keep = scroller.scrollTop;
   const consultOnly = !!(window.CONSULT && CONSULT.filter && CONSULT.count());       // Phase 9 R2b: only the customers waiting for you to book a consultation
   let shown, more = 0, note = '';
   if (!consultOnly && (allTab || q)) {
@@ -321,63 +326,98 @@ function renderList() {
     if (S.dirState === 'loading') note = q ? 'Searching the latest chats while every customer loads…' : 'Loading every customer…';
     else if (S.dirState === 'error') note = 'Could not load the older customers (' + S.dirError + '). Showing the latest 300 chats. Press the All tab again to retry.';
     else if (dir) note = (S.dirTruncated ? 'Showing the ' + S.dirTotal.toLocaleString('en-IE') + ' most recent customers. ' : '') + (q ? all.length.toLocaleString('en-IE') + ' found' : all.length.toLocaleString('en-IE') + ' customers');
+  } else if (noReply && !consultOnly) {
+    shown = noReplyRows();
+    note = NR.error ? 'Could not check every lead (' + NR.error + '). Press the No reply tab again to retry.' : NR.busy ? 'Checking which leads have not replied…' : shown.length + (shown.length === 1 ? ' lead has' : ' leads have') + ' never replied. Oldest first.';
   } else shown = S.convs.filter((c) => consultOnly ? CONSULT.has(c) && (!q || matchesQuery(c, q)) : q ? matchesQuery(c, q) : inboxStatus(c) === S.statusFilter);
   const kids = shown.map(convItem);
   if (more > 0) { const b = el('button', 'list-more', `Show ${Math.min(PAGE, more)} more (${more.toLocaleString('en-IE')} left)`); b.type = 'button'; b.onclick = () => { S.shownCount += PAGE; renderList(); }; kids.push(b); }
   list.replaceChildren(...kids);
-  list.scrollTop = keep;
+  scroller.scrollTop = keep;
   const ln = $('list-note'); ln.hidden = !note; ln.textContent = note;
 
   const empty = $('list-empty');
   if (!S.listLoaded) { empty.hidden = true; }
   else if (!S.convs.length && !(S.dirItems && S.dirItems.length)) { empty.hidden = false; empty.textContent = 'No conversations yet. New WhatsApp messages will appear here.'; }
-  else if (!shown.length) { empty.hidden = false; empty.textContent = S.dirState === 'loading' ? 'Searching…' : q ? 'No conversations match your search across the stages. Try another name, phone number, email or town.' : allTab ? 'No customers yet.' : 'No conversations marked ' + stage + '. Choose another stage to see more.'; }
+  else if (!shown.length) { empty.hidden = false; empty.textContent = S.dirState === 'loading' ? 'Searching…' : q ? 'No conversations match your search across the stages. Try another name, phone number, email or town.' : allTab ? 'No customers yet.' : noReply ? (NR.busy ? 'Checking…' : 'Every lead has replied, or been moved on.') : 'No conversations marked ' + stage + '. Choose another stage to see more.'; }
   else empty.hidden = true;
 
   const n = S.convs.filter(isUnread).length;
   $('total-unread').hidden = !n; $('total-unread').textContent = n;
   $('rail-badge').hidden = !n; $('rail-badge').textContent = n > 9 ? '9+' : n;
   if (window.CONSULT) CONSULT.render();
+  if (window.FOLLOWUP) FOLLOWUP.render();
   if (window.REPLY && REPLY.drawRecep) REPLY.drawRecep();
   document.title = (n ? `(${n}) ` : '') + 'Inbox · Elite Kitchens';
   for (const button of $('status-filters').querySelectorAll('button')) {
     const status = button.dataset.status;
     const unread = S.convs.filter(c => (status === 'all' || inboxStatus(c) === status) && isUnread(c)).length;
     button.setAttribute('aria-pressed', String(status === S.statusFilter));
-    button.setAttribute('aria-label', (status === 'all' ? 'All conversations' : INBOX_STATUSES[status]) + (unread ? ', ' + unread + ' unread conversation' + (unread === 1 ? '' : 's') : ''));
+    button.setAttribute('aria-label', (status === 'all' ? 'All conversations' : filterLabel(status)) + (unread ? ', ' + unread + ' unread conversation' + (unread === 1 ? '' : 's') : ''));
     button.querySelector('.status-unread').hidden = !unread;
   }
 }
 
+
+// The ⭐ beside a customer who wants the kitchen as soon as possible (from the lead form's answer in their Notes: functions/lib/asap.js). Used by the Inbox, Today and the Pipeline.
+function asapStar() { const s = el('span', 'asap-star', '\u2B50'); s.title = 'Wants it as soon as possible (from the lead form)'; s.setAttribute('role', 'img'); s.setAttribute('aria-label', 'Wants it as soon as possible'); return s; }
 
 function convItem(c) {
   const unread = isUnread(c);
   const item = el('div', 'conv' + (unread ? ' unread' : '') + (c.id === S.selected ? ' sel' : ''));
   item.setAttribute('role', 'listitem'); item.tabIndex = 0; item.dataset.phone = c.id;
   if (c.id === S.selected) item.setAttribute('aria-current', 'true');
-  item.setAttribute('aria-label', displayName(c) + (unread ? ', unread messages' : '') + '. Open conversation');
+  item.setAttribute('aria-label', displayName(c) + (c.asap === true ? ', wants it as soon as possible' : '') + (unread ? ', unread messages' : '') + '. Open conversation');
   item.append(el('div', 'avatar', initials(c)));
   const body = el('div', 'conv-body');
   const top = el('div', 'conv-top');
-  top.append(el('div', 'conv-name', displayName(c)), el('div', 'conv-time', listTime(ms(c.updatedAt))));
+  top.append(el('div', 'conv-name', displayName(c)));
+  if (c.asap === true) top.append(asapStar());
+  top.append(el('div', 'conv-time', listTime(ms(c.updatedAt))));
   body.append(top);
-  const tag = [(S.query.trim() || S.statusFilter === 'all') ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
+  const nrMode = S.statusFilter === 'noreply' && !S.query.trim();
+  const tag = nrMode ? [(NoReply.ageText(NoReply.ageDays(c, Date.now())) || 'New') + ', no reply', window.FOLLOWUP ? FOLLOWUP.emailedText(c) : '', c.projectType, c.location].filter(Boolean).join(' · ')
+    : [(S.query.trim() || S.statusFilter === 'all') ? INBOX_STATUSES[inboxStatus(c)] : '', c.projectType, c.location].filter(Boolean).join(' · ');
   if (tag) body.append(el('div', 'conv-sub', tag));
   if (window.CONSULT && CONSULT.has(c)) body.append(el('div', 'conv-consult', 'Needs booking'));
   if (dncOf(c)) body.append(el('div', 'conv-dnc', 'Do not contact'));                                                  // Phase 10
   if (c.receptionist && c.receptionist.notifyFailed) body.append(el('div', 'conv-alert', 'Alert did not reach your phone'));   // Phase 10: see Needs attention
   const prev = el('div', 'conv-prev');
-  prev.append(el('span', 't', previewOf(c) || (c.fromDirectory && c.email) || ' '));
+  prev.append(el('span', 't', previewOf(c) || (nrMode ? 'No message has been sent to them yet' : (c.fromDirectory && c.email) || ' ')));
   if (unread) {
     if (typeof c.unreadCount === 'number' && c.unreadCount > 0) { const b = el('span', 'badge', c.unreadCount > 99 ? '99+' : String(c.unreadCount)); b.title = c.unreadCount + ' unread'; prev.append(b); }
     else { const d = el('span', 'dot'); d.title = 'Unread'; prev.append(d); }
   }
   body.append(prev);
   item.append(body);
+  const tel = nrMode ? NoReply.callHref(c.id) : null;
+  if (nrMode && window.FOLLOWUP && FOLLOWUP.canEmail(c)) { const mail = el('button', 'conv-mail', 'Email'); mail.type = 'button'; mail.setAttribute('aria-label', 'Email ' + displayName(c)); mail.onclick = (e) => { e.stopPropagation(); FOLLOWUP.openOne(c.id); }; item.append(mail); }
+  if (tel) { const call = el('a', 'conv-call', 'Call'); call.href = tel; call.setAttribute('aria-label', 'Call ' + displayName(c)); call.onclick = (e) => e.stopPropagation(); item.append(call); }       // a tap on Call rings them; it does not open the chat
   const open = () => openConversation(c.id);
   item.onclick = open;
-  item.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  item.onkeydown = (e) => { if (e.target.closest && e.target.closest('.conv-call, .conv-mail')) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
   return item;
+}
+
+// ---------- the "No reply" tab: leads who never wrote back ----------
+// The live list holds the 300 newest chats, so the older ones are read once when the tab is pressed: every chat whose last message is ours. A lead whose record lacks "they wrote" is then
+// confirmed against the chat's own messages (older records may not have it), one tiny read each, and remembered for the session.
+const NR = { extra: [], checked: new Map(), busy: false, error: '' };
+const noReplyRows = () => NoReply.rows(S.convs, NR.extra, NR.checked);
+async function loadNoReply() {
+  if (NR.busy) return;
+  NR.busy = true; NR.error = ''; renderList();
+  ensureDirectory();                                                                    // the customers' email addresses (for the Email button) come with it
+  try {
+    NR.extra = (await db.collection('conversations').where('lastMessageDirection', '==', 'out').limit(2000).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderList();
+    const todo = noReplyRows().map((c) => c.id).filter((id) => !NR.checked.has(id));
+    for (let i = 0; i < todo.length; i += 8) {
+      await Promise.all(todo.slice(i, i + 8).map(async (id) => { const m = await db.collection('conversations').doc(id).collection('messages').where('direction', '==', 'in').limit(1).get(); NR.checked.set(id, !m.empty); }));
+      if (S.statusFilter === 'noreply') renderList();
+    }
+  } catch (e) { NR.error = errText(e); }
+  NR.busy = false; renderList();
 }
 
 $('search').addEventListener('input', (e) => { S.query = e.target.value; S.shownCount = 100; if (S.query.trim()) ensureDirectory(); renderList(); });
@@ -385,8 +425,8 @@ $('status-filters').addEventListener('click', e => {
   const button = e.target.closest('button[data-status]');
   if (!button) return;
   S.statusFilter = button.dataset.status;
-  S.shownCount = 100; if (S.statusFilter === 'all') ensureDirectory();
-  $('list').scrollTop = 0;
+  S.shownCount = 100; if (S.statusFilter === 'all') ensureDirectory(); if (S.statusFilter === 'noreply') loadNoReply();
+  listScroller().scrollTop = 0;
   renderList();
 });
 
@@ -427,6 +467,16 @@ function routeFromHash() {
   // Quotes (Phase 6): #quotes, #quotes/<id>, #quotes/settings. Leaving a quote with unsaved changes asks first.
   if (window.QUOTES && !QUOTES.mayLeave(location.hash)) return;
   if (window.PROJ && !PROJ.mayLeave(location.hash)) return;           // Phase 7: leaving a project with unsaved notes asks first
+  // Emails (14 Nov 2026): #emails, the list of every email in and out. Like the other screens it closes whatever is open before it shows, and any other address closes it.
+  if (window.EMAILS) {
+    if (EMAILS.handles(location.hash)) {
+      if (S.selected) closeConversation(true);
+      if (window.TODAY) TODAY.fromToday = false;
+      for (const m of [window.TODAY, window.PIPE, window.APPT, window.QUOTES, window.PROJ, window.ASSIST]) if (m && m.active) m.hide();
+      EMAILS.show(); return;
+    }
+    if (EMAILS.active) EMAILS.hide();
+  }
   // Today (Phase 11): the screen Elite OS opens on. Any other address closes it first. This comes AFTER the two "unsaved changes" questions above: going to Today must ask them too
   // (review of 18 Oct 2026: it used to close a quote or project with unsaved edits without asking).
   if (window.TODAY) {
@@ -474,7 +524,7 @@ function routeFromHash() {
 }
 window.addEventListener('hashchange', routeFromHash);
 
-function setView() { $('app').dataset.view = window.TODAY && TODAY.active ? 'today' : window.ASSIST && ASSIST.active ? 'assistant' : window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
+function setView() { $('app').dataset.view = window.EMAILS && EMAILS.active ? 'emails' : window.TODAY && TODAY.active ? 'today' : window.ASSIST && ASSIST.active ? 'assistant' : window.PROJ && PROJ.active ? 'projects' : window.QUOTES && QUOTES.active ? 'quotes' : window.APPT && APPT.active ? 'appointments' : window.PIPE && PIPE.active ? 'pipeline' : S.selected ? 'thread' : 'list'; }
 
 function closeConversation(fromHash) {
   rememberDrafts();
@@ -484,6 +534,7 @@ function closeConversation(fromHash) {
   S.selected = null; S.msgs = []; S.pending = [];
   syncExtra();
   if (window.REPLY) REPLY.onSelect(null);
+  if (window.EMAILBOX) EMAILBOX.onSelect(null);
   watchContact(null);
   $('thread').hidden = true; $('thread-empty').hidden = false;
   if (!fromHash && location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -511,6 +562,7 @@ function openConversation(id, fromHash) {
   S.selected = id; S.msgs = []; S.pending = []; banner('');
   syncExtra();                                                      // an older customer (not among the 300 newest) is watched on their own while open
   if (window.REPLY) REPLY.onSelect(id);                // Phase 9 R1: the Suggest reply button follows the open chat
+  if (window.EMAILBOX) EMAILBOX.onSelect(id);            // the chat's emails and the Email button follow the open chat
   $('text').value = messageDrafts.get(id) || ''; $('text').style.height = 'auto';
   if (!fromHash) history.replaceState(null, '', '#c/' + id);
   $('thread').hidden = false; $('thread-empty').hidden = true;
@@ -684,6 +736,15 @@ const timeOf = (m) => { const t = m.createdAt && m.createdAt.toDate ? m.createdA
 
 function buildBubble(m) {
   const out = m.direction === 'out';
+  if (m.type === 'email') {                                   // an email in the chat (docs/EMAIL_INBOX.md): its subject, what they wrote, and a link to Gmail when there are attachments
+    const e = el('div', 'm em ' + (out ? 'out' : 'in'));
+    e.append(el('div', 'em-head', (out ? (m.kind === 'gmail' ? '\u2709 You emailed from Gmail' : m.kind === 'assistant' ? '\u2709 You emailed (written by the Assistant)' : '\u2709 You emailed') : '\u2709 Email') + ' \u00b7 ' + (m.subject || '(no subject)')));
+    if (m.body) e.append(el('div', 'body', m.body));
+    if (m.attachments && m.attachments.length) { const a = el('a', 'em-att', '\ud83d\udcce ' + m.attachments.map((x) => x.name).join(', ') + ' (open in Gmail)'); a.href = 'https://mail.google.com/mail/u/0/#all/' + encodeURIComponent(m.gmailId || ''); a.target = '_blank'; a.rel = 'noopener'; e.append(a); }
+    const meta = el('div', 'meta'); meta.append(el('span', null, timeOf(m) + (out && m.confirmed === false ? ' \u00b7 not confirmed: check Gmail' : ''))); e.append(meta);
+    if (m.replyable && window.EMAILBOX) { const r = el('button', 'btn btn-primary btn-sm em-reply', 'Reply by email'); r.type = 'button'; r.onclick = () => EMAILBOX.open(); e.append(r); }          // under the newest email from them that has not been answered
+    return e;
+  }
   const b = el('div', 'm ' + (out ? 'out' : 'in') + (m.status === 'failed' ? ' failed' : ''));
   const type = m.type || 'text';
   const isMedia = !!MEDIA_LABEL[type];
@@ -715,13 +776,15 @@ function patchTick(b, m) {
 // Keep each message's element between renders (a playing voice note must not restart when a new message arrives).
 const nodeCache = new Map();
 let cacheFor = null;
-const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename], m.quote && [m.quote.ref, m.quote.version], m.auto === true]); };
+const sigOf = (m) => { const d = m.media || null; return JSON.stringify([m.body, m.type, m.error, m.state, m.progress, d && [d.status, d.storagePath, d.error, d.filename], m.quote && [m.quote.ref, m.quote.version], m.auto === true, m.replyable === true]); };
 
 function renderMessages() {
   const box = $('msgs');
   if (cacheFor !== S.selected) { nodeCache.clear(); cacheFor = S.selected; }
   const atBottom = S.firstRender || box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-  const all = [...S.msgs, ...S.pending.map((p) => ({ direction: 'out', type: p.attach ? p.kind : 'text', body: p.body, at: p.at, state: 'sending', attach: p.attach, progress: p.progress }))];
+  const mails = window.EMAILBOX ? EMAILBOX.items(S.selected) : [], at = (m) => ms(m.createdAt) || m.at || 0;
+  const base = mails.length ? [...S.msgs, ...mails].sort((a, b) => at(a) - at(b)) : S.msgs;          // emails are shown in time order with the WhatsApp messages
+  const all = [...base, ...S.pending.map((p) => ({ direction: 'out', type: p.attach ? p.kind : 'text', body: p.body, at: p.at, state: 'sending', attach: p.attach, progress: p.progress }))];
   const nodes = [], seen = new Set();
   let lastDay = null;
   for (const m of all) {
@@ -1165,6 +1228,7 @@ function watchContact(id) {
   setDetailsOpen(pref ? pref === 'open' && window.innerWidth >= 900 : window.innerWidth >= 1280, false);
   S.unsubContact = db.collection('contacts').doc(id).onSnapshot((d) => {
     S.contact = d.exists ? d.data() : {};
+    if (window.EMAILBOX) EMAILBOX.sync();                         // the Email button needs their address
     renderDetails(false);
   }, () => {});
 }

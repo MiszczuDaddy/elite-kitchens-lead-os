@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 'use strict';
-// Makes the app icons in public/icons/ from the REAL "E" and "K" letters of the logo (public/brand/elite-kitchens-logo.png), in the Elite OS brand
-// colours: the bone page colour on the accent green (--bg and --accent in public/app.css). Run it again only if the logo or the colours change; the PNGs are committed.
+// Makes the app icons in public/icons/ from the REAL "E" and "K" letters of the logo (public/brand/elite-kitchens-logo.png), on black
+// (bone letters on black: Thomas's choice, the icon the installed app first had). Run it again only if the logo or the colour change; the PNGs are committed.
 //   NODE_PATH="$(npm root -g)" node scripts/make-icons.js        (needs Playwright; set CHROMIUM=<path> if it has no browser of its own)
 // Outputs: icon-192.png and icon-512.png (rounded square, purpose "any"), icon-maskable-512.png (full square, the letters inside the middle 80% that Android may crop to),
 // favicon-32.png and favicon-48.png.
 const fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const ROOT = path.join(__dirname, '..'), OUT = path.join(ROOT, 'public', 'icons');
-const GREEN = '#465c45', BONE = '#f7f7f4';
+const BACK = '#000000', BONE = '#f7f7f4';                  // the icon's background: black (it was brand green #465c45 for a while)
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const logo = fs.readFileSync(path.join(ROOT, 'public', 'brand', 'elite-kitchens-logo.png')).toString('base64');
   const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
   const page = await browser.newPage();
-  const made = await page.evaluate(async ({ logo, GREEN, BONE }) => {
+  const made = await page.evaluate(async ({ logo, BACK, BONE }) => {
     const img = new Image(); img.src = 'data:image/png;base64,' + logo; await img.decode();
     const src = document.createElement('canvas'); src.width = img.width; src.height = img.height; const sx = src.getContext('2d'); sx.drawImage(img, 0, 0);
     const d = sx.getImageData(0, 0, src.width, src.height).data;
@@ -38,7 +38,7 @@ const GREEN = '#465c45', BONE = '#f7f7f4';
     const draw = (size, { rounded, markWidth }) => {                     // markWidth is the share of the icon's width the letters take
       const c = document.createElement('canvas'); c.width = c.height = size; const x = c.getContext('2d');
       x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
-      x.fillStyle = GREEN;
+      x.fillStyle = BACK;
       if (rounded) { x.beginPath(); x.roundRect(0, 0, size, size, size * 0.2); x.fill(); } else x.fillRect(0, 0, size, size);
       const mw = size * markWidth, mh = mw * h / w;
       // draw the letters at 512 first, then scale (a small icon is a high-quality reduction of the big one)
@@ -50,7 +50,7 @@ const GREEN = '#465c45', BONE = '#f7f7f4';
     const any = { rounded: true, markWidth: 0.66 }, maskable = { rounded: false, markWidth: 0.56 };
     const url = (c) => c.toDataURL('image/png');
     return { letters: { E, K, top, bottom }, files: { 'icon-512.png': url(big(any)), 'icon-192.png': url(scaled(any, 192)), 'icon-maskable-512.png': url(big(maskable)), 'favicon-48.png': url(scaled(any, 48)), 'favicon-32.png': url(scaled(any, 32)) } };
-  }, { logo, GREEN, BONE });
+  }, { logo, BACK, BONE });
   for (const [name, dataUrl] of Object.entries(made.files)) fs.writeFileSync(path.join(OUT, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
   console.log('letters (source pixels):', JSON.stringify(made.letters));
   console.log('written to public/icons/:', Object.keys(made.files).join(', '));

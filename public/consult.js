@@ -57,6 +57,6 @@ window.CONSULT = (() => {
     try { await call('aiDismissConsult')({ phone }); } catch (e) { C.error = (e && e.message ? e.message : 'Could not clear this.').replace(/^(functions\/)?[\w-]+:\s*/, '').slice(0, 200); }
     C.busy = false; drawCard();                                              // the card itself goes when the conversation list updates
   }
-  $('consult-filter').onclick = () => { C.filter = !C.filter; $('list').scrollTop = 0; if (window.renderList) renderList(); render(); };
+  $('consult-filter').onclick = () => { C.filter = !C.filter; (typeof listScroller === 'function' ? listScroller() : $('list')).scrollTop = 0; if (window.renderList) renderList(); render(); };
   return Object.assign(C, { start, stop, render, has, count });
 })();

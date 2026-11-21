@@ -68,12 +68,14 @@ exports.sendReply = onCall({ secrets: SECRETS }, (req) => h.sendReply(req.auth, 
 // Needs only the WhatsApp token and its own key (least privilege), and its own secret LEADS_API_KEY (comma-separated keys allow rotation).
 const LEADS_API_KEY = defineSecret('LEADS_API_KEY');
 const leads = require('./lib/leads');
+// 14 Nov 2026: a lead that arrives between midnight and 07:00 Irish time gets its welcome message at 07:00, not at 01:46 (docs/WELCOME_QUIET_HOURS.md). WELCOME_NIGHT_HOLD=off turns the wait off.
+const WELCOME_NIGHT_HOLD = defineString('WELCOME_NIGHT_HOLD', { default: 'on' });
 exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeoutSeconds: 60 }, async (req, res) => {
   try {
     const c = { phoneId: PHONE_ID.value(), template: TEMPLATE.value(), lang: LANG.value(), version: API_VERSION.value(),
       apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), apiKeys: LEADS_API_KEY.value(), onOutcome: waOutcome };
     const r = await leads.handleLeadRequest({ method: req.method, headers: req.headers, rawBody: req.rawBody, body: req.body },
-      { db: getFirestore(), wa: createClient(c), cfg: c, push: pushHook(), health: healthHook() });
+      { db: getFirestore(), wa: createClient(c), cfg: c, push: pushHook(), health: healthHook(), holdAtNight: WELCOME_NIGHT_HOLD.value().trim().toLowerCase() !== 'off' });
     Object.entries(r.headers || {}).forEach(([k, v]) => res.set(k, v));
     res.status(r.status).json(r.body);
   } catch (e) {   // unexpected: 500 makes Make retry, which is safe because processing is idempotent. No lead data in the log.
@@ -89,6 +91,11 @@ exports.leadIntake = onRequest({ secrets: [ACCESS_TOKEN, LEADS_API_KEY], timeout
 // Google Calendar is off unless GCAL_SYNC=on and both ids are set (functions/.env.<project>). Authentication is keyless: the
 // runtime identity gets a short-lived token for GCAL_SERVICE_ACCOUNT, the only account the calendar is shared with for editing.
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+exports.welcomeSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', secrets: [ACCESS_TOKEN], timeoutSeconds: 180, retryCount: 0 }, async () => {       // sends the welcomes held back overnight, from 07:00
+  const c = { phoneId: PHONE_ID.value(), template: TEMPLATE.value(), lang: LANG.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome };
+  try { const r = await require('./lib/welcomeHold').sweep({ db: getFirestore(), wa: createClient(c), cfg: c }); if (r.due || r.stuck) console.log(JSON.stringify({ level: 'info', msg: 'welcome sweep', ...r })); }
+  catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'welcome sweep failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
+});
 const gcalLib = require('./lib/gcal');
 const calendarSync = require('./lib/calendarSync');
 const GCAL_SYNC = defineString('GCAL_SYNC', { default: 'off' });
@@ -193,6 +200,52 @@ function mailChannel() {
   }
   return { enabled, sender, channel: quoteChannelLib.emailChannel({ gmail: gmailClient, enabled, sender, fromName: MAIL_FROM_NAME.value().trim() || 'Elite Kitchens' }) };
 }
+// Follow-up emails to leads who never replied (docs/FOLLOW_UP_EMAIL.md): the same Gmail sign-in as quote emails. FOLLOWUP_SENDER (optional) is a SEPARATE Workspace mailbox to send them from, so the business
+// mailbox's Sent folder stays clean; replies still go to MAIL_SENDER (Reply-To). Empty = send as MAIL_SENDER.
+const FOLLOWUP_SENDER = defineString('FOLLOWUP_SENDER', { default: '' });
+let followUpClient = null, followUpKey = null;
+function followUpMailer() {
+  const main = MAIL_SENDER.value().trim(), sender = FOLLOWUP_SENDER.value().trim() || main, serviceAccount = MAIL_SERVICE_ACCOUNT.value().trim();
+  const testBase = process.env.FUNCTIONS_EMULATOR === 'true' ? process.env.MAIL_API_BASE : undefined;
+  const enabled = MAIL_SEND.value().trim().toLowerCase() === 'on' && !!sender && (!!serviceAccount || !!testBase), key = [sender, serviceAccount, testBase].join('|');
+  if (key !== followUpKey) {
+    const tokens = testBase ? { get: async () => 'emulator-token', clear: () => {} } : gmailLib.delegatedTokenProvider({ serviceAccount, sender });
+    followUpClient = gmailLib.createGmailClient({ apiBase: testBase || undefined, tokens }); followUpKey = key;
+  }
+  return { enabled, sender, replyTo: main || sender, fromName: MAIL_FROM_NAME.value().trim() || 'Elite Kitchens', gmail: followUpClient };
+}
+exports.sendFollowUpEmail = onCall({}, (req) => h.sendFollowUpEmail(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));
+// ---- The email inbox (10 Nov 2026, docs/EMAIL_INBOX.md): customers' replies come into their chat; "Reply by email" answers from the business mailbox. EMAIL_IN is the kill switch (off until switched on).
+// Reading uses its OWN read-only sign-in (gmail.readonly), approved separately in the Workspace admin console; sending never gets it.
+const EMAIL_IN = defineString('EMAIL_IN', { default: 'off' });
+const mailerBase = () => ({ main: MAIL_SENDER.value().trim(), serviceAccount: MAIL_SERVICE_ACCOUNT.value().trim(), testBase: process.env.FUNCTIONS_EMULATOR === 'true' ? process.env.MAIL_API_BASE : undefined });
+let replyClient = null, replyKey = null;
+function replyMailer() {                                                                       // sends AS the business mailbox (the address the customer wrote to), never the follow-up mailbox
+  const { main, serviceAccount, testBase } = mailerBase(), key = [main, serviceAccount, testBase].join('|');
+  const enabled = MAIL_SEND.value().trim().toLowerCase() === 'on' && !!main && (!!serviceAccount || !!testBase);
+  if (key !== replyKey) { replyClient = gmailLib.createGmailClient({ apiBase: testBase || undefined, tokens: testBase ? { get: async () => 'emulator-token', clear: () => {} } : gmailLib.delegatedTokenProvider({ serviceAccount, sender: main }) }); replyKey = key; }
+  return { enabled, sender: main, replyTo: main, fromName: MAIL_FROM_NAME.value().trim() || 'Elite Kitchens', gmail: replyClient };
+}
+let readerClient = null, readerKey = null;
+function inboxReader() {
+  const { main, serviceAccount, testBase } = mailerBase(), key = [main, serviceAccount, testBase].join('|');
+  const enabled = EMAIL_IN.value().trim().toLowerCase() === 'on' && !!main && (!!serviceAccount || !!testBase);
+  if (key !== readerKey) { readerClient = gmailLib.createGmailReader({ apiBase: testBase || undefined, tokens: testBase ? { get: async () => 'emulator-token', clear: () => {} } : gmailLib.delegatedTokenProvider({ serviceAccount, sender: main, scope: gmailLib.GMAIL_READ_SCOPE }) }); readerKey = key; }
+  return { enabled, mailbox: main, reader: readerClient };
+}
+exports.emailSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', timeoutSeconds: 180, retryCount: 0 }, async () => {
+  const inbox = inboxReader(); if (!inbox.enabled) return;
+  try { const r = await require('./lib/emailInbound').sweep({ db: getFirestore(), reader: inbox.reader, mailbox: inbox.mailbox }); console.log(JSON.stringify({ level: 'info', msg: 'email sweep', ...r })); }
+  catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'email sweep failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
+});
+// A follow-up list the owner approved for LATER (21 Nov 2026, lib/aiActions.js sweepScheduled): every five minutes, sends each one whose time has come, never in the Irish night.
+exports.followUpSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Europe/Dublin', timeoutSeconds: 300, retryCount: 0 }, async () => {
+  try { const r = await require('./lib/aiActions').sweepScheduled({ db: getFirestore(), mailer: followUpMailer() }); if (r.due) console.log(JSON.stringify({ level: 'info', msg: 'scheduled follow-ups', ...r })); }
+  catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'scheduled follow-ups failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
+});
+exports.sendEmailReply = onCall({}, (req) => h.sendEmailReply(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: replyMailer() }));
+exports.checkEmail = onCall({ timeoutSeconds: 120 }, (req) => h.checkEmail(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, inbox: inboxReader() }));
+exports.sendQuoteFollowUp = onCall({}, (req) => h.sendQuoteFollowUp(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));          // the same mailbox as the lead follow-ups
 const deliveryDeps = () => {
   const db = getFirestore(), bucket = getStorage().bucket(bucketName());
   const wa = createClient({ phoneId: PHONE_ID.value(), version: API_VERSION.value(), apiBase: process.env.WHATSAPP_API_BASE, token: ACCESS_TOKEN.value().trim(), onOutcome: waOutcome });
@@ -234,7 +287,7 @@ const aiDeps = () => ({ ...quoteDeps(), model: aiModel(), aiOwners: AI_OWNER_EMA
 exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 240 }, (req) => h.aiChat(req.auth, req.data, aiDeps()));
 exports.aiStatus = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.aiStatus(req.auth, req.data, aiDeps()));
 exports.setAiSettings = onCall({ secrets: [ANTHROPIC_API_KEY] }, (req) => h.setAiSettings(req.auth, req.data, aiDeps()));
-exports.aiDecide = onCall({}, (req) => h.aiDecide(req.auth, req.data, quoteDeps()));
+exports.aiDecide = onCall({ timeoutSeconds: 180 }, (req) => h.aiDecide(req.auth, req.data, { ...quoteDeps(), mailer: followUpMailer() }));          // an approved batch of follow-up emails is sent one by one, so it may take a while
 exports.aiSuggestReply = onCall({ secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 120 }, (req) => h.aiSuggestReply(req.auth, req.data, aiDeps()));
 exports.aiDraftOutcome = onCall({}, (req) => h.aiDraftOutcome(req.auth, req.data, quoteDeps()));
 exports.aiDismissConsult = onCall({}, (req) => h.aiDismissConsult(req.auth, req.data, quoteDeps()));
@@ -270,6 +323,7 @@ exports.setDoNotContact = onCall({}, (req) => h.setDoNotContact(req.auth, req.da
 exports.customerDirectory = onCall({ memory: '512MiB', timeoutSeconds: 60 }, (req) => h.customerDirectory(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.saveReminder = onCall({}, (req) => h.saveReminder(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.snoozeQuote = onCall({}, (req) => h.snoozeQuote(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
+exports.dismissReply = onCall({}, (req) => h.dismissReply(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 exports.attentionAction = onCall({}, (req) => h.attentionAction(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() } }));
 // Who gets the alert emails (comma-separated; empty = no alert emails, the phone alerts and the screen still work). They are sent through the quote mailer (MAIL_* settings), so
 // only while email sending is on. A plain setting, not a secret.

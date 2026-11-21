@@ -124,26 +124,26 @@ test('C10, A20: an answer with the visit offer carries ONE greeting (the code\'s
 // ---- recommendation 4: availability is recorded whenever it is given ----
 test('E04, E05: "Can someone come out today?" and "tomorrow at 10?" are recorded with the real date and get the owner\'s "pass your request on" line, not "Good question"', () => {
   const e04 = run({ intent: 'scheduling', visit: 'asked', hasQuestion: true, answerState: 'none', unknown: 'same-day visit availability', handover: { needed: true, reason: 'asks for a same-day visit, needs a person to check availability' }, ...pref({ status: 'available', days: ['tuesday'], text: 'today', weeks: 'this' }) }, { messages: [WELCOME, inn('Can someone come out today?')], name: 'Dermot' });
-  assert.deepEqual([e04.step, e04.sent, e04.handover.needed], ['acknowledge', K.lines.soon, true]); assert.doesNotMatch(e04.sent, /good question/i);
+  assert.deepEqual([e04.step, e04.sent, e04.handover.needed], ['acknowledge', K.lines.soon + '\n' + L.see_our_work, true]); assert.doesNotMatch(e04.sent, /good question/i);
   assert.deepEqual([e04.plan.preference.days, e04.plan.preference.firstDate], [['tuesday'], '2026-10-13'], 'today is Tuesday 13 Oct');
   // the model named the wrong weekday for "today": the day comes from the date, not from the model
   const wrong = run({ intent: 'scheduling', visit: 'asked', hasQuestion: true, answerState: 'none', handover: { needed: true, reason: 'same-day' }, ...pref({ status: 'available', days: ['wednesday'], text: 'today', weeks: 'this' }) }, { messages: [WELCOME, inn('Can someone come out today?')] });
   assert.deepEqual([wrong.step, wrong.plan.preference.days, wrong.plan.preference.firstDate], ['acknowledge', ['tuesday'], '2026-10-13']);
   const e05 = run({ intent: 'wants_consultation', visit: 'asked', hasQuestion: true, answerState: 'none', unknown: 'availability for a visit tomorrow at 10', handover: { needed: true, reason: 'asked for specific visit time tomorrow at 10' }, ...pref({ status: 'available', text: 'tomorrow at 10', times: '10am', weeks: 'this' }) }, { messages: [WELCOME, inn('Could someone call out tomorrow at 10?')], name: 'Sharon' });
-  assert.deepEqual([e05.step, e05.sent], ['acknowledge', K.lines.soon]); assert.deepEqual([e05.plan.preference.days, e05.plan.preference.times, e05.plan.preference.firstDate, e05.plan.preference.customerWords], [['wednesday'], '10am', '2026-10-14', 'tomorrow at 10']);
+  assert.deepEqual([e05.step, e05.sent], ['acknowledge', K.lines.soon + '\n' + L.see_our_work]); assert.deepEqual([e05.plan.preference.days, e05.plan.preference.times, e05.plan.preference.firstDate, e05.plan.preference.customerWords], [['wednesday'], '10am', '2026-10-14', 'tomorrow at 10']);
   assert.match(e05.handover.reason, /preference/); assert.equal(S.PAUSE_STEPS.has(e05.step), true, 'then the owner takes over, with a push');
   // tomorrow on a Sunday is Monday of next week
   const sun = run({ intent: 'scheduling', visit: 'asked', ...pref({ status: 'available', text: 'tomorrow', weeks: 'this' }) }, { messages: [WELCOME, inn('can you come tomorrow?')], nowMs: Date.UTC(2026, 9, 18, 12, 0) });
   assert.deepEqual([sun.plan.preference.days, sun.plan.preference.firstDate], [['monday'], '2026-10-19']);
   // "not today": no day is made up from it
   const notToday = run({ intent: 'scheduling', visit: 'asked', ...pref({ status: 'available', days: ['friday'], text: 'not today, Friday would suit', weeks: 'this' }) }, { messages: [WELCOME, inn('Not today, Friday would suit')] });
-  assert.deepEqual([notToday.step, notToday.sent, notToday.plan.preference.days], ['acknowledge', L.acknowledge, ['friday']]);
+  assert.deepEqual([notToday.step, notToday.sent, notToday.plan.preference.days], ['acknowledge', L.acknowledge + '\n' + L.see_our_work, ['friday']]);
 });
 
 test('E08: "Do you work weekends? I can only do Saturdays" is recorded (Saturday on the booking card) while a person answers the question', () => {
   const e08 = run({ intent: 'asking_info', hasQuestion: true, answerState: 'none', unknown: 'whether we work weekends or can do Saturdays', handover: { needed: true, reason: 'asks if we work weekends / Saturday availability, not in knowledge' }, ...pref({ status: 'available', days: ['saturday'], text: 'I can only do Saturdays' }) }, { messages: [WELCOME, inn('Do you work weekends? I can only do Saturdays')], name: 'Hazel' });
   // the day is acknowledged and the question will be checked (audit repairs 17 Oct 2026, Astra F6 B076: "Good question" alone did not tell them their day was passed on)
-  assert.deepEqual([e08.step, e08.sent, e08.handover.needed], ['acknowledge', L.acknowledge + ' ' + K.lines.partly, true], 'a real question: the day is passed on and the question checked; the preference is kept');
+  assert.deepEqual([e08.step, e08.sent, e08.handover.needed], ['acknowledge', L.acknowledge + ' ' + K.lines.partly + '\n' + L.see_our_work, true], 'a real question: the day is passed on and the question checked; the preference is kept');
   assert.deepEqual(e08.plan.preference.days, ['saturday']); assert.match(e08.handover.reason, /weekends/);
   assert.equal(S.advance(null, e08.step, e08.plan.preference, NOW).needsBooking, true);
   // without a usable day (or for a booked customer) the question is simply held, as before
@@ -173,5 +173,5 @@ test('the two new lines are the owner\'s to edit (Knowledge Centre), pass every 
   const p = (o, messages) => S.plan({ decision: { ...base, ...o, schedule: { opener: '', ...(o.schedule || {}) }, handover: { needed: false, reason: null, ...(o.handover || {}) } }, consult: null, messages, booked: false, nowMs: NOW, natural: true, kn: kn2, who });
   assert.equal(p({ intent: 'greeting', ack: 'hello' }, [WELCOME, inn('Hi')]).reply, 'Hi Leo, thanks for getting back to us. Are you still thinking about a new kitchen?');
   assert.equal(p({ intent: 'greeting', ack: 'thanks' }, [WELCOME, inn('Hi'), out('Hi Leo, thanks for getting back to us. Are you still thinking about a new kitchen?'), inn('yes')]).step, 'offer_visit', 'the edited question is recognised');
-  assert.equal(p({ intent: 'scheduling', visit: 'asked', schedule: { preference: S.cleanPreference({ status: 'available', text: 'tomorrow', weeks: 'this' }) } }, [WELCOME, inn('Can you come tomorrow?')]).reply, 'Thanks, I\'ll let the team know right away.');
+  assert.equal(p({ intent: 'scheduling', visit: 'asked', schedule: { preference: S.cleanPreference({ status: 'available', text: 'tomorrow', weeks: 'this' }) } }, [WELCOME, inn('Can you come tomorrow?')]).reply, 'Thanks, I\'ll let the team know right away.' + '\n' + L.see_our_work);
 });

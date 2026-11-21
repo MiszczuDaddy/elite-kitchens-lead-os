@@ -112,10 +112,10 @@ const web = http.createServer((req, res) => {
   assert.deepEqual([headingAfter.width, headingAfter.height], [headingBefore.width, headingBefore.height], 'the header (the "Inbox" heading) must look exactly the same with the option offered: ' + JSON.stringify([headingBefore, headingAfter]));
   assert.ok(headingAfter.height < 40, 'the heading stays on one line');
   assert.ok(btn.x >= 0 && btn.x + btn.width <= vw && btn.height >= 36, 'the option fits the screen and is easy to tap: ' + JSON.stringify(btn));
-  assert.ok(btn.y > (await page.locator('.pane-caption').boundingBox()).y, 'the option sits below the caption, not among the header buttons');
+  assert.ok(btn.y > headingAfter.y + headingAfter.height, 'the option is in the section buttons under the header, not among the header buttons');
   await page.screenshot({ path: path.join(SHOTS, 'pwa-install-phone.png') });
   await page.tap('#install-app-m'); assert.equal(await page.evaluate(() => window.__prompts), 1); await page.waitForSelector('#install-app-m', { state: 'hidden' });
-  ok('on a phone the option is a small text line under the caption (the header looks exactly the same), asks the browser once, and goes away');
+  ok('on a phone the option is one of the section buttons under the header (the header looks exactly the same), asks the browser once, and goes away');
   await ctx.close();
 
   // ------------------------------------------------------------------ 7. inside the installed app the option never appears

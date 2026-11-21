@@ -1,6 +1,7 @@
 'use strict';
 // Phase 11 (docs/PHASE11_TODAY.md): the only two things the Today tab stores. Everything else on Today is worked out from what Elite OS already knows (public/today-model.js).
 //   reminders/{r_<24 hex>}      the person's own reminder or call-back: { title, phone|null, customerName|null, dueDate 'YYYY-MM-DD', dueTime 'HH:MM'|null, status open|done, doneAt, createdAt, createdBy }
+//   todayMarks/reply_<phone>    "hide this customer's reply alert until they write again" (see dismissReply below)
 //   todayMarks/quote_<quoteId>  "do not show this quote's follow-up until ...": { kind, quoteId, phone, ref, basis (the quote's sent time: a quote sent AGAIN comes back), snoozeUntil, at, by }
 // Both are written only here (staff-only callables); the browser only reads. A reminder id comes from the request id, so pressing Add twice, or a bad connection, makes ONE reminder.
 // Erasing a customer erases their reminders and quote notes (store.deleteCustomerData).
@@ -88,12 +89,17 @@ async function saveReminder({ db }, actor, data, { nowMs = Date.now() } = {}) {
   }
 }
 
-// "Followed up" / "Snooze" on a quote: hide its follow-up until 08:00 Irish time N days ahead (1, 3, 5 or 7). 0 = undo. The note is tied to the quote's sent time, which the SERVER reads
+// "Followed up" on a quote: hide its follow-up until 08:00 Irish time N days ahead (1, 3, 5 or 7). 0 = undo. "Dismiss" ({ id, dismiss: true }, 7 Nov 2026): hide it for good (the note runs to 2100), which still
+// only covers THIS send of the quote: sending it again brings the follow-up back. Undo (days 0) removes either note. The note is tied to the quote's sent time, which the SERVER reads
 // (never the screen), so sending the quote again brings the follow-up back by itself.
+const DISMISSED_UNTIL = Date.UTC(2100, 0, 1);                                                          // a dismissed quote follow-up stays hidden until the quote is sent again
 async function snoozeQuote({ db }, actor, data, { nowMs = Date.now() } = {}) {
-  onlyKeys(data, ['id', 'days']);
+  onlyKeys(data, ['id', 'days', 'dismiss']);
   if (typeof data.id !== 'string' || !QUOTE_ID.test(data.id)) throw bad('Missing quote.');
-  if (data.days !== 0 && !SNOOZE_DAYS.includes(data.days)) throw bad('Choose 1, 3, 5 or 7 days.');
+  const dismiss = data.dismiss === true;
+  if (data.dismiss !== undefined && !dismiss) throw bad('Missing details.');
+  if (dismiss) { if (data.days !== undefined) throw bad('Dismiss takes no number of days.'); }
+  else if (data.days !== 0 && !SNOOZE_DAYS.includes(data.days)) throw bad('Choose 1, 3, 5 or 7 days.');
   const qRef = db.collection('quotes').doc(data.id), mRef = db.collection('todayMarks').doc('quote_' + data.id);
   return db.runTransaction(async (tx) => {
     const q = await tx.get(qRef);
@@ -101,10 +107,30 @@ async function snoozeQuote({ db }, actor, data, { nowMs = Date.now() } = {}) {
     if (!q.exists) throw new HttpsError('not-found', 'That quote is no longer there.');
     const d = q.data();
     if (d.status !== 'sent' || !d.sentAt) throw new HttpsError('failed-precondition', 'Only a quote that was sent and not answered can be followed up.');
-    const [y, m, day] = keyParts(addDays(dateKey(nowMs), data.days)), until = dublinToMs(y, m, day, 8, 0);
-    tx.set(mRef, { kind: 'quote', quoteId: data.id, phone: d.phone || null, ref: d.ref || null, basis: d.sentAt.toMillis(), snoozeUntil: Timestamp.fromMillis(until), at: Timestamp.fromMillis(nowMs), by: actor.id });
+    const [y, m, day] = keyParts(addDays(dateKey(nowMs), dismiss ? 0 : data.days)), until = dismiss ? DISMISSED_UNTIL : dublinToMs(y, m, day, 8, 0);
+    tx.set(mRef, { kind: 'quote', quoteId: data.id, phone: d.phone || null, ref: d.ref || null, basis: d.sentAt.toMillis(), snoozeUntil: Timestamp.fromMillis(until), at: Timestamp.fromMillis(nowMs), by: actor.id, ...(dismiss ? { dismissed: true } : {}) });
     return { ok: true, until };
   });
 }
 
-module.exports = { saveReminder, snoozeQuote, SNOOZE_DAYS, TITLE_MAX, dateKey };
+// "Dismiss" on a "Waiting for your reply" card (the customer only said "Ok perfect", or sent a photo that needs no answer): hide that reply alert until the customer writes AGAIN.
+// The note is tied to the customer's last message time, which the SERVER reads (never the screen), so a newer message from them brings the alert back by itself. { phone, undo? }: undo removes the note.
+// todayMarks/reply_<phone>: { kind: 'reply', phone, basis (their last message time), at, by }. Erasing the customer erases it (it carries their phone, see store.deleteCustomerData).
+async function dismissReply({ db }, actor, data, { nowMs = Date.now() } = {}) {
+  onlyKeys(data, ['phone', 'undo']);
+  const phone = normalizePhone(data.phone);
+  if (!/^\d{9,15}$/.test(phone)) throw bad('Missing customer.');
+  if (data.undo !== undefined && typeof data.undo !== 'boolean') throw bad('Missing details.');
+  const cRef = db.collection('conversations').doc(phone), mRef = db.collection('todayMarks').doc('reply_' + phone);
+  return db.runTransaction(async (tx) => {
+    if (data.undo === true) { tx.delete(mRef); return { ok: true, undone: true }; }
+    const c = await tx.get(cRef);
+    if (!c.exists) throw new HttpsError('not-found', 'That customer is no longer there.');
+    const lastIn = c.data().lastInboundAt;
+    if (!lastIn || typeof lastIn.toMillis !== 'function') throw new HttpsError('failed-precondition', 'This customer has not written to you.');
+    tx.set(mRef, { kind: 'reply', phone, basis: lastIn.toMillis(), at: Timestamp.fromMillis(nowMs), by: actor.id });
+    return { ok: true, basis: lastIn.toMillis() };
+  });
+}
+
+module.exports = { saveReminder, snoozeQuote, dismissReply, SNOOZE_DAYS, TITLE_MAX, dateKey };

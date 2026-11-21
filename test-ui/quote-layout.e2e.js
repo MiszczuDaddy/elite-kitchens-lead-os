@@ -73,6 +73,7 @@ const CAP = 1680;            // the readable maximum width of the quote page (px
   // the edge of a scrolling column (it takes no room of its own), so the test browser does the same.
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/pw-browsers/chromium', ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--enable-features=OverlayScrollbar'] });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctx.addInitScript(() => { navigator.canShare = (d) => !!(d && d.files); navigator.share = async () => {}; });     // a phone: the Share buttons are shown, so the Sent versions row is measured at its widest
   const page = await ctx.newPage(); global.__page = page;
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });

@@ -48,7 +48,7 @@ test('THE FOUR NEW LINES are exactly the owner\'s approved wording, the same in 
   assert.ok(!/straight away|right away|immediately|at once/i.test(L.soon + K.lines.soon));
   // and it is what a customer asking for a visit tomorrow receives, with the same hand-over and push as before
   const r = run({ intent: 'wants_consultation', visit: 'asked', ...pref({ weeks: 'this', text: 'tomorrow' }) }, { messages: [WELCOME, inn('Can someone come out tomorrow?')] });
-  assert.equal(r.sent, approved.soon); assert.equal(r.step, 'acknowledge'); assert.ok(r.handover.needed && r.pause, 'handed to the owner with a push, the receptionist stops');
+  assert.equal(r.sent, approved.soon + '\n' + L.see_our_work); assert.equal(r.step, 'acknowledge'); assert.ok(r.handover.needed && r.pause, 'handed to the owner with a push, the receptionist stops');
   assert.equal(r.plan.preference.firstDate, '2026-10-20', 'the day is on the booking card');
 });
 
@@ -156,16 +156,16 @@ test('ONLY THE VISIT DAY IS OPEN (re-run of 17 Oct 2026, N29): "Could someone co
   const r = run({ intent: 'wants_consultation', visit: 'asked', hasQuestion: true, answerState: 'none', unknown: 'visit availability this Saturday', handover: { needed: true, reason: 'asks for a visit this Saturday, specific date request' }, ...pref({ days: ['saturday'], weeks: 'this', text: 'this Saturday' }) },
     { messages: [WELCOME, inn('Could someone come out this Saturday?')] });
   assert.equal(r.step, 'acknowledge');
-  assert.equal(r.sent, L.acknowledge, r.sent);
+  assert.equal(r.sent, L.acknowledge + '\n' + L.see_our_work, r.sent);
   assert.deepEqual(r.plan.preference.days, ['saturday']); assert.equal(r.plan.preference.firstDate, '2026-10-24');
   assert.ok(r.handover.needed && r.pause, 'handed to the owner with a push, as before');
   // unchanged: a real second question keeps "I'll check the rest" (Astra B076: samples; our E08: weekend working)
   const b076 = run({ intent: 'scheduling', visit: 'agreed', hasQuestion: true, answerState: 'none', unknown: 'whether worktop samples are brought to the visit', handover: { needed: true, reason: 'samples' }, ...pref({ days: ['wednesday'], weeks: 'next', text: 'Wednesday next week suits me' }) },
     { messages: [...ASKED, inn('Wednesday next week suits me. Will you bring worktop samples?')], consult: ASKED_C });
-  assert.equal(b076.sent, L.acknowledge + ' ' + K.lines.partly);
+  assert.equal(b076.sent, L.acknowledge + ' ' + K.lines.partly + '\n' + L.see_our_work);
   const e08 = run({ intent: 'asking_info', hasQuestion: true, answerState: 'none', unknown: 'weekend / Saturday working and visit availability', handover: { needed: true, reason: 'weekends' }, ...pref({ days: ['saturday'], text: 'I can only do Saturdays' }) },
     { messages: [WELCOME, inn('Do you work weekends? I can only do Saturdays')] });
-  assert.equal(e08.sent, L.acknowledge + ' ' + K.lines.partly);
+  assert.equal(e08.sent, L.acknowledge + ' ' + K.lines.partly + '\n' + L.see_our_work);
 });
 
 test('CANCEL WITH NO NEW DATE (Astra F3 A082; ours G12): an explicit "no other date" or "we went with another company" is never asked to move the visit; nothing is said as done; a person takes over', () => {

@@ -176,7 +176,7 @@ window.QuoteDocument = (() => {
     const kt = h('table'); kt.style.width = '100%';
     const k1 = h('td', null, facts); Object.assign(k1.style, { width: '48%', verticalAlign: 'top' });
     const k2 = h('td'); k2.style.width = '4%';
-    const k3 = h('td', 'soft about', `${w.made} rather than assembled from stock sizes, with panels and gables finished to match the doors you choose. Hinges and runners are Blum throughout, soft-close as standard.`);
+    const k3 = h('td', 'soft about', `${w.made} rather than assembled from stock sizes, with panels and gables finished to match the doors you choose. Blum soft-close hinges and soft-close drawer runners as standard.`);
     Object.assign(k3.style, { width: '48%', verticalAlign: 'top' });
     kt.append(h('tbody', null, h('tr', null, k1, k2, k3)));
     blk('', h('div', 'rule-ink'), h('div', 'sec-h', w.heading), kt);

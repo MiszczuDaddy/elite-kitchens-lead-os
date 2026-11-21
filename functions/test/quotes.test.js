@@ -571,6 +571,27 @@ test('PDF link: the stored file of a sent version only; a draft has none; a tamp
   await rejects(h.quotePdfUrl(staff, { id, version: 1 }, deps), 'permission-denied');
 });
 
+test('PDF link for Share PDF: bytes:true returns the verified file under its proper name; without it nothing extra; a very large file gets the link only', async () => {
+  await seed(); await setup();
+  const id = await sent(), ref = (await quote(id)).ref;
+  const plain = await h.quotePdfUrl(staff, { id, version: 1 }, deps);
+  assert.equal('base64' in plain, false, 'no file inside the answer unless asked for');
+  const shared = await h.quotePdfUrl(staff, { id, version: 1, bytes: true }, deps);
+  assert.equal(shared.filename, `EliteKitchens-${ref}-v1.pdf`, 'the name the phone will show in WhatsApp');
+  assert.ok(Buffer.from(shared.base64, 'base64').equals(PDF), 'the file returned is the stored PDF, byte for byte');
+  assert.equal(shared.size, PDF.length);
+  await rejects(h.quotePdfUrl(staff, { id, version: 1, bytes: 'yes' }, deps), 'invalid-argument', /Bytes must be yes or no/);
+  await rejects(h.quotePdfUrl(staff, { id: 'q_000000000000000000000000', version: 1, bytes: true }, deps), 'not-found');
+  // a file over the limit: still verified and still linked, but not returned inside the answer (the page then opens the link instead)
+  const vref = db.doc(`quotes/${id}/versions/1`), pdf = (await vref.get()).data().pdf;
+  const big = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(6 * 1024 * 1024 + 10, 0x20), Buffer.from('\n%%EOF')]);
+  await bucket.file(pdf.path).save(big, { contentType: 'application/pdf' });
+  await vref.update({ 'pdf.size': big.length, 'pdf.sha256': crypto.createHash('sha256').update(big).digest('hex') });
+  const huge = await h.quotePdfUrl(staff, { id, version: 1, bytes: true }, deps);
+  assert.equal('base64' in huge, false);
+  assert.ok(huge.url && huge.filename === `EliteKitchens-${ref}-v1.pdf`);
+});
+
 // ================================================ several quotes, one customer ============================================
 test('a customer can have several quotes: the rules apply per customer, whichever quote is sent or accepted', async () => {
   await seed(); await setup();

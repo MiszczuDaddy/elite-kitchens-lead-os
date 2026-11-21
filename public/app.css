@@ -72,7 +72,14 @@ h1, h2, p { overflow-wrap: anywhere; }
 .new-conversation { border: 1px solid var(--line); width: 36px; min-height: 36px; }
 .count { vertical-align: middle; margin-left: 5px; font-size: 12px; font-weight: 600; background: var(--selected); color: var(--accent); padding: 2px 7px; border-radius: 4px; letter-spacing: 0; }
 .pane-caption { color: var(--muted); font-size: 13px; margin: 4px 22px 10px; }
-.install-m { margin: -6px 10px 6px; min-height: 40px; font-weight: 500; }                /* phones only (.only-mobile), and only while the browser offers installation (Phase 6.2) */
+/* Phone section buttons: every section the desktop rail has, as one grid of identical icon + word buttons (phones only). Notifications and Install appear only when the browser offers them. */
+.phone-nav { display: none; }
+.pn-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; min-height: 64px; padding: 8px 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); font: inherit; font-size: 12px; font-weight: 550; line-height: 1.2; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.pn-btn:hover { background: var(--hover); }
+.pn-btn svg { flex: none; color: var(--accent); }
+.pn-btn span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-btn.is-on svg { color: #3f6a3a; }
+.list-sticky { display: contents; }                      /* desktop: the wrapper changes nothing. On a phone it keeps the filters and search in view while the rest slides away (below) */
 
 /* ---- Projects (Phase 7, docs/PROJECTS.md): the dashboard and one project reuse the Quotes screen's header, scroll area, filters, list rows and chips ---- */
 .projects-pane { display: none; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg); }
@@ -187,6 +194,8 @@ h1, h2, p { overflow-wrap: anywhere; }
 .conv-sub { color: var(--muted); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-prev { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
 .conv-prev .t { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-call { flex: none; align-self: center; min-width: 54px; min-height: 40px; display: none; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--accent); font-size: 14px; font-weight: 600; text-decoration: none; }      /* the No reply tab: tap to ring the lead */
+.conv-call:hover { background: var(--hover); }
 .conv.unread .conv-name { font-weight: 700; }
 .conv.unread .conv-prev .t { color: var(--ink); font-weight: 550; }
 .conv.unread .conv-time { color: var(--accent); }
@@ -213,7 +222,7 @@ h1, h2, p { overflow-wrap: anywhere; }
 .m.out { align-self: flex-end; background: var(--out); color: var(--out-ink); border-bottom-right-radius: 2px; }
 .m .meta { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 5px; font-size: 11px; color: #596a78; font-variant-numeric: tabular-nums; }
 .tick { white-space: nowrap; }
-.tick.read { color: var(--ok); }
+.tick.read { color: #7a2fc0; font-size: 19px; font-weight: 700; line-height: 1; letter-spacing: -.06em; }          /* the customer READ it: purple and large, so it cannot be missed (it was a small teal tick) */
 .m.failed { outline: 1px solid var(--err); }
 .m .err { color: var(--err); font-size: 13px; margin-top: 4px; }
 .composer { display: flex; align-items: flex-end; gap: 9px; background: var(--panel); border-top: 1px solid var(--line); padding: 14px 18px max(14px,env(safe-area-inset-bottom)); }
@@ -357,6 +366,14 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 @media (max-width: 899px) {
   .app { grid-template-columns: minmax(0,1fr); }.rail { display: none; }
   .only-mobile { display: inline-flex; }
+  .phone-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 16px 14px; }
+  .conv-call { display: inline-flex; }                    /* the Call button of the No reply tab is for phones only */
+  /* On a phone the whole inbox scrolls as one: the Today card and the section buttons slide up out of the way, and the filters and search stay at the top. */
+  .list-pane { overflow-y: auto; overscroll-behavior-y: contain; }
+  .list { flex: none; overflow: visible; padding-top: 8px; }
+  .list-sticky { display: flex; flex-direction: column; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 3; background: var(--panel); box-shadow: 0 1px 0 var(--line); }
+  .list-sticky .search { margin-bottom: 10px; }
+  .list-note { margin-top: 0; }
   .app[data-view=list] .thread-pane, .app[data-view=thread] .list-pane { display: none; }
   .pane-head { padding: max(20px,env(safe-area-inset-top)) 20px 0; }
   .pane-caption { margin: 5px 20px 10px; }
@@ -422,7 +439,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 [data-stage=booked], [data-status=booked] { --st: var(--st-booked); --st-rgb: var(--st-booked-rgb); --tint: .055; --tint-drag: .12; }
 [data-stage=quoted], [data-status=quoted] { --st: var(--st-quoted); --st-rgb: var(--st-quoted-rgb); --tint: .05; --tint-drag: .11; }
 [data-stage=won], [data-status=won] { --st: var(--st-won); --st-rgb: var(--st-won-rgb); --tint: .055; --tint-drag: .12; }
-[data-stage=closed], [data-status=closed] { --st: var(--st-closed); --st-rgb: var(--st-closed-rgb); --tint: .055; --tint-drag: .12; }
+[data-stage=closed], [data-status=closed], [data-status=noreply] { --st: var(--st-closed); --st-rgb: var(--st-closed-rgb); --tint: .055; --tint-drag: .12; }
 [data-status=all] { --st: var(--muted); --st-rgb: 98 105 112; --tint: .05; --tint-drag: .11; }
 .lane { position: relative; isolation: isolate; min-width: 0; min-height: 280px; padding-top: 16px; }
 .lane::before { content: ''; position: absolute; inset: 6px -6px 0; border-radius: 8px; background: rgb(var(--st-rgb) / var(--tint)); z-index: -1; transition: background-color 120ms ease-out; }
@@ -448,6 +465,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .prow-top { display: flex; align-items: center; gap: 7px; }
 .prow-name { font-size: 15px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prow-sub { font-size: 13px; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow-time { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 2px; overflow-wrap: anywhere; }          /* the lead's chosen time to be contacted: kept readable, never cut off */
 .prow-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 4px; font-size: 13px; color: var(--muted); }
 .prow-meta .pv { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .prow-meta .pv.none { color: #8a6d1f; font-weight: 400; }
@@ -1049,7 +1067,7 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .as-meter[data-level=full] span { background: var(--err); }
 .as-notice { margin: 12px 28px 0; padding: 10px 12px; border-radius: 6px; font-size: 13px; background: var(--selected); color: var(--ink); }
 .as-notice[data-level=warn] { background: #f6eedd; }
-.as-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 28px 8px; }
+.as-scroll { flex: 1 1 0; min-height: 60px; overflow-y: auto; padding: 18px 28px 8px; }          /* the chat takes what the approval box leaves, and always keeps a little */
 .as-empty { max-width: 640px; margin: 8vh auto 0; color: var(--muted); text-align: center; }
 .as-suggest { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; }
 .as-suggest button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 16px; padding: 7px 13px; font-size: 13px; cursor: pointer; min-height: 36px; }
@@ -1079,10 +1097,10 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .as-retry:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
 .as-models { margin: 4px 0 10px; } .as-models-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .as-models-list { list-style: none; margin: 0 0 6px; padding: 0; font-size: 13px; } .as-models-list li { padding: 3px 0; } .as-models-list .bad { color: var(--err); } .as-models-list .good { color: var(--ok); }
-.as-tray { max-width: 876px; width: 100%; margin: 0 auto; box-sizing: border-box; padding: 10px 28px 0; max-height: 42vh; overflow-y: auto; border-top: 1px solid var(--line); background: var(--bg); }
+.as-tray { max-width: 876px; width: 100%; margin: 0 auto; box-sizing: border-box; padding: 10px 28px 0; max-height: 78vh; overflow-y: auto; border-top: 1px solid var(--line); background: var(--bg); }          /* room for the whole list and the whole email (it was 42vh: too small to read an email without scrolling inside it) */
 .as-tray-head { font-size: 12px; font-weight: 650; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; }
 .as-tray .as-card { max-width: none; margin-bottom: 8px; }
-@media (max-width: 899px) { .as-tray { padding: 8px 14px 0; } }
+@media (max-width: 899px) { .as-tray { padding: 8px 14px 0; max-height: 78vh; } .as-scroll { min-height: 40px; } .assistant-pane:has(#as-tray:not([hidden])) .q-subtitle { display: none; } }          /* a phone: while something waits for your approval the box gets the room (the chat and the page's small print step aside) */
 .reply-panel { margin: 0 14px 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 13.5px; max-height: 46vh; overflow-y: auto; }
 .reply-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; } .reply-head .reply-x { margin-left: auto; width: 32px; height: 32px; font-size: 20px; }
 .reply-state { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: var(--hover); }
@@ -1114,6 +1132,9 @@ legend { font-size: 13px; font-weight: 650; padding: 0; margin-bottom: 12px; }
 .as-card-foot { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
 .as-card-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; } .as-card-exp { font-size: 12px; color: var(--muted); }
 .as-card-state { margin-top: 10px; font-size: 13px; font-weight: 600; } .as-card[data-state=applied] .as-card-state { color: var(--ok); } .as-card[data-state=stale] .as-card-state, .as-card[data-state=failed] .as-card-state, .as-card[data-state=partial] .as-card-state { color: var(--err); }
+.as-card-list { font-size: 13px; margin: 2px 0 0; padding: 0 0 0 18px; max-height: clamp(96px, 13vh, 400px); overflow: auto; overflow-wrap: anywhere; } .as-card-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; background: #f4f1ea; border-radius: 4px; padding: 6px 8px; margin-top: 2px; }          /* the email is never scrolled inside its own little box: the whole text is shown */
+.as-tray .as-card-actions { position: sticky; bottom: 0; z-index: 1; background: var(--panel); margin-top: 6px; padding: 8px 0 2px; }          /* a tall card (the follow-up emails) scrolls inside the tray, but Approve and Reject stay on screen */
+@media (max-width: 899px) { .as-card-list { max-height: clamp(72px, 12vh, 200px); } }
 .as-card-res { font-size: 12px; margin: 4px 0 0; padding: 0; list-style: none; } .as-card-res .bad { color: var(--err); }
 .as-actions { margin: 6px 0 10px; } .as-kinds { margin-left: 4px; }
 @media (max-width: 899px) { .as-card { max-width: 96%; } }
@@ -1310,3 +1331,88 @@ div.td-open { cursor: default; }
 .list-note { margin: -8px 18px 10px; font-size: 12.5px; color: var(--muted); }
 .list-more { display: block; width: calc(100% - 24px); min-height: 44px; margin: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
 .list-more:hover { background: var(--hover); }
+/* small phones (360 wide): a little less spacing so "Notifications" still fits in its button */
+@media (max-width: 374px) { .phone-nav { gap: 6px; margin-left: 12px; margin-right: 12px; } .pn-btn { padding: 8px 0; font-size: 11px; } }
+/* phones: the note under the search ("2 leads have never replied") starts right below the pinned filters; it must come after the base .list-note rule above to win */
+@media (max-width: 899px) { .list-note { margin-top: 0; } }
+/* the ⭐ beside a customer who wants the kitchen as soon as possible (Inbox, Today, Pipeline) */
+.asap-star { flex: none; margin-left: 5px; font-size: 13px; line-height: 1; cursor: default; }
+.conv-top .asap-star { margin: 0 auto 0 5px; }
+/* follow-up emails in the No reply tab */
+.conv-mail { flex: none; align-self: center; min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--accent); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.conv-mail:hover { background: var(--hover); }
+.nr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 18px 10px; }
+#nr-email-all { white-space: nowrap; }
+.nr-bar-t { color: var(--muted); font-size: 12.5px; }
+.fu-batch { max-height: 140px; overflow-y: auto; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--muted); }
+#fu-body { min-height: 230px; }
+
+/* the email inbox (docs/EMAIL_INBOX.md): an email inside the chat, and the reply box */
+.m.em { max-width: min(78%, 560px); }
+.m.em .em-head { font-size: 12px; font-weight: 650; opacity: .8; margin-bottom: 4px; overflow-wrap: anywhere; }
+.m.em .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.m.em .em-att { display: block; font-size: 12px; margin-top: 6px; overflow-wrap: anywhere; }
+.em-last { background: #f4f1ea; border-radius: 6px; padding: 8px 10px; margin: 0 0 10px; max-height: 150px; overflow: auto; }
+.em-last-h { font-size: 12px; font-weight: 650; color: var(--muted); margin-bottom: 3px; overflow-wrap: anywhere; } .em-last-b { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#em-dlg .dlg-actions .em-check { margin-right: auto; }
+@media (max-width: 899px) { .m.em { max-width: 92%; } }
+.m.em .em-reply { margin-top: 8px; min-height: 36px; }
+@media (max-width: 899px) { .m.em .em-reply { min-height: 44px; width: 100%; } }
+
+.email-hd { flex: none; } .email-hd.em-hot { color: var(--accent); }
+
+/* The Emails page (docs/EMAIL_LIST.md): the list of every email in and out on the left, the chosen email on the right; on a phone one at a time. */
+.emails-pane { display: none; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg); }
+.app[data-view=emails] { grid-template-columns: 196px minmax(0,1fr); }
+.app[data-view=emails] .list-pane, .app[data-view=emails] .thread-pane, .app[data-view=emails] .details-pane { display: none !important; }
+.app[data-view=emails] .emails-pane { display: flex; }
+@media (min-width: 1280px) and (max-width: 1439px) { .app[data-view=emails] { grid-template-columns: 176px minmax(0,1fr); } }
+@media (min-width: 900px) and (max-width: 1279px) { .app[data-view=emails] { grid-template-columns: 68px minmax(0,1fr); } }
+@media (max-width: 899px) { .app[data-view=emails] { grid-template-columns: minmax(0,1fr); } }
+.emails-pane .quotes-head .quotes-titles { flex: 1 1 200px; }
+.emp-tools { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 12px 28px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.emp-search { flex: 1 1 280px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
+.emp-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.ea-chip { min-height: 38px; padding: 6px 16px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+.ea-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.emp-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 440px) minmax(0, 1fr); }
+.emp-listcol { min-height: 0; overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); }
+.emp-note { margin: 0; padding: 12px 16px 0; }
+.ea-list { list-style: none; margin: 0; padding: 0; }
+.ea-row { border-bottom: 1px solid var(--line); }
+.ea-open { display: block; width: 100%; min-height: 56px; padding: 10px 16px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.ea-open:hover { background: var(--hover); } .ea-open[aria-current="true"] { background: var(--selected); }
+.ea-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.ea-name { font-weight: 650; overflow-wrap: anywhere; } .ea-when { flex: none; font-size: 12.5px; color: var(--muted); }
+.ea-sub { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin: 2px 0; font-size: 12.5px; }
+.ea-kind { font-weight: 600; } .ea-in { color: var(--ok); } .ea-out { color: var(--accent); }
+.ea-warn { padding: 0 7px; border-radius: 9px; background: #f8e3e1; color: var(--err); font-weight: 600; } .ea-ref { color: var(--muted); }
+.ea-subject { font-weight: 600; overflow-wrap: anywhere; } .ea-snip { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emp-more { padding: 12px 16px 20px; }
+.emp-readcol { min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
+.emp-empty { color: var(--muted); padding: 40px 0; text-align: center; }
+.emp-tolist { display: none; margin-bottom: 12px; }
+.emp-d-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.emp-d-name { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.emp-d-subject { margin: 12px 0 8px; font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
+.emp-d-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 14px; margin: 0 0 14px; font-size: 13.5px; }
+.emp-d-meta dt { color: var(--muted); } .emp-d-meta dd { margin: 0; overflow-wrap: anywhere; }
+.emp-d-warn { margin: 0 0 14px; padding: 9px 12px; border-radius: 8px; background: #f8e3e1; color: #7a1f1b; font-size: 13.5px; }
+.emp-d-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+@media (max-width: 899px) {
+  .emp-tools { padding: 10px 12px; } .emp-cols { grid-template-columns: minmax(0, 1fr); } .emp-listcol { border-right: 0; } .emp-readcol { padding: 14px 14px 28px; }
+  .emails-pane[data-sub=list] .emp-readcol, .emails-pane[data-sub=read] .emp-listcol { display: none; }
+  .emails-pane[data-sub=read] .emp-tools { display: none; }                                    /* reading an email: the search and filters are for the list */
+  .emp-tolist { display: inline-flex; min-height: 44px; } .ea-chip { min-height: 44px; } .emp-search { min-height: 44px; font-size: 16px; }
+  .emails-pane .quotes-head { padding: max(14px,env(safe-area-inset-top)) 12px 12px; gap: 6px; }
+}
+
+/* The Assistant's follow-up list: tick boxes with how long it has been, and "when to send" (21 Nov 2026). */
+.as-pick-tools { display: flex; gap: 14px; margin: 2px 0 4px; }
+.as-pick-list { max-height: clamp(140px, 24vh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; background: var(--bg); }
+.as-pick-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; padding: 6px 0; min-height: 34px; font-size: 13.5px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.as-pick-row:last-child { border-bottom: 0; } .as-pick-row input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
+.as-pick-text { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; } .as-pick-note { flex: none; padding: 0 8px; border-radius: 9px; background: #f8efdc; color: #5f3f08; font-size: 12px; font-weight: 600; }
+.as-when { margin: 10px 0 0; } .as-when-row { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 13.5px; cursor: pointer; } .as-when-row input { width: 18px; height: 18px; accent-color: var(--accent); }
+.as-when-time { margin: 2px 0 4px 26px; min-height: 38px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+@media (max-width: 899px) { .as-pick-row { min-height: 44px; align-items: center; } .as-when-row { min-height: 44px; } .as-pick-list { max-height: clamp(110px, 20vh, 260px); } .as-when-time { font-size: 16px; min-height: 44px; } }

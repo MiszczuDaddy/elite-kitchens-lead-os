@@ -122,6 +122,20 @@ test('QUOTE SNOOZE: hides only THIS send of the quote, only until the date; a re
   assert.deepEqual(r.doneToday.map((d) => [d.kind, d.id]), [['quote', 'q_a']], 'shown under "Done today", where it can be undone');
 });
 
+test('REPLY DISMISS: hides "Waiting for your reply" for that message only, in the card list AND in New Leads Today; a newer message, an older note, or another customer\'s note leaves it showing; listed under Done today', () => {
+  const c = chat(P1, { lastMessage: 'Ok perfect', lastInboundAt: ts(NOW - 2 * HOUR) }), at = c.lastInboundAt.toMillis(), mark = (over) => ({ ['reply|' + P1]: { basis: at, at: ts(NOW - HOUR), ...over } });
+  assert.equal(build({ convs: [c] }).cards.length, 1, 'listed');
+  assert.equal(build({ convs: [c], marks: mark() }).cards.length, 0, 'dismissed');
+  assert.equal(build({ convs: [c], marks: mark({ basis: at - 1 }) }).cards.length, 1, 'they wrote since the note: back');
+  assert.equal(build({ convs: [c], marks: { ['reply|' + P2]: { basis: at } } }).cards.length, 1, 'another customer\'s note does not hide this one');
+  assert.deepEqual(build({ convs: [c], marks: mark() }).doneToday.map((d) => [d.kind, d.id]), [['reply', P1]], 'shown under Done today, where it can be undone');
+  assert.equal(build({ convs: [c], marks: mark({ at: ts(NOW - 2 * DAY) }) }).doneToday.length, 0, 'only today\'s dismissals are listed');
+  assert.equal(build({ convs: [chat(P1, { lastInboundAt: ts(at + 5 * MIN), lastMessage: 'Hello?' })], marks: mark() }).doneToday.length, 0, 'a dismissal the customer has since overtaken is not listed');
+  const fresh = chat(P3, { createdAt: ts(NOW - HOUR), lastMessage: 'Ok perfect', lastInboundAt: ts(NOW - 30 * MIN) });
+  const nl = (marks) => build({ convs: [fresh], contactsToday: [ct(P3, 'L3')], ledger: { L3: { welcome: { state: 'sent' } } }, marks }).newLeads.items[0];
+  assert.equal(nl({}).status, 'needs'); assert.equal(nl({ ['reply|' + P3]: { basis: fresh.lastInboundAt.toMillis(), at: ts(NOW) } }).status, 'contacted', 'a dismissed reply is not "needs you" in New Leads Today either');
+});
+
 // ================================================================ reminders =============================================
 const rem = (id, dueDate, over = {}) => ({ id, title: 'Ring Mr Doyle', phone: P4, customerName: 'Mr Doyle', dueDate, dueTime: null, status: 'open', ...over });
 test('REMINDERS: due today is normal; overdue is red when it was an earlier day', () => {

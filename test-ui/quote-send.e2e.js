@@ -165,6 +165,13 @@ function savePages(buf, prefix) {
   const wlog = await page.evaluate(() => { const l = window.__w.slice(); window.open = window.__keep; return l; });
   assert.ok(wlog[0].startsWith('write:') && wlog.at(-1).startsWith('blob:'), 'the new tab is opened at once with a waiting note, then pointed at the PDF: ' + JSON.stringify(wlog));
   for (const p of page.context().pages()) if (p !== page) await p.close().catch(() => {});
+  // A phone's share sheet, stubbed: it records the file it was given (the name WhatsApp would show, the type and every byte) or fails with the error named in window.__deny.
+  assert.equal(await page.evaluate(() => typeof navigator.canShare === 'function' && navigator.canShare({ files: [new File(['x'], 'a.pdf', { type: 'application/pdf' })] })), false, 'desktop test browser: no share sheet, so no Share buttons');
+  await page.evaluate(() => {
+    window.__shared = []; window.__deny = null;
+    navigator.canShare = (d) => !!(d && d.files && d.files.length);
+    navigator.share = async (d) => { if (window.__deny) { const n = window.__deny; window.__deny = null; throw new DOMException('no', n); } const f = d.files[0]; window.__shared.push({ name: f.name, type: f.type, bytes: Array.from(new Uint8Array(await f.arrayBuffer())) }); };
+  });
   await page.click('#qsend-go');
   await page.waitForSelector('#qsend-done:not([hidden])', { timeout: 60000 });
   assert.match(await page.textContent('#qsend-done-text'), /EK-0034 v1 is marked sent[\s\S]*Anna Murphy moved from New lead to Quoted/);
@@ -184,6 +191,17 @@ function savePages(buf, prefix) {
   assert.deepEqual(v1.customer, { name: 'Anna Murphy', email: 'anna@example.com', address: '12 Main Street, Swords, K67 AB12', phone: ph.anna });
   assert.equal(graph.length, 0, 'nothing went to WhatsApp');
   ok(`Preview PDF in the Send box (with the render) sent and stored nothing; Send makes the PDF (${pagesOf(stored)} pages, with the render), stores it, and the file offered for download is byte-for-byte the stored copy; New lead -> Quoted, value set to the dearest option`);
+
+  // ---- Share PDF in the Send box: the phone's share sheet gets the file, named properly ----
+  assert.equal(await page.isVisible('#qsend-share'), true);
+  await page.click('#qsend-share');
+  await page.waitForFunction(() => window.__shared.length === 1);
+  const s1 = await page.evaluate(() => window.__shared[0]);
+  assert.equal(s1.name, 'EliteKitchens-EK-0034-v1.pdf'); assert.equal(s1.type, 'application/pdf');
+  assert.ok(Buffer.from(s1.bytes).equals(stored), 'the shared file is the very PDF that was made and stored');
+  await page.evaluate(() => { window.__deny = 'AbortError'; }); await page.click('#qsend-share'); await sleep(300);
+  assert.equal((await page.evaluate(() => window.__shared.length)), 1, 'closing the share sheet shares nothing'); assert.equal(await page.textContent('#qsend-done-err'), '', '... and is not an error');
+  ok('Share PDF in the Send box hands the share sheet the PDF as a file named EliteKitchens-EK-0034-v1.pdf (the exact stored bytes); closing the sheet is quiet');
 
   // ---- the email draft ----
   await page.click('#qsend-email');
@@ -206,6 +224,24 @@ function savePages(buf, prefix) {
   assert.ok(link.startsWith('data:application/pdf;base64,'), 'the emulator answers with the file itself');
   assert.ok(Buffer.from(link.split(',')[1], 'base64').equals(stored));
   ok('a sent version\'s PDF opens from the quote (the stored file)');
+
+  // ---- Share from the quote's Sent versions row: the file comes from the stored copy, with its proper name ----
+  await page.click('#q-quote-view .qv-versions button[data-share="1"]');
+  await page.waitForFunction(() => window.__shared.length === 2, null, { timeout: 30000 });
+  const s2 = await page.evaluate(() => window.__shared[1]);
+  assert.equal(s2.name, 'EliteKitchens-EK-0034-v1.pdf'); assert.equal(s2.type, 'application/pdf'); assert.ok(Buffer.from(s2.bytes).equals(stored), 'the stored PDF, byte for byte');
+  // the phone can refuse a share that starts after a slow fetch (the tap is used up): the file is kept and the next tap shares at once
+  await page.evaluate(() => { window.__deny = 'NotAllowedError'; }); await page.click('#q-quote-view .qv-versions button[data-share="1"]');
+  await page.waitForFunction(() => /Tap Share again/.test(document.getElementById('q-toast').textContent));
+  assert.equal(await page.evaluate(() => window.__shared.length), 2);
+  await page.click('#q-quote-view .qv-versions button[data-share="1"]'); await page.waitForFunction(() => window.__shared.length === 3);
+  assert.ok(Buffer.from((await page.evaluate(() => window.__shared[2])).bytes).equals(stored));
+  // a browser that cannot share this file still gives the PDF, with the right name
+  await page.evaluate(() => { window.__deny = 'TypeError'; });
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#q-quote-view .qv-versions button[data-share="1"]')]);
+  assert.equal(dl.suggestedFilename(), 'EliteKitchens-EK-0034-v1.pdf');
+  await page.waitForFunction(() => /downloaded as EliteKitchens-EK-0034-v1\.pdf/.test(document.getElementById('q-toast').textContent));
+  ok('Share on a sent version fetches the stored PDF and shares it under its proper name; a refused tap says "Tap Share again" and then shares; with no sharing it downloads the right name');
 
   // ---- send again on an expired quote: a new version, same prices, new dates; the stage stays Quoted ----
   await db.doc('quotes/' + q.id).update({ validUntil: '2026-01-31', 'sent.validUntil': '2026-01-31' });

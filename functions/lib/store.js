@@ -3,6 +3,8 @@
 //   conversations/{phone}                 (one per contact; doc id = phone digits)
 //   conversations/{phone}/messages/{id}   (id = WhatsApp message id when known -> free, atomic dedup)
 const { Timestamp, FieldValue } = require('firebase-admin/firestore');
+const Asap = require('./asap');
+const ContactTime = require('./contactTime');
 
 const RANK = { failed: 0, sent: 1, delivered: 2, read: 3 };
 const preview = (s) => String(s || '').slice(0, 120);
@@ -151,6 +153,8 @@ async function updateContact(db, phone, fields) {
     tx.set(contactRef, { phone, ...fields, updatedAt: now }, { merge: true });
     const denorm = {};
     for (const k of ['name', 'location', 'projectType']) if (k in fields) denorm[k] = fields[k];
+    if ('notes' in fields) denorm.asap = Asap.fromNotes(fields.notes);          // the ⭐ follows the Notes: removing the lead's answer from them takes it away
+    if ('notes' in fields) denorm.contactTime = ContactTime.fromNotes(fields.notes);          // so does the "best time to contact" on the Pipeline's New lead card
     if (Object.keys(denorm).length) tx.set(convRef, denorm, { merge: true });   // does not touch updatedAt: no inbox reorder
     return true;
   });
@@ -195,7 +199,7 @@ async function deleteCustomerData(db, bucket, phone) {
   let aiProposals = 0;
   for (const d of await proposalDocs()) { await d.ref.delete(); aiProposals++; }
   for (const d of (await db.collection('aiDrafts').where('phone', '==', phone).get()).docs) await d.ref.delete();       // R1: records of suggested replies (no words, but they hold the number)
-  for (const c of ['reminders', 'todayMarks', 'bookingNotices']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();       // Phase 11: their reminders and quote follow-up notes
+  for (const c of ['reminders', 'todayMarks', 'bookingNotices', 'emailLog']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();       // Phase 11: their reminders and quote follow-up notes; the list of their emails
   const appts = await db.collection('appointments').where('phone', '==', phone).get();
   for (let i = 0; i < appts.size; i += 400) { const b = db.batch(); appts.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref)); await b.commit(); }
   const quoteDocs = async () => (await db.collection('quotes').where('phone', '==', phone).get()).docs;
@@ -208,7 +212,7 @@ async function deleteCustomerData(db, bucket, phone) {
   for (const d of await pushDocs()) { await d.ref.delete(); pushEvents++; }               // a message that arrived while this ran
   for (const d of await proposalDocs()) { await d.ref.delete(); aiProposals++; }          // a proposal made while this ran
   for (const d of (await db.collection('aiDrafts').where('phone', '==', phone).get()).docs) await d.ref.delete();
-  for (const c of ['reminders', 'todayMarks', 'bookingNotices']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();         // one added while this ran
+  for (const c of ['reminders', 'todayMarks', 'bookingNotices', 'emailLog']) for (const d of (await db.collection(c).where('phone', '==', phone).get()).docs) await d.ref.delete();         // one added while this ran
   const late =(await bucket.getFiles({ prefix }))[0].length;
   if (late) { files += late; await bucket.deleteFiles({ prefix, force: true }); }
   const lateQuoteFiles = (await bucket.getFiles({ prefix: quotePrefix }))[0].length;
