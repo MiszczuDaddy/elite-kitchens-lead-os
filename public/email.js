@@ -83,7 +83,7 @@ window.EMAILBOX = (() => {
 // chat records; a quote email's wording is not kept). Live while the page is open; nothing is written from here.
 window.EMAILS = (() => {
   const L = { active: false, unsub: null, items: [], filter: 'all', query: '', limit: 300, loaded: false, error: null, sel: null };
-  const T = { phone: null, unsub: null, items: [], bodies: {}, loading: false, failed: false, stick: true, seq: 0 };
+  const T = { phone: null, unsub: null, items: [], bodies: {}, loading: false, failed: false, stick: true, seq: 0, attMsg: {} };
   const MAX = 1500, BASE = ['nav-inbox', 'nav-pipeline', 'nav-appointments', 'nav-quotes', 'nav-projects', 'nav-assistant'];
   const KIND = { customer: 'Received', reply: 'Sent · your reply', followup: 'Sent · follow-up', quotefollowup: 'Sent · quote follow-up', quote: 'Sent · quote', gmail: 'Sent · from Gmail', assistant: 'Sent · written by the Assistant' };
   const DAY_F = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Dublin' }), TIME_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), DATE_F = new Intl.DateTimeFormat('en-IE', { timeZone: 'Europe/Dublin', day: 'numeric', month: 'short' });
@@ -135,6 +135,30 @@ window.EMAILS = (() => {
   const docIdOf = (m) => (m.kind === 'quote' ? null : m.id.startsWith('g_') ? m.id : m.id.slice(String(m.phone).length + 1));
   function stopThread() { if (T.unsub) { T.unsub(); T.unsub = null; } T.phone = null; T.seq++; }
   const nearBottom = (box) => box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  // Files that came with an email (docs/EMAIL_ATTACHMENTS.md): the chat keeps only their names; "View" asks the server for that one file (it comes from Gmail when asked, nothing is stored). Only types a browser shows safely
+  // (PDF and common images) are opened; anything else, and anything the server does not vouch for, is DOWNLOADED, never displayed (a web page or SVG sent by a stranger must never run here).
+  const SHOWN = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp']), LOOKS_SHOWN = /\.(pdf|png|jpe?g|gif|webp)$/i;
+  const sizeText = (n) => (!n ? '' : n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
+  const fileName = (s) => String(s || 'file').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100) || 'file';
+  const saveFile = (url, name) => { const a = document.createElement('a'); a.href = url; a.download = fileName(name); document.body.append(a); a.click(); a.remove(); };
+  const urls = [];
+  async function viewFile(btn, phone, docId, index, name) {
+    if (btn.disabled) return;
+    const key = docId + ':' + index; delete T.attMsg[key]; const keep = btn.textContent;
+    const win = LOOKS_SHOWN.test(name) ? window.open('', '_blank') : null;                                   // opened now, while the click still counts; filled when the file arrives
+    if (win) { try { win.document.write('<!doctype html><title>' + 'Opening…</title><body style="font:16px system-ui,sans-serif;padding:28px;color:#444">Opening the file…</body>'); } catch (e) { /* ignore */ } }
+    btn.disabled = true; btn.textContent = 'Opening…';
+    try {
+      const r = (await call('getEmailAttachment')({ phone, emailId: docId, index })).data;
+      const bin = atob(r.data), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const show = SHOWN.has(r.mimeType), blob = new Blob([bytes], { type: show ? r.mimeType : 'application/octet-stream' });
+      while (urls.length > 5) URL.revokeObjectURL(urls.shift());
+      const url = URL.createObjectURL(blob); urls.push(url);
+      if (show && win && !win.closed) win.location.href = url;
+      else { if (win && !win.closed) win.close(); saveFile(url, r.name || name); if (show) T.attMsg[key] = 'Your browser blocked the new tab, so the file was downloaded instead.'; }
+    } catch (e) { if (win && !win.closed) win.close(); T.attMsg[key] = errText(e); }
+    btn.disabled = false; btn.textContent = keep; if (T.phone === phone) renderThread(false);
+  }
   // The whole conversation with one customer: every email, oldest first, newest at the bottom (like the chat). The text of each comes from the customer's chat records when it has arrived (the preview until then).
   function renderThread(forceBottom) {
     const box = $('emp-read'), host = $('emp-thread'), mine = T.items;
@@ -147,8 +171,14 @@ window.EMAILS = (() => {
       if (m.confirmed === false) card.append(el('div', 'emp-d-warn', 'Google did not confirm this email was sent. Check the Sent folder of the mailbox; Elite OS never sends it again by itself.'));
       const docId = docIdOf(m), got = docId && T.bodies[docId];
       card.append(el('div', 'emp-d-body', got && typeof got.body === 'string' ? got.body : (m.snippet || '')));
+      const files = got && Array.isArray(got.attachments) ? got.attachments : [];
+      if (files.length) {                                                                          // each file of the email, to open from here
+        const row = el('div', 'emp-atts'); row.append(el('span', 'emp-att-h', files.length === 1 ? 'Attachment' : 'Attachments'));
+        files.forEach((f, i) => { const b = el('button', 'btn btn-ghost btn-sm emp-att', 'View ' + f.name + (f.size ? ' (' + sizeText(f.size) + ')' : '')); b.type = 'button'; b.title = 'Open this file (fetched from Gmail now, not stored here)'; b.dataset.index = String(i); b.onclick = () => viewFile(b, m.phone, docId, i, f.name); row.append(b); });
+        card.append(row);
+        const bad = files.map((f, i) => T.attMsg[docId + ':' + i]).filter(Boolean); if (bad.length) card.append(el('p', 'emp-att-err', bad[0]));
+      }
       const note = !docId ? 'The wording of a quote email and its PDF are not kept here: this is the start of it. Open the chat or the quote to see the quote itself.'
-        : got && got.attachments && got.attachments.length ? 'Attachments (open the email in Gmail to see them): ' + got.attachments.map((a) => a.name).join(', ')
         : docId in T.bodies && !got ? 'The whole email is no longer in the chat, so this is the preview.' : T.failed ? 'The whole email could not be loaded just now, so this is the preview.' : '';
       if (note) card.append(el('p', 'hint emp-msg-note', note));
       host.append(card);
@@ -183,7 +213,7 @@ window.EMAILS = (() => {
     } finally { btn.disabled = false; }
   }
   function openThread(phone) {
-    stopThread(); T.phone = phone; T.items = []; T.bodies = {}; T.loading = false; T.failed = false; T.stick = true; const mine = ++T.seq;
+    stopThread(); T.phone = phone; T.items = []; T.bodies = {}; T.attMsg = {}; T.loading = false; T.failed = false; T.stick = true; const mine = ++T.seq;
     const first = L.items.find((x) => x.phone === phone);
     $('emp-d-name').textContent = (first && first.name) || 'Customer'; $('emp-d-sub').textContent = ''; $('emp-chat').onclick = () => { location.hash = '#c/' + phone; };
     T.items = L.items.filter((x) => x.phone === phone).sort((a, b) => ms(a.at) - ms(b.at)); renderThread(true);                       // what the list already has, at once

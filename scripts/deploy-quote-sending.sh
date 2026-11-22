@@ -47,6 +47,7 @@
 #   ./scripts/deploy-quote-sending.sh pdfshare   Share PDF (docs/QUOTES.md, "Share PDF"): ONE function that already exists (quotePdfUrl) now also hands the phone the PDF file itself. Nothing is sent to anyone. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh emaillist  The Emails list on the Inbox (docs/EMAIL_LIST.md): the functions that send or receive an email now also add it to the list (all exist already; nothing is sent, nothing made public). Run it BEFORE "live". Optional afterwards: node scripts/backfill-email-log.js.
 #   ./scripts/deploy-quote-sending.sh followuplist  The Assistant's follow-up LIST with tick boxes and a send time (docs/FOLLOW_UP_EMAIL.md): aiChat, aiDecide, sendQuoteFollowUp (exist already) and ONE new scheduled function, followUpSweep, that sends a list you approved for later (never in the Irish night). Nothing is sent by this stage.
+#   ./scripts/deploy-quote-sending.sh emailattach  View a customer's email attachments from the Emails page (docs/EMAIL_ATTACHMENTS.md): ONE new staff function, getEmailAttachment, that fetches the one file from Gmail when you click View (nothing is stored). Needs the email inbox on (emailin). Nothing is sent. Then run live.
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -98,6 +99,7 @@ EMAILIN_NEW="emailSweep sendEmailReply checkEmail"                              
 EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"                                                      # + the three that decide who "never wrote": an email reply now counts
 EMAILLIST_FUNCS="emailSweep checkEmail sendEmailReply sendFollowUpEmail sendQuoteFollowUp aiDecide deliverQuote retryQuoteDelivery resolveQuoteDelivery deleteCustomer"          # the Emails list: everything that sends, receives or erases an email now also writes (or erases) its list entry
 FOLLOWLIST_FUNCS="followUpSweep aiChat aiDecide sendQuoteFollowUp"                                                           # the follow-up list: the new five-minute timer (scheduled, first on purpose: it has no web address) + the Assistant and the quote follow-up that share the new code
+EMAILATTACH_FUNCS="getEmailAttachment"                                                                                  # View an email attachment: the one new staff function (reads the file from Gmail when asked; nothing is stored)
 PDFSHARE_FUNCS="quotePdfUrl"                                                                                           # Share PDF: the existing PDF link function can also return the file itself (the screen's Share button asks for it)
 NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                             # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
@@ -113,7 +115,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,60p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,61p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -551,6 +553,21 @@ case "${1:-}" in
     install; save_revisions aiChat aiDecide sendQuoteFollowUp; deploy_functions $FOLLOWLIST_FUNCS
     check_reachable "${FOLLOWLIST_FUNCS#followUpSweep }"                            # followUpSweep runs on a timer and has no web address to ask: only the callable ones are checked
     echo "Done. Next: $0 live (the screen). To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:aiChat,functions:aiDecide,functions:sendQuoteFollowUp --project $PROJECT and firebase functions:delete followUpSweep --region $REGION --project $PROJECT (the Assistant then goes back to its old follow-up cards)."
+    ;;
+  emailattach)
+    [ -f functions/lib/emailAttachment.js ] || { echo "This checkout has no email attachment code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision checkemail)" ] || { echo "The email inbox is not deployed yet: run $0 emailin first."; exit 1; }
+    check_settings; check_access; check_routing $EMAILATTACH_FUNCS
+    echo "Function: $EMAILATTACH_FUNCS (new; staff only: it checks the signed-in staff account itself). It uses the same read-only mailbox sign-in as the email inbox (no new Google approval)."
+    echo "On the Emails page each file that came with an email gets a View button: PDFs and pictures open in a new tab, anything else downloads. The file is fetched from Gmail at that moment and is NOT stored in Elite OS. Each open is noted in the audit log (who and which customer, never the file name). Nothing is sent, changed or deleted."
+    confirm "Deploy the email attachment viewer to the LIVE project?"
+    install; deploy_functions $EMAILATTACH_FUNCS                                      # a new function: there is no earlier revision to save
+    echo "==> making the new staff function reachable (it checks the signed-in staff account itself)"
+    for f in $EMAILATTACH_FUNCS; do
+      gcloud run services add-iam-policy-binding "$(svc "$f")" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: $f"
+    done
+    check_reachable "$EMAILATTACH_FUNCS"
+    echo "Done. Next: $0 live (the screen: the View buttons). To go back: firebase functions:delete $EMAILATTACH_FUNCS --region $REGION --project $PROJECT (the buttons then say the file could not be fetched; open the email in Gmail)."
     ;;
   pdfshare)
     grep -q "SHARE_MAX" functions/lib/quotes.js || { echo "This checkout has no Share PDF code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }

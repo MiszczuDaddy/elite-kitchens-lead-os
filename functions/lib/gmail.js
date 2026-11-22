@@ -127,6 +127,13 @@ function createGmailReader({ apiBase = API_BASE, fetchImpl = fetch, tokens }) {
       const q = full ? 'format=full' : 'format=metadata&' + headers.map((h) => 'metadataHeaders=' + encodeURIComponent(h)).join('&');
       return call(`messages/${id}?${q}`, timeoutMs);
     },
+    // One attachment of one message (opened by a person on the Emails page, nothing is stored): { size, data } with data in base64url.
+    async attachment(messageId, attachmentId, { timeoutMs = 30000 } = {}) {
+      if (!/^[0-9a-f]{6,32}$/i.test(String(messageId)) || !/^[A-Za-z0-9_-]{1,2000}$/.test(String(attachmentId))) throw new GmailError('bad_request', 400, true);
+      const j = await call(`messages/${messageId}/attachments/${attachmentId}`, timeoutMs);
+      if (typeof j.data !== 'string') throw new GmailError('no_data', 200, false);
+      return { size: Number(j.size) || 0, data: j.data };
+    },
   };
 }
 

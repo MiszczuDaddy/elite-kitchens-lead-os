@@ -27,7 +27,18 @@ const web = http.createServer((req, res) => {
 }).listen(5072);
 // the fake Gmail (the functions emulator is told to use it: MAIL_API_BASE in test-ui/run.sh): it records what would be sent
 const mails = [];
-const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => { try { mails.push(Buffer.from(JSON.parse(Buffer.concat(c).toString()).raw, 'base64url').toString('utf8')); } catch (e) { /* ignore */ } res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ id: 'gsent' + mails.length, threadId: 't' + mails.length })); }); }).listen(9913);
+const PDFB = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\n%%EOF\n'), PNGB = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'), HTMLB = Buffer.from('<script>window.__pwned=1</script><h1>offer</h1>');
+const ATT_MSG = { id: '1a2b3c4d5e6f', threadId: 't9', payload: { mimeType: 'multipart/mixed', parts: [{ mimeType: 'text/plain', filename: '', body: { size: 2, data: 'aGk' } },
+  { mimeType: 'application/pdf', filename: 'plan.pdf', body: { size: PDFB.length, attachmentId: 'ATT1' } }, { mimeType: 'image/png', filename: 'photo.png', body: { size: PNGB.length, data: PNGB.toString('base64url') } },
+  { mimeType: 'text/html', filename: 'offer.html', body: { size: HTMLB.length, attachmentId: 'ATT3' } }] } };
+const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => {
+  res.setHeader('content-type', 'application/json');
+  if (req.method === 'GET') {                                                                  // the mailbox being read: one message with three files; any other message is gone
+    let m; if ((m = /\/messages\/1a2b3c4d5e6f\/attachments\/(\w+)$/.exec(req.url))) { const f = { ATT1: PDFB, ATT3: HTMLB }[m[1]]; if (!f) { res.statusCode = 404; return res.end('{}'); } return res.end(JSON.stringify({ size: f.length, data: f.toString('base64url') })); }
+    if (/\/messages\/1a2b3c4d5e6f\?/.test(req.url)) return res.end(JSON.stringify(ATT_MSG));
+    res.statusCode = 404; return res.end('{}');
+  }
+  try { mails.push(Buffer.from(JSON.parse(Buffer.concat(c).toString()).raw, 'base64url').toString('utf8')); } catch (e) { /* ignore */ } res.end(JSON.stringify({ id: 'gsent' + mails.length, threadId: 't' + mails.length })); }); }).listen(9913);
 
 (async () => {
   initializeApp({ projectId: 'demo-leados' }); const db = getFirestore(), T = (ms) => Timestamp.fromMillis(ms), NOW = Date.now(), MIN = 60000, DAY = 86400000;
@@ -43,7 +54,7 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   const FULL_IN = 'Hi, the price is fine. Can you call me tomorrow after 5?\n\nI would also like to ask about the island lighting and when the delivery could be.\n\nThanks, Anna';
   async function seed() {
     await entry('g_1', P.anna, 'Anna Apple', 'in', 'customer', 'Re: Your Elite Kitchens quote EK-0112', FULL_IN.replace(/\s+/g, ' ').slice(0, 200), NOW - 20 * MIN);
-    await chatEmail(P.anna, 'g_1', { direction: 'in', subject: 'Re: Your Elite Kitchens quote EK-0112', fromEmail: P.anna + '@example.com', body: FULL_IN, createdAt: T(NOW - 20 * MIN), attachments: [{ name: 'plan.pdf', size: 1234 }] });
+    await chatEmail(P.anna, 'g_1', { direction: 'in', subject: 'Re: Your Elite Kitchens quote EK-0112', fromEmail: P.anna + '@example.com', body: FULL_IN, createdAt: T(NOW - 20 * MIN), gmailId: '1a2b3c4d5e6f', attachments: [{ name: 'plan.pdf', size: PDFB.length }, { name: 'photo.png', size: PNGB.length }, { name: 'offer.html', size: HTMLB.length }] });
     await entry(P.bob + '_fu_1', P.bob, 'Bob Byrne', 'out', 'followup', 'Your kitchen enquiry with Elite Kitchens', 'Hi Bob, Thanks for your enquiry with Elite Kitchens. I just wanted to check in', NOW - 3 * DAY, { by: 'staff@test.dev' });
     await chatEmail(P.bob, 'fu_1', { direction: 'out', subject: 'Your kitchen enquiry with Elite Kitchens', to: P.bob + '@example.com', body: 'Hi Bob,\n\nThanks for your enquiry with Elite Kitchens. I just wanted to check in, in case my earlier message got lost.\n\nKind regards,\nElite Kitchens', createdAt: T(NOW - 3 * DAY), by: 'staff@test.dev', kind: 'followup' });
     await entry(P.anna + '_qf_1', P.anna, 'Anna Apple', 'out', 'quotefollowup', 'Your Elite Kitchens quote EK-0112', 'Hi Anna, I just wanted to check that you received your quote (EK-0112)', NOW - 2 * DAY, { quoteRef: 'EK-0112', by: 'staff@test.dev' });
@@ -54,7 +65,7 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   }
   await seed();
   await entry('g_2', P.cara, '"><script>window.__pwned=1</script>Cara <b>Cole</b>', 'in', 'customer', '<img src=x onerror=window.__pwned=1>', 'Thanks <script>window.__pwned=1</script>', NOW - 40 * MIN);
-  await chatEmail(P.cara, 'g_2', { direction: 'in', subject: '<img src=x onerror=window.__pwned=1>', fromEmail: P.cara + '@example.com', body: 'Thanks <script>window.__pwned=1</script> <b>bold</b>', createdAt: T(NOW - 40 * MIN) });
+  await chatEmail(P.cara, 'g_2', { direction: 'in', subject: '<img src=x onerror=window.__pwned=1>', fromEmail: P.cara + '@example.com', body: 'Thanks <script>window.__pwned=1</script> <b>bold</b>', createdAt: T(NOW - 40 * MIN), gmailId: 'ffffffffffff', attachments: [{ name: 'gone.pdf', size: 10 }] });
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/pw-browsers/chromium' }), errors = []; global.__errors = errors;
   const open = async (viewport, phone, hash) => {
     const ctx = await browser.newContext({ viewport, ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}) }), page = await ctx.newPage();
@@ -67,7 +78,7 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   const rows = () => page.$$eval('#emp-list .ea-open', (els) => els.map((e) => ({ name: e.querySelector('.ea-name').textContent, kind: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.ea-subject').textContent, snip: e.querySelector('.ea-snip').textContent, warn: !!e.querySelector('.ea-warn'), ref: (e.querySelector('.ea-ref') || {}).textContent || null, id: e.dataset.kind, phone: e.dataset.phone, count: e.querySelector('.ea-count').textContent })));
   const ids = async () => (await rows()).map((r) => r.id);
   const view = () => page.evaluate(() => document.getElementById('app').dataset.view);
-  const cards = () => page.$$eval('#emp-thread .emp-msg', (els) => els.map((e) => ({ kind: e.dataset.kind, dir: e.classList.contains('emp-in') ? 'in' : 'out', badge: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.emp-msg-subject').textContent, meta: (e.querySelector('.emp-msg-meta') || {}).textContent || '', body: e.querySelector('.emp-d-body').textContent, note: (e.querySelector('.emp-msg-note') || {}).textContent || '', warn: !!e.querySelector('.emp-d-warn') })));
+  const cards = () => page.$$eval('#emp-thread .emp-msg', (els) => els.map((e) => ({ kind: e.dataset.kind, dir: e.classList.contains('emp-in') ? 'in' : 'out', badge: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.emp-msg-subject').textContent, meta: (e.querySelector('.emp-msg-meta') || {}).textContent || '', body: e.querySelector('.emp-d-body').textContent, note: (e.querySelector('.emp-msg-note') || {}).textContent || '', warn: !!e.querySelector('.emp-d-warn'), atts: [...e.querySelectorAll('.emp-att')].map((b) => b.textContent) })));
   const thread = () => page.innerText('#emp-thread');
 
   // ------------------------------------------------------------------ 1. its own page, from the menu; ONE ROW PER CUSTOMER, newest conversation first
@@ -102,7 +113,7 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   const ac = await cards(); assert.equal(ac.length, 3, 'all of Anna\'s emails are in ONE window');
   assert.deepEqual(ac.map((c) => c.kind), ['quotefollowup', 'customer', 'reply'], 'oldest first, the newest at the bottom (like the chat)'); assert.deepEqual(ac.map((c) => c.dir), ['out', 'in', 'out']); assert.deepEqual(ac.map((c) => c.badge), ['↗ Sent · quote follow-up', '↙ Received', '↗ Sent · your reply']);
   assert.match(ac[0].body, /^Hi Anna,[\s\S]*any questions about it\./); assert.match(ac[1].body, /Thanks, Anna$/); assert.match(ac[2].body, /about six weeks/); assert.equal(ac[1].subject, 'Re: Your Elite Kitchens quote EK-0112');
-  assert.equal(ac[1].meta, `From ${P.anna}@example.com`); assert.equal(ac[2].meta, `To ${P.anna}@example.com · sent by staff@test.dev`); assert.match(ac[1].note, /Attachments[\s\S]*plan\.pdf/); assert.equal(ac[0].note, '');
+  assert.equal(ac[1].meta, `From ${P.anna}@example.com`); assert.equal(ac[2].meta, `To ${P.anna}@example.com · sent by staff@test.dev`); assert.deepEqual(ac[1].atts.map((x) => x.replace(/ \(.*\)$/, '')), ['View plan.pdf', 'View photo.png', 'View offer.html'], 'her email\'s three files, each with a View button'); assert.deepEqual([ac[0].atts, ac[2].atts], [[], []], 'the other emails have no files'); assert.equal(ac[0].note, '');
   assert.doesNotMatch(await thread(), /Bob|Dear Bob|Please find attached your quotation/, 'no one else\'s email is in her conversation');
   assert.equal(await page.getAttribute('#emp-list .ea-open[data-phone="' + P.anna + '"]', 'aria-current'), 'true', 'the chosen customer is marked');
   const last = await page.locator('#emp-thread .emp-msg').last().boundingBox(); assert.ok(last.y + last.height <= 900 + 1, 'the newest email is on screen');
@@ -132,11 +143,34 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   await until(async () => (await rows()).find((r) => r.name === 'Anna Apple').count === '4 emails', 'her row counts it'); assert.equal((await rows())[0].name, 'Anna Apple');
   ok('"Reply by email" sits at the bottom of every conversation ("Write an email" when they have never written): it opens the same reply window as in the chat, with their newest email above it; sending delivers it, and it appears at the bottom of their conversation and in the count on their row; closing the window sends nothing');
 
+  // ------------------------------------------------------------------ 3c. view the files that came with an email (fetched from Gmail when clicked, never stored)
+  await page.evaluate(() => { const o = URL.createObjectURL.bind(URL); window.__blobs = []; URL.createObjectURL = (b) => { window.__blobs.push({ size: b.size, type: b.type }); return o(b); }; });
+  await page.click('#emp-list .ea-open[data-phone="' + P.anna + '"]'); await until(async () => (await page.locator('#emp-thread .emp-att').count()) === 3, 'the three file buttons');
+  const attBtn = (name) => page.locator('#emp-thread .emp-att', { hasText: 'View ' + name });
+  await page.screenshot({ path: path.join(SHOTS, 'email-attachments.png') });
+  const ctx0 = page.context(), pagesBefore = ctx0.pages().length;
+  let [pop] = await Promise.all([ctx0.waitForEvent('page'), attBtn('plan.pdf').click()]);
+  await until(async () => (await page.evaluate(() => window.__blobs.length)) === 1, 'the PDF arrived'); assert.deepEqual(await page.evaluate(() => window.__blobs[0]), { size: PDFB.length, type: 'application/pdf' }, 'the exact file, as a PDF');
+  await until(async () => pop.isClosed() || pop.url().startsWith('blob:'), 'the PDF opened in its own tab (or was handed to the browser to download)'); if (!pop.isClosed()) await pop.close();
+  [pop] = await Promise.all([ctx0.waitForEvent('page'), attBtn('photo.png').click()]);
+  await until(async () => (await page.evaluate(() => window.__blobs.length)) === 2, 'the picture arrived'); assert.deepEqual(await page.evaluate(() => window.__blobs[1]), { size: PNGB.length, type: 'image/png' });
+  await until(async () => pop.url().startsWith('blob:'), 'the picture opened in its own tab'); assert.equal(await pop.evaluate(() => document.contentType), 'image/png'); await pop.close();
+  const [dl] = await Promise.all([page.waitForEvent('download'), attBtn('offer.html').click()]);
+  assert.equal(dl.suggestedFilename(), 'offer.html', 'a web page sent as a file is DOWNLOADED, not shown'); await until(async () => (await page.evaluate(() => window.__blobs.length)) === 3, 'the web page file arrived'); assert.equal((await page.evaluate(() => window.__blobs[2])).type, 'application/octet-stream', 'it is never given a type a browser would run');
+  assert.equal(await page.evaluate(() => window.__pwned || 0), 0, 'nothing in the file ran'); assert.equal(ctx0.pages().length, pagesBefore, 'no tab was left open');
+  assert.equal(await page.locator('#emp-thread .emp-att-err').count(), 0, 'no error');
+  const opened = (await db.collection('auditLog').where('action', '==', 'emailAttachmentOpened').get()).docs.map((d) => d.data()); assert.equal(opened.length, 3, 'each open is audited'); assert.ok(opened.every((o) => o.by === 'staff@test.dev' && o.phoneTail === P.anna.slice(-4)) && !/plan|photo|offer/.test(JSON.stringify(opened)), 'who and which customer, never the file name');
+  assert.equal((await db.collection('emailLog').get()).docs.filter((d) => /plan\.pdf|photo\.png|offer\.html|ATT1|attachmentId|attachments/.test(JSON.stringify(d.data()))).length, 0, 'nothing about the files was stored in the list');
+  ok('each file of an email has a View button; a PDF and a picture open in their own tab, exactly the bytes Gmail has; a web page sent as a file is downloaded and never run; every open is audited without the file name; nothing is stored');
+
   // ------------------------------------------------------------------ 4. names and subjects are text, never code
   await page.click('#nav-emails'); await page.waitForSelector('#emails', { state: 'visible' }); await until(async () => (await rows()).length === 3, 'back on the page');
   const cara = (await rows())[1]; assert.ok(cara.name.includes('<script>') && cara.subject.startsWith('<img src=x'), 'shown literally: ' + JSON.stringify([cara.name, cara.subject]));
   await page.click('#emp-list .ea-open[data-phone="' + P.cara + '"]'); await until(async () => (await thread()).includes('<b>bold</b>'), 'the body, as text');
   assert.equal(await page.evaluate(() => window.__pwned || 0), 0, 'nothing ran'); assert.equal(await page.locator('#emails script, #emails img, #emails b').count(), 0, 'no element was created from a name, subject or body');
+  const [pop2] = await Promise.all([page.context().waitForEvent('page'), page.locator('#emp-thread .emp-att', { hasText: 'View gone.pdf' }).click()]);
+  await until(async () => (await page.locator('#emp-thread .emp-att-err').count()) === 1, 'the message'); assert.match(await page.innerText('#emp-thread .emp-att-err'), /Gmail no longer has that email/); await until(async () => pop2.isClosed(), 'the empty tab was closed');
+  assert.equal((await db.collection('auditLog').where('action', '==', 'emailAttachmentOpened').get()).size, 3, 'a file that could not be fetched is not counted as opened');
   ok('a name, subject or body with code in it is shown as text: nothing runs, no element is created from it');
 
   // ------------------------------------------------------------------ 5. live: a new email moves the customer to the top, and appears at the bottom of an open conversation
@@ -177,6 +211,9 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   const rb = await m.page.locator('#emp-reply').boundingBox(); assert.ok(rb && rb.y >= 0 && rb.y + rb.height <= 812 && rb.width >= 300 && rb.height >= 44, 'on a phone the reply button is on screen, full width and easy to tap: ' + JSON.stringify(rb));
   await m.page.screenshot({ path: path.join(SHOTS, 'email-read-phone.png') });
   await m.page.click('#emp-tolist'); await m.page.waitForSelector('#emp-list', { state: 'visible' }); assert.equal(await m.page.isVisible('#emp-detail'), false);
+  await m.page.click('#emp-list .ea-open[data-phone="' + P.anna + '"]'); await until(async () => (await m.page.locator('#emp-thread .emp-att').count()) === 3, 'her file buttons on the phone'); await fits('conversation with files');
+  const ab = await m.page.locator('#emp-thread .emp-att').first().boundingBox(); assert.ok(ab && ab.height >= 40 && ab.x >= 0 && ab.x + ab.width <= 375, 'the file buttons fit and are easy to tap: ' + JSON.stringify(ab)); await m.page.screenshot({ path: path.join(SHOTS, 'email-attachments-phone.png') });
+  await m.page.click('#emp-tolist'); await m.page.waitForSelector('#emp-list', { state: 'visible' });
   await m.page.click('#emp-back'); await m.page.waitForSelector('#emails', { state: 'hidden' });
   ok('on a 375px phone: the Emails button is easy to tap; the page shows the list of customers, choosing one shows their whole conversation alone with a way back, and Back returns to the Inbox; no sideways scrolling');
 

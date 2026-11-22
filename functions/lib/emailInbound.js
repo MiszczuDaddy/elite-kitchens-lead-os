@@ -60,7 +60,9 @@ function stripQuoted(text) {
   const out = keep.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return out || String(text || '').trim();
 }
-const attachmentsOf = (payload) => partsOf(payload).filter((p) => p.filename).slice(0, ATTACH_MAX).map((p) => ({ name: String(p.filename).slice(0, 100), size: Number(p.body && p.body.size) || 0 }));
+// The parts of a message that are files, in order: the list kept in the chat (attachmentsOf) and the lookup of one file (emailAttachment.js) both use THIS, so "file number 1" is the same file in both.
+const attachmentParts = (payload) => partsOf(payload).filter((p) => p.filename).slice(0, ATTACH_MAX);
+const attachmentsOf = (payload) => attachmentParts(payload).map((p) => ({ name: String(p.filename).slice(0, 100), size: Number(p.body && p.body.size) || 0 }));
 
 // ---------------------------------------------------------------- who is a customer ------------------------------------------------
 // Every address Elite OS knows (customers and leads), one read of the contacts per sweep, and only when there is something new to look at.
@@ -197,4 +199,4 @@ async function sweep({ db, reader, mailbox, nowMs = Date.now() }) {
   return { ...out, ok: !out.error };
 }
 
-module.exports = { sweep, parseAddress, parseAddresses, keepOutbound, sentByElite, textOf, stripQuoted, attachmentsOf, emailDoc, keepInbound, loadIndex, htmlToText, MAX_PER_RUN, BODY_MAX };
+module.exports = { sweep, parseAddress, parseAddresses, keepOutbound, sentByElite, textOf, stripQuoted, attachmentsOf, attachmentParts, emailDoc, keepInbound, loadIndex, htmlToText, MAX_PER_RUN, BODY_MAX };

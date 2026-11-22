@@ -245,6 +245,7 @@ exports.followUpSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Eur
 });
 exports.sendEmailReply = onCall({}, (req) => h.sendEmailReply(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: replyMailer() }));
 exports.checkEmail = onCall({ timeoutSeconds: 120 }, (req) => h.checkEmail(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, inbox: inboxReader() }));
+exports.getEmailAttachment = onCall({ timeoutSeconds: 60, memory: '512MiB' }, (req) => h.getEmailAttachment(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, inbox: inboxReader() }));          // one file of an email, fetched from Gmail when a person clicks View
 exports.sendQuoteFollowUp = onCall({}, (req) => h.sendQuoteFollowUp(req.auth, req.data, { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, mailer: followUpMailer() }));          // the same mailbox as the lead follow-ups
 const deliveryDeps = () => {
   const db = getFirestore(), bucket = getStorage().bucket(bucketName());

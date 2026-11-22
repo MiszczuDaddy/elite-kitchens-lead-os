@@ -443,6 +443,9 @@ const checkEmail = async (auth, data, deps) => {
   const r = await emailInboundLib.sweep({ db: deps.db, reader: deps.inbox.reader, mailbox: deps.inbox.mailbox });
   return { ok: r.ok, stored: r.stored, matched: r.matched, sentStored: r.sentStored, sentMatched: r.sentMatched, ...(r.error ? { error: r.error } : {}) };
 };
+// "View" on an email's attachment (Emails page): the one file, fetched from Gmail when asked, never stored (docs/EMAIL_ATTACHMENTS.md). Staff only.
+const emailAttachmentLib = require('./emailAttachment');
+const getEmailAttachment = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return emailAttachmentLib.fetchOne({ db: deps.db, inbox: deps.inbox }, actorOf(auth), data); };
 const sendQuoteFollowUp = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return quoteFollowUpLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
 const todayLib = require('./today');
 const saveReminder = staffAction(todayLib.saveReminder);
@@ -473,7 +476,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, sendQuoteFollowUp, sendEmailReply, checkEmail, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, sendQuoteFollowUp, sendEmailReply, checkEmail, getEmailAttachment, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,
