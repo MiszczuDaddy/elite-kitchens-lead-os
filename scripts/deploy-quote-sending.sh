@@ -48,6 +48,7 @@
 #   ./scripts/deploy-quote-sending.sh emaillist  The Emails list on the Inbox (docs/EMAIL_LIST.md): the functions that send or receive an email now also add it to the list (all exist already; nothing is sent, nothing made public). Run it BEFORE "live". Optional afterwards: node scripts/backfill-email-log.js.
 #   ./scripts/deploy-quote-sending.sh followuplist  The Assistant's follow-up LIST with tick boxes and a send time (docs/FOLLOW_UP_EMAIL.md): aiChat, aiDecide, sendQuoteFollowUp (exist already) and ONE new scheduled function, followUpSweep, that sends a list you approved for later (never in the Irish night). Nothing is sent by this stage.
 #   ./scripts/deploy-quote-sending.sh emailattach  View a customer's email attachments from the Emails page (docs/EMAIL_ATTACHMENTS.md): ONE new staff function, getEmailAttachment, that fetches the one file from Gmail when you click View (nothing is stored). Needs the email inbox on (emailin). Nothing is sent. Then run live.
+#   ./scripts/deploy-quote-sending.sh assistantread  The Assistant can see everything (docs/AI.md, 22 Nov 2026): ONE function that already exists, aiChat, gets five more read-only look-up tools (what is in a quote, emails, what happened, the price list, find anything). Nothing is changed or sent; nothing to switch on.
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -100,6 +101,7 @@ EMAILIN_FUNCS="$EMAILIN_NEW sendFollowUpEmail sendQuoteFollowUp aiChat"         
 EMAILLIST_FUNCS="emailSweep checkEmail sendEmailReply sendFollowUpEmail sendQuoteFollowUp aiDecide deliverQuote retryQuoteDelivery resolveQuoteDelivery deleteCustomer"          # the Emails list: everything that sends, receives or erases an email now also writes (or erases) its list entry
 FOLLOWLIST_FUNCS="followUpSweep aiChat aiDecide sendQuoteFollowUp"                                                           # the follow-up list: the new five-minute timer (scheduled, first on purpose: it has no web address) + the Assistant and the quote follow-up that share the new code
 EMAILATTACH_FUNCS="getEmailAttachment"                                                                                  # View an email attachment: the one new staff function (reads the file from Gmail when asked; nothing is stored)
+AIREAD_FUNCS="aiChat"                                                                                                   # the Assistant can see everything: the one function that runs the look-up tools gets five more (read-only)
 PDFSHARE_FUNCS="quotePdfUrl"                                                                                           # Share PDF: the existing PDF link function can also return the file itself (the screen's Share button asks for it)
 NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                             # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
@@ -115,7 +117,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,61p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,62p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -568,6 +570,16 @@ case "${1:-}" in
     done
     check_reachable "$EMAILATTACH_FUNCS"
     echo "Done. Next: $0 live (the screen: the View buttons). To go back: firebase functions:delete $EMAILATTACH_FUNCS --region $REGION --project $PROJECT (the buttons then say the file could not be fetched; open the email in Gmail)."
+    ;;
+  assistantread)
+    grep -q "find_records" functions/lib/aiTools.js || { echo "This checkout has no Assistant look-up code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -n "$(serving_revision aichat)" ] || { echo "The Assistant is not deployed yet: run $0 ai first."; exit 1; }
+    check_settings; check_access; check_routing $AIREAD_FUNCS
+    echo "Function: $AIREAD_FUNCS (exists already; no new function, nothing made public). It keeps answering exactly as before; it can also look up what is in a quote, a customer's emails, what happened on a day, the price list, and any other record. Read-only: nothing is changed or sent, and every change it proposes still needs your Approve. Nothing to switch on."
+    confirm "Deploy the Assistant look-up tools to the LIVE project?"
+    install; save_revisions $AIREAD_FUNCS; deploy_functions $AIREAD_FUNCS
+    check_reachable "$AIREAD_FUNCS"
+    echo "Done. To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:aiChat --project $PROJECT (the Assistant then has its earlier twelve tools)."
     ;;
   pdfshare)
     grep -q "SHARE_MAX" functions/lib/quotes.js || { echo "This checkout has no Share PDF code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
