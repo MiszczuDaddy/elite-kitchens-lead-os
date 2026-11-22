@@ -75,7 +75,7 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   };
   console.log('EMAIL LIST E2E: real page + real functions + emulators');
   const { page } = await open({ width: 1360, height: 900 });
-  const rows = () => page.$$eval('#emp-list .ea-open', (els) => els.map((e) => ({ name: e.querySelector('.ea-name').textContent, kind: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.ea-subject').textContent, snip: e.querySelector('.ea-snip').textContent, warn: !!e.querySelector('.ea-warn'), ref: (e.querySelector('.ea-ref') || {}).textContent || null, id: e.dataset.kind, phone: e.dataset.phone, count: e.querySelector('.ea-count').textContent })));
+  const rows = () => page.$$eval('#emp-list .ea-open', (els) => els.map((e) => ({ name: e.querySelector('.ea-name').textContent, kind: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.ea-subject').textContent, snip: e.querySelector('.ea-snip').textContent, warn: !!e.querySelector('.ea-warn'), ref: (e.querySelector('.ea-ref') || {}).textContent || null, id: e.dataset.kind, phone: e.dataset.phone, count: e.querySelector('.ea-count').textContent, turn: e.parentElement.classList.contains('ea-turn'), tag: e.querySelector('.ea-tag-turn, .ea-tag-wait').textContent })));
   const ids = async () => (await rows()).map((r) => r.id);
   const view = () => page.evaluate(() => document.getElementById('app').dataset.view);
   const cards = () => page.$$eval('#emp-thread .emp-msg', (els) => els.map((e) => ({ kind: e.dataset.kind, dir: e.classList.contains('emp-in') ? 'in' : 'out', badge: e.querySelector('.ea-kind').textContent, subject: e.querySelector('.emp-msg-subject').textContent, meta: (e.querySelector('.emp-msg-meta') || {}).textContent || '', body: e.querySelector('.emp-d-body').textContent, note: (e.querySelector('.emp-msg-note') || {}).textContent || '', warn: !!e.querySelector('.emp-d-warn'), atts: [...e.querySelectorAll('.emp-att')].map((b) => b.textContent) })));
@@ -91,6 +91,12 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   assert.deepEqual(all.map((r) => r.count), ['3 emails', '1 email', '2 emails'], 'how many emails each customer has');
   assert.deepEqual(all.map((r) => r.id), ['reply', 'customer', 'followup'], 'each row shows the customer\'s newest email'); assert.deepEqual(all.map((r) => r.kind), ['↗ Sent · your reply', '↙ Received', '↗ Sent · follow-up']);
   assert.equal(all[0].snip, 'Of course, I will ring you tomorrow at 5.'); assert.equal(all[0].ref, null, 'Anna\'s newest email (her reply) has no quote number on it');
+  assert.deepEqual(all.map((r) => r.turn), [false, true, false], 'only Cara (her email is the newest) has replied and is waiting for you; Anna (you replied last) and Bob (your follow-up) are waiting for THEM');
+  assert.deepEqual(all.map((r) => r.tag), ['Waiting for their reply', 'Replied · your turn', 'Waiting for their reply']);
+  const looks = await page.$$eval('#emp-list .ea-row', (els) => els.map((e) => { const b = getComputedStyle(e.querySelector('.ea-open')), k = getComputedStyle(e.querySelector('.ea-kind')); return { bg: b.backgroundColor, kind: k.color, name: getComputedStyle(e.querySelector('.ea-name')).fontWeight }; }));
+  assert.notEqual(looks[1].bg, looks[0].bg, 'the row of the customer who replied has its own background'); assert.equal(looks[0].bg, looks[2].bg, 'the rows of emails you sent look the same: plain'); assert.ok(Number(looks[1].name) > Number(looks[0].name), 'her name is bolder');
+  assert.notEqual(looks[0].kind, looks[1].kind, 'a sent email is not coloured like a received one'); assert.equal(looks[0].kind, looks[2].kind, 'a sent email is coloured the same in every row (grey)');
+  assert.equal((await page.innerText('#emails .ea-chip[data-f="turn"]')).trim(), 'Needs your reply (1)', 'the filter says how many are waiting');
   ok('"Emails" in the menu opens its own page (the Inbox list is replaced and the menu shows where you are) with ONE row per customer, newest conversation first: who, how many emails, and the newest one\'s kind, subject and preview');
 
   // ------------------------------------------------------------------ 2. filters and search (they pick customers; the row shows their newest matching email)
@@ -98,6 +104,7 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   assert.match(await page.locator('#emp-list .ea-warn').getAttribute('title'), /Google did not confirm/);
   const chip = (f) => page.click(`#emails .ea-chip[data-f="${f}"]`);
   await chip('in'); assert.deepEqual(await ids(), ['customer', 'customer'], 'customers who have written to you'); assert.equal(await page.getAttribute('#emails .ea-chip[data-f="in"]', 'aria-pressed'), 'true');
+  await chip('turn'); assert.equal((await rows()).length, 1, 'only the customer who has replied and is waiting for you'); assert.ok((await rows())[0].name.includes('Cara')); assert.deepEqual(await ids(), ['customer']); assert.equal(await page.getAttribute('#emails .ea-chip[data-f="turn"]', 'aria-pressed'), 'true');
   await chip('out'); assert.deepEqual(await ids(), ['reply', 'followup'], 'Anna (newest sent: her reply) and Bob (his follow-up)'); assert.deepEqual((await rows()).map((r) => r.count), ['2 emails', '2 emails']);
   await chip('followups'); assert.deepEqual(await ids(), ['quotefollowup', 'followup'], 'both kinds of follow-up'); assert.deepEqual((await rows()).map((r) => r.count), ['1 email', '1 email']);
   await chip('unconfirmed'); assert.deepEqual(await ids(), ['quote'], 'only what Google did not confirm'); await chip('all'); assert.equal((await rows()).length, 3);
@@ -179,6 +186,7 @@ const gmail = http.createServer((req, res) => { const c = []; req.on('data', (x)
   await until(async () => (await cards()).length === 3, 'the new email appears in the open conversation'); const live = await cards(); assert.equal(live[2].kind, 'customer'); assert.match(live[2].body, /Thursday works/, 'at the bottom');
   await until(async () => (await rows())[0].name === 'Bob Byrne', 'Bob moves to the top of the list'); const top = (await rows())[0]; assert.equal(top.count, '3 emails'); assert.equal(top.snip, 'Yes, I would love a consultation. Thursday works.'); assert.equal((await rows()).length, 3, 'still one row per customer');
   assert.equal(await page.innerText('#emp-d-sub'), `3 emails · ${P.bob}@example.com`);
+  assert.equal(top.turn, true, 'Bob has now replied: his row is highlighted'); assert.equal(top.tag, 'Replied · your turn'); await until(async () => (await page.innerText('#emails .ea-chip[data-f="turn"]')).trim() === 'Needs your reply (2)', 'the count follows');
   ok('a new email moves that customer to the top while the page is open and appears at the bottom of their open conversation, without reloading');
 
   // ------------------------------------------------------------------ 6. it opens and closes like the other pages

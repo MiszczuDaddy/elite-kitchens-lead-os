@@ -1386,6 +1386,13 @@ div.td-open { cursor: default; }
 .ea-name { font-weight: 650; overflow-wrap: anywhere; } .ea-when { flex: none; font-size: 12.5px; color: var(--muted); }
 .ea-sub { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin: 2px 0; font-size: 12.5px; }
 .ea-kind { font-weight: 600; } .ea-in { color: var(--ok); } .ea-out { color: var(--accent); }
+/* only a customer who has replied is highlighted (their turn: green, bold); an email you sent is plain and grey, so a follow-up can never look like an answer */
+.ea-open .ea-out { color: var(--muted); }
+.emails-pane { --turn: #2a7d4b; }                                                                /* a real green: the page's own "ok" colour is a teal-blue, too close to the grey-blue of a sent email */
+.ea-turn .ea-open:not([aria-current="true"]) { background: color-mix(in srgb, var(--turn) 11%, var(--panel)); box-shadow: inset 4px 0 0 var(--turn); }
+.ea-turn .ea-open .ea-in { color: var(--turn); }
+.ea-turn .ea-name { font-weight: 800; }
+.ea-tag-turn { padding: 0 9px; border-radius: 9px; background: var(--turn); color: #fff; font-weight: 700; } .ea-tag-wait { color: var(--muted); font-weight: 500; }
 .ea-warn { padding: 0 7px; border-radius: 9px; background: #f8e3e1; color: var(--err); font-weight: 600; } .ea-ref { color: var(--muted); }
 .ea-subject { font-weight: 600; overflow-wrap: anywhere; } .ea-snip { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .emp-more { padding: 12px 16px 20px; }

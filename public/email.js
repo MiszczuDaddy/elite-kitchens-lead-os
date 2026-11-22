@@ -96,7 +96,9 @@ window.EMAILS = (() => {
   }
   const norm = (x) => String(x == null ? '' : x).toLowerCase();
   const matches = (m, q) => !q || [m.name, m.subject, m.snippet, m.email, m.quoteRef, m.phone].some((v) => norm(v).includes(q));
-  const byFilter = (m) => L.filter === 'all' || (L.filter === 'in' || L.filter === 'out' ? m.direction === L.filter : L.filter === 'followups' ? (m.kind === 'followup' || m.kind === 'quotefollowup') : m.confirmed === false);
+  const byFilter = (m) => L.filter === 'all' || L.filter === 'turn' || (L.filter === 'in' || L.filter === 'out' ? m.direction === L.filter : L.filter === 'followups' ? (m.kind === 'followup' || m.kind === 'quotefollowup') : m.confirmed === false);
+  // Whose turn it is: a customer whose NEWEST email (of all their emails, whatever filter is on) came from them has replied and is waiting for you; otherwise you wrote last and are waiting for them.
+  function turnSet() { const seen = new Set(), turn = new Set(); for (const m of L.items) { if (seen.has(m.phone)) continue; seen.add(m.phone); if (m.direction === 'in') turn.add(m.phone); } return turn; }
   const kindText = (m) => (m.direction === 'in' ? '↙ ' : '↗ ') + (KIND[m.kind] || (m.direction === 'in' ? 'Received' : 'Sent'));
   const plural = (n) => n + ' email' + (n === 1 ? '' : 's');
   function badges(m, host, warn) {
@@ -105,31 +107,32 @@ window.EMAILS = (() => {
     if (m.quoteRef) host.append(el('span', 'ea-ref', m.quoteRef));
   }
   // One entry per customer: their emails that match the filter and the search (the list is newest first, so the first one seen is the newest), and how many.
-  function groups() {
+  function groups(turn) {
     const q = norm(L.query).trim(), by = new Map();
     for (const m of L.items) {
-      if (!byFilter(m) || !matches(m, q)) continue;
+      if (!byFilter(m) || !matches(m, q) || (L.filter === 'turn' && !turn.has(m.phone))) continue;
       let g = by.get(m.phone); if (!g) { g = { phone: m.phone, name: m.name || '', newest: m, count: 0, unconfirmed: 0 }; by.set(m.phone, g); }
       g.count++; if (m.confirmed === false) g.unconfirmed++; if (!g.name && m.name) g.name = m.name;
     }
     return [...by.values()];
   }
   function renderList() {
-    const ul = $('emp-list'), rows = groups(); ul.replaceChildren();
+    const ul = $('emp-list'), turn = turnSet(), rows = groups(turn); ul.replaceChildren();
     const filtering = L.filter !== 'all' || norm(L.query).trim();
     $('emp-note').textContent = L.error ? 'The list could not be loaded just now. Open this page again in a moment.' : !L.loaded ? 'Loading…'
-      : rows.length ? '' : filtering ? 'No emails match. Clear the search or choose All.' : 'No emails yet. Emails you send from Elite OS, and customers\' replies, will appear here.';
+      : rows.length ? '' : L.filter === 'turn' && !filtering ? 'Nobody is waiting for your reply by email.' : filtering ? 'No emails match. Clear the search or choose All.' : 'No emails yet. Emails you send from Elite OS, and customers\' replies, will appear here.';
     for (const g of rows) {
-      const m = g.newest, li = el('li', 'ea-row'), b = el('button', 'ea-open'); b.type = 'button'; b.dataset.phone = g.phone; b.dataset.kind = m.kind; b.dataset.id = m.id;
+      const m = g.newest, mine = turn.has(g.phone), li = el('li', 'ea-row' + (mine ? ' ea-turn' : '')), b = el('button', 'ea-open'); b.type = 'button'; b.dataset.phone = g.phone; b.dataset.kind = m.kind; b.dataset.id = m.id;
       if (g.phone === L.sel) b.setAttribute('aria-current', 'true');
       const top = el('div', 'ea-top'); top.append(el('span', 'ea-name', g.name || 'Customer'), el('span', 'ea-when', whenText(ms(m.at))));
-      const sub = el('div', 'ea-sub'); badges(m, sub, g.unconfirmed > 0); sub.append(el('span', 'ea-count', plural(g.count)));          // a customer with any email Google did not confirm is flagged, even when it is not the newest
+      const sub = el('div', 'ea-sub'); badges(m, sub, g.unconfirmed > 0); sub.append(el(mine ? 'strong' : 'span', mine ? 'ea-tag-turn' : 'ea-tag-wait', mine ? 'Replied · your turn' : 'Waiting for their reply'), el('span', 'ea-count', plural(g.count)));          // only a customer who has answered is highlighted; an email you sent is plain          // a customer with any email Google did not confirm is flagged, even when it is not the newest
       b.append(top, sub, el('div', 'ea-subject', m.subject || '(no subject)'), el('div', 'ea-snip', m.snippet || ''));
       b.onclick = () => select(g.phone);
       li.append(b); ul.append(li);
     }
     $('emp-more').hidden = !!L.error || L.items.length < L.limit || L.limit >= MAX;
     for (const c of document.querySelectorAll('#emails .ea-chip')) c.setAttribute('aria-pressed', c.dataset.f === L.filter ? 'true' : 'false');
+    const tc = document.querySelector('#emails .ea-chip[data-f="turn"]'); if (tc) tc.textContent = 'Needs your reply' + (L.loaded && turn.size ? ' (' + turn.size + ')' : '');          // how many customers are waiting for you
   }
   // The email's own record in the customer's chat holds the whole text (not for a quote email: only its preview is kept).
   const docIdOf = (m) => (m.kind === 'quote' ? null : m.id.startsWith('g_') ? m.id : m.id.slice(String(m.phone).length + 1));
