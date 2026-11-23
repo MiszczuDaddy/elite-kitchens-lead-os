@@ -17,7 +17,10 @@ window.APPT = (() => {
     calError: '', calLimited: false, drag: null,
     leadPhone: null, leadInfo: null, unsubLead: null,
     calList: [], calLoaded: false, unsubCal: null, calKey: null,
+    ext: [], extKey: null, unsubExt: null, extSync: null, unsubExtSync: null, showExt: true,         // the phone calendar (docs/PHONE_CALENDAR.md): read-only events from Google Calendar, shown in purple
   };
+  const EXT_KEY = 'ek.showPhoneCal';
+  try { if (localStorage.getItem(EXT_KEY) === '0') A.showExt = false; } catch (e) { /* private mode */ }
   const VIEW_KEY = 'ek.apptView.v2';
   function initialView() {
     try { const v = sessionStorage.getItem(VIEW_KEY); if (['calendar', 'week', 'day', 'list'].includes(v)) return v; } catch (e) { /* private mode */ }
@@ -91,6 +94,7 @@ window.APPT = (() => {
         A.failed = snap.docs.map((d) => ({ id: d.id, ...d.data() })); render();
       }, () => { if (A.unsubFailed) { A.unsubFailed(); A.unsubFailed = null; } });
     }
+    if (!A.unsubExtSync) A.unsubExtSync = db.doc('externalSync/state').onSnapshot((snap) => { A.extSync = snap.exists ? snap.data() : null; renderExtBar(); }, () => { if (A.unsubExtSync) { A.unsubExtSync(); A.unsubExtSync = null; } });
     if (A.view === 'list') { stopCal(); startList(); } else { stopList(); startCal(); }
   }
   function startList() {
@@ -116,12 +120,52 @@ window.APPT = (() => {
       A.calLimited = snap.size >= 500; A.calError = '';
       render();
     }, (e) => { if (A.calKey !== key) return; stopCal(); A.calError = 'Cannot load the calendar: ' + errText(e); render(); });
+    // The phone calendar for the same days (an event that began up to 15 days earlier may still run into them). Nothing here is needed for the appointments: if it cannot be read, the screen simply shows none.
+    A.extKey = key;
+    A.unsubExt = db.collection('externalEvents').where('start', '>=', T.fromMillis(r.from - 15 * DAY)).where('start', '<', T.fromMillis(r.to)).orderBy('start').limit(500).onSnapshot((snap) => {
+      if (A.extKey !== key) return;
+      A.ext = snap.docs.map((d) => ({ id: d.id, external: true, ...d.data() })).filter((e) => ts(e.end) > r.from); render();
+    }, () => { if (A.extKey === key) { A.ext = []; render(); } });
   }
-  function stopCal() { if (A.unsubCal) { A.unsubCal(); A.unsubCal = null; } A.calKey = null; A.calList = []; A.calLoaded = false; A.calError = ''; A.calLimited = false; }
+  function stopExt() { if (A.unsubExt) { A.unsubExt(); A.unsubExt = null; } A.extKey = null; A.ext = []; }
+  function stopCal() { stopExt(); if (A.unsubCal) { A.unsubCal(); A.unsubCal = null; } A.calKey = null; A.calList = []; A.calLoaded = false; A.calError = ''; A.calLimited = false; }
   function unlisten() {
     stopList(); stopCal();
     if (A.unsubFailed) { A.unsubFailed(); A.unsubFailed = null; }
+    if (A.unsubExtSync) { A.unsubExtSync(); A.unsubExtSync = null; } A.extSync = null;
     A.failed = [];
+  }
+
+  // ---------- the phone calendar (docs/PHONE_CALENDAR.md): events read from the business Google Calendar once a day; shown in purple, never editable here ----------
+  const extShown = () => (A.showExt ? A.ext : []);
+  const extOnDay = (k) => { const r = CalendarLayout.range(k); return extShown().filter((e) => ts(e.start) < r.to && ts(e.end) > r.from); };      // overlapping that Irish day
+  const extTime = (e) => (e.allDay ? 'All day' : clock(ts(e.start)) + '–' + clock(ts(e.end)));
+  const EXT_WHY = { forbidden: 'the calendar is not shared with Elite OS yet', not_found: 'Elite OS cannot find that calendar', auth: 'Elite OS is not allowed to sign in to Google Calendar', off: 'it is not switched on' };
+  function renderExtBar() {
+    const bar = $('ext-bar'); if (!bar) return;
+    bar.hidden = !A.active || A.view === 'list';
+    const st = A.extSync, when = (t) => { const v = ts(t); return v == null ? '' : new Date(v).toLocaleString('en-IE', { timeZone: 'Europe/Dublin', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); };
+    $('ext-status').textContent = !st ? 'not connected yet'
+      : st.ok === false ? 'the last check failed (' + (EXT_WHY[st.error] || 'Google did not answer') + ')' + (st.lastRunAt ? '. Last good check: ' + when(st.lastRunAt) : '')
+      : 'updated ' + when(st.lastRunAt) + ' · ' + (st.count === 1 ? '1 event' : (st.count || 0) + ' events') + (st.truncated ? ' (the first ones only)' : '');
+    $('ext-status').classList.toggle('bad', !!(st && st.ok === false));
+  }
+  function openExt(e) {
+    $('ext-dlg-title').textContent = e.title || 'Busy';
+    const d = (t) => new Date(ts(t)).toLocaleDateString('en-IE', { timeZone: 'Europe/Dublin', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    $('ext-dlg-when').textContent = e.allDay ? (dublinDate(ts(e.start)) === dublinDate(ts(e.end) - 1) ? d(e.start) : d(e.start) + ' to ' + d(ts(e.end) - 1)) + ' · all day' : d(e.start) + ', ' + clock(ts(e.start)) + '–' + clock(ts(e.end));
+    $('ext-dlg-where').textContent = e.location || ''; $('ext-dlg-where').hidden = !e.location;
+    const link = $('ext-dlg-open'), ok = typeof e.htmlLink === 'string' && /^https:\/\/(www\.)?google\.com\/calendar\//.test(e.htmlLink);
+    link.hidden = !ok; if (ok) link.href = e.htmlLink; else link.removeAttribute('href');
+    showDialog($('ext-dlg')); $('ext-dlg-close').focus();
+  }
+  async function refreshExt() {
+    const b = $('ext-refresh'); if (b.disabled) return; const keep = b.textContent; b.disabled = true; b.textContent = 'Checking…';
+    try {
+      const r = (await call('refreshPhoneCalendar')({})).data || {};
+      note(r.ok ? (r.tooSoon ? 'The phone calendar was updated a moment ago.' : 'Phone calendar updated: ' + (r.count === 1 ? '1 event.' : (r.count || 0) + ' events.')) : 'Could not read the phone calendar: ' + (EXT_WHY[r.error] || 'Google did not answer. Try again later.') + '.');
+    } catch (e) { note(errText(e)); }
+    b.disabled = false; b.textContent = keep;
   }
 
   // ---------- month grid (pure date arithmetic on Dublin calendar dates) ----------
@@ -220,6 +264,7 @@ window.APPT = (() => {
     $('cal-grid').closest('.cal-workspace').hidden = A.view !== 'calendar';
     $('cal-timeline').hidden = !['week', 'day'].includes(A.view);
     for (const id of ['cal-prev', 'cal-next', 'cal-today']) $(id).hidden = A.view === 'list';
+    renderExtBar();
     $('appts-list').hidden = A.view !== 'list';
     if (A.view === 'calendar') renderCalendar();
     else if (A.view === 'list') { $('cal-title').textContent = 'Upcoming appointments'; $('cal-status').textContent = ''; renderList(); }
@@ -299,15 +344,17 @@ window.APPT = (() => {
     const scrollLeft = oldScroll?.scrollLeft || 0, focused = document.activeElement?.dataset.focus;
     host.dataset.range = rangeKey;
     const visible = A.calList.filter(a => A.showCancelled || a.status !== 'cancelled');
-    const layouts = keys.map(k => CalendarLayout.layout(visible, k));
+    const phoneAll = A.calError ? [] : extShown(), phoneTimed = phoneAll.filter(e => !e.allDay);
+    const apptLayouts = keys.map(k => CalendarLayout.layout(visible, k));                // the hours shown follow the appointments only: a phone event at 06:00 does not stretch the day
+    const layouts = phoneTimed.length ? keys.map(k => CalendarLayout.layout(visible.concat(phoneTimed), k)) : apptLayouts;
     const mobile = window.matchMedia('(max-width: 899px)').matches;
     const scale = mobile ? 44 / 60 : Math.max(.65, Math.min(.8, (innerHeight - 300) / 720)), step = mobile ? 60 : 30;
-    const windowRange = CalendarLayout.windowFor(keys, layouts, A.fullHours);
+    const windowRange = CalendarLayout.windowFor(keys, apptLayouts, A.fullHours);
     const { minutes, starts } = windowRange;
     const dateLabel = key => new Date(key + 'T12:00:00Z').toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
     $('cal-title').textContent = A.view === 'day' ? dateLabel(A.selDay) : dateLabel(keys[0]) + ' – ' + dateLabel(keys.at(-1));
     $('cal-status').textContent = 'Irish time';
-    const status = el('p', 'time-status', A.calError || (!A.calLoaded ? 'Loading appointments…' : A.calLimited ? 'Showing the first 500 appointments. This schedule may be incomplete.' : 'Blank times show no Elite OS appointment. Travel time and Google-only events are not included.'));
+    const status = el('p', 'time-status', A.calError || (!A.calLoaded ? 'Loading appointments…' : A.calLimited ? 'Showing the first 500 appointments. This schedule may be incomplete.' : phoneAll.length ? 'Purple blocks come from your phone calendar (read-only). Travel time is not included.' : 'Blank times show no Elite OS appointment. Travel time and Google-only events are not included.'));
     status.setAttribute('role', 'status');
     const hours = button(A.fullHours ? 'Show 08:00–20:00' : 'Show all 24 hours', 'linkbtn time-hours', () => { A.fullHours = !A.fullHours; host.dataset.range = ''; render(); });
     hours.setAttribute('aria-pressed', String(!!A.fullHours));
@@ -321,6 +368,8 @@ window.APPT = (() => {
       head.setAttribute('aria-label', 'Open ' + longDay(key));
       if (key === dublinDate(Date.now())) head.setAttribute('aria-current', 'date');
       if (layouts[i].minutes !== 1440) head.append(el('small', null, layouts[i].minutes / 60 + '-hour day · clocks change'));
+      const allDayHere = phoneAll.filter(e => e.allDay && ts(e.start) < layouts[i].to && ts(e.end) > layouts[i].from);
+      if (allDayHere.length) head.append(el('small', 'time-allday', 'Phone: ' + allDayHere.slice(0, 2).map(e => e.title).join(' · ') + (allDayHere.length > 2 ? ' +' + (allDayHere.length - 2) : '')));
       grid.append(head);
     }
     const ruler = el('div', 'time-ruler'); ruler.style.height = minutes * scale + 18 + 'px';
@@ -354,6 +403,15 @@ window.APPT = (() => {
       }
       for (const event of layout.events) {
         const a = event.appointment;
+        if (a.external) {                    // a phone-calendar event: purple, clipped to the hours shown, opens a small read-only box
+          const top = Math.max(event.top, starts[i]), bottom = Math.min(event.top + event.duration, starts[i] + minutes); if (bottom <= top) continue;
+          const x = button('', 'time-event ext', () => openExt(a)); x.dataset.ext = a.id;
+          x.style.top = (top - starts[i]) * scale + 'px'; x.style.height = Math.max(16, (bottom - top) * scale) + 'px';
+          x.style.left = `calc(${event.column / event.columns * 100}% + 2px)`; x.style.width = `calc(${100 / event.columns}% - 4px)`;
+          const xl = `${extTime(a)} · ${a.title || 'Busy'}${a.location ? ' · ' + a.location : ''}`; x.title = xl + ' (from your phone calendar)'; x.setAttribute('aria-label', xl + ', from your phone calendar. Show details');
+          x.append(el('strong', null, a.title || 'Busy'), el('span', null, extTime(a))); if (bottom - top < 60) x.classList.add('time-event-short');
+          column.append(x); continue;
+        }
         const b = button('', 'time-event' + (a.status === 'cancelled' ? ' cancelled' : ''), () => openTimelineDetail(a));
         b.dataset.id = a.id; b.dataset.focus = 'event-' + key + '-' + a.id;
         b.style.top = (event.top - starts[i]) * scale + 'px'; b.style.height = event.duration * scale + 'px';
@@ -397,10 +455,10 @@ window.APPT = (() => {
     }
     const nodes = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => el('div', 'cal-dow', d));
     for (const k of monthCells(A.month)) {
-      const items = byDay.get(k) || [];
+      const items = byDay.get(k) || [], phoneEvents = extOnDay(k);
       const cell = el('div', 'cal-cell' + (sameMonth(k, A.month) ? '' : ' out') + (k === today ? ' today' : '') + (k === A.selDay ? ' sel' : ''));
       cell.dataset.day = k; cell.setAttribute('role', 'group');
-      cell.setAttribute('aria-label', longDay(k) + (items.length ? ', ' + items.length + ' appointment' + (items.length === 1 ? '' : 's') : ''));
+      cell.setAttribute('aria-label', longDay(k) + (items.length ? ', ' + items.length + ' appointment' + (items.length === 1 ? '' : 's') : '') + (phoneEvents.length ? ', ' + phoneEvents.length + ' from your phone calendar' : ''));
       if (k === today) cell.setAttribute('aria-current', 'date');
       const pick = el('button', 'cal-select', String(Number(k.slice(8)))); pick.type = 'button';
       pick.dataset.focus = 'day-' + k; pick.tabIndex = k === A.selDay ? 0 : -1;
@@ -421,9 +479,15 @@ window.APPT = (() => {
         more.onclick = (e) => { e.stopPropagation(); selectDay(k, items[0].id); };
         cell.append(more);
       }
-      if (items.length) {                  // on a phone the day shows dots instead of names
+      if (phoneEvents.length) {            // one purple chip: how many of the day come from the phone calendar (the day list below names them)
+        const chip = el('button', 'cal-ev ext'); chip.type = 'button'; chip.dataset.ext = String(phoneEvents.length);
+        chip.append(el('span', 'cal-ev-name', 'Phone · ' + phoneEvents.length)); chip.setAttribute('aria-label', phoneEvents.length + ' from your phone calendar on ' + longDay(k) + '. Show the day');
+        chip.onclick = (e) => { e.stopPropagation(); selectDay(k, null, true); }; cell.append(chip);
+      }
+      if (items.length || phoneEvents.length) {                  // on a phone the day shows dots instead of names
         const dots = el('div', 'cal-dots'); dots.setAttribute('aria-hidden', 'true');
         items.slice(0, 4).forEach((a) => { const d = el('span', 'cal-dot'); const st = stageOf(a); if (st) d.dataset.status = st; dots.append(d); });
+        if (phoneEvents.length) dots.append(el('span', 'cal-dot ext'));
         cell.append(dots);
       }
       cell.onclick = () => selectDay(k, null, true);
@@ -458,6 +522,16 @@ window.APPT = (() => {
     else if (!items.length && A.calLimited) body.append(el('p', 'agenda-message', 'The calendar result limit was reached. This day may be incomplete.'));
     else body.append(...items.map(agendaEntry));
     if (A.calLimited && items.length) body.append(el('p', 'agenda-message', 'Showing the first 500 appointments in this calendar range. This day may be incomplete.'));
+    const phoneEvents = A.calError ? [] : extOnDay(A.selDay);
+    if (phoneEvents.length) {                // below the appointments, in purple: from the phone calendar, read-only
+      const sec = el('section', 'agenda-ext'); sec.append(el('h3', 'agenda-ext-head', 'From your phone calendar · ' + phoneEvents.length));
+      for (const e of phoneEvents.slice().sort((a, b) => ts(a.start) - ts(b.start))) {
+        const row = el('button', 'agenda-ext-row'); row.type = 'button'; row.dataset.ext = e.id;
+        row.append(el('span', 'agenda-time', extTime(e)), el('strong', 'agenda-name', e.title || 'Busy'), el('span', 'agenda-place', e.location || ''));
+        row.onclick = () => openExt(e); sec.append(row);
+      }
+      body.append(sec);
+    }
     day.replaceChildren(head, nav, book, body);
     if (past) day.append(el('p', 'hint', 'Past appointments are shown for reference. Choose today or a future date to book.'));
   }
@@ -867,6 +941,8 @@ window.APPT = (() => {
   });
   window.addEventListener('resize', () => { endDrag(); closeMenu(); if (A.active && ['week', 'day'].includes(A.view)) render(); });
   $('appts-show-cancelled').addEventListener('change', (e) => { A.showCancelled = e.target.checked; render(); });
+  $('ext-show').checked = A.showExt; $('ext-show').addEventListener('change', (e) => { A.showExt = e.target.checked; try { localStorage.setItem(EXT_KEY, A.showExt ? '1' : '0'); } catch (x) { /* private mode */ } render(); });
+  $('ext-refresh').onclick = refreshExt; $('ext-dlg-close').onclick = () => closeDialog($('ext-dlg'));
   $('appts-view').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b && b.dataset.view !== A.view) setMode(b.dataset.view); });
   $('cal-prev').onclick = () => A.view === 'calendar' ? goMonth(addMonths(A.month, -1)) : stepDay(A.view === 'week' ? -7 : -1);
   $('cal-next').onclick = () => A.view === 'calendar' ? goMonth(addMonths(A.month, 1)) : stepDay(A.view === 'week' ? 7 : 1);

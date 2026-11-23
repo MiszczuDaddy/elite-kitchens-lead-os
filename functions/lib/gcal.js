@@ -96,6 +96,15 @@ function createCalendarClient({ apiBase = API_BASE, fetchImpl = fetch, tokens })
       if (r.status === 404 || r.status === 410) return null;
       throw classify(r.status, r.json);
     },
+    // The events of a calendar in a window, a repeating one as separate occurrences, newest data only (the phone-calendar import, docs/PHONE_CALENDAR.md). Read-only. The description of an event is not asked for.
+    async listEvents(calendarId, { timeMin, timeMax, pageToken, timeoutMs = 15000 } = {}) {
+      const q = new URLSearchParams({ singleEvents: 'true', orderBy: 'startTime', showDeleted: 'false', maxResults: '250', timeMin: new Date(timeMin).toISOString(), timeMax: new Date(timeMax).toISOString(),
+        fields: 'nextPageToken,items(id,status,summary,location,start,end,htmlLink,updated,visibility,transparency,eventType,attendees(self,responseStatus))' });
+      if (pageToken) q.set('pageToken', pageToken);
+      const r = await call(`${events(calendarId)}?${q.toString()}`, { timeoutMs });
+      if (r.ok && r.json) return { items: Array.isArray(r.json.items) ? r.json.items : [], next: r.json.nextPageToken || null };
+      throw classify(r.status, r.json);
+    },
     // Deleting something already deleted or never created counts as done.
     async deleteEvent(calendarId, eventId, { timeoutMs } = {}) {
       const r = await call(`${events(calendarId)}/${encodeURIComponent(eventId)}?sendUpdates=none`, { method: 'DELETE', timeoutMs });

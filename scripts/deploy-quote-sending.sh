@@ -49,6 +49,7 @@
 #   ./scripts/deploy-quote-sending.sh followuplist  The Assistant's follow-up LIST with tick boxes and a send time (docs/FOLLOW_UP_EMAIL.md): aiChat, aiDecide, sendQuoteFollowUp (exist already) and ONE new scheduled function, followUpSweep, that sends a list you approved for later (never in the Irish night). Nothing is sent by this stage.
 #   ./scripts/deploy-quote-sending.sh emailattach  View a customer's email attachments from the Emails page (docs/EMAIL_ATTACHMENTS.md): ONE new staff function, getEmailAttachment, that fetches the one file from Gmail when you click View (nothing is stored). Needs the email inbox on (emailin). Nothing is sent. Then run live.
 #   ./scripts/deploy-quote-sending.sh assistantread  The Assistant can see everything (docs/AI.md, 22 Nov 2026): ONE function that already exists, aiChat, gets five more read-only look-up tools (what is in a quote, emails, what happened, the price list, find anything). Nothing is changed or sent; nothing to switch on.
+#   ./scripts/deploy-quote-sending.sh phonecal [on|off]  Your phone calendar on the Calendar screen (docs/PHONE_CALENDAR.md): once a day at midnight Elite OS READS your business Google Calendar (never changes it) and shows it in purple. No argument: deploys the 2 new functions (calendarImport, refreshPhoneCalendar), switched OFF. "on" asks for the calendar's address, tells you how to share it with Elite OS, and switches it on. "off": the kill switch.
 #   ./scripts/deploy-quote-sending.sh asap       The ⭐ "wants it as soon as possible" (docs/ASAP_STAR.md): leadIntake and updateContact (both exist already). Nothing is sent to anyone. Then run node scripts/mark-asap-leads.js for the existing leads, then "live".
 #   ./scripts/deploy-quote-sending.sh welcome    The welcome switch (docs/WELCOME_SWITCH.md): leadIntake, the receptionist and 4 assistant functions. It changes NO message by itself: the standard welcome goes out until the owner picks the new one in Assistant > Settings. Run it BEFORE "live".
 #   ./scripts/deploy-quote-sending.sh search     The Inbox "All" tab and the search across every customer (docs/INBOX_ALL_AND_SEARCH.md): ONE new read-only function (customerDirectory). Run it BEFORE "live". No existing function is touched; nothing is sent.
@@ -102,6 +103,7 @@ EMAILLIST_FUNCS="emailSweep checkEmail sendEmailReply sendFollowUpEmail sendQuot
 FOLLOWLIST_FUNCS="followUpSweep aiChat aiDecide sendQuoteFollowUp"                                                           # the follow-up list: the new five-minute timer (scheduled, first on purpose: it has no web address) + the Assistant and the quote follow-up that share the new code
 EMAILATTACH_FUNCS="getEmailAttachment"                                                                                  # View an email attachment: the one new staff function (reads the file from Gmail when asked; nothing is stored)
 AIREAD_FUNCS="aiChat"                                                                                                   # the Assistant can see everything: the one function that runs the look-up tools gets five more (read-only)
+PHONECAL_FUNCS="calendarImport refreshPhoneCalendar"                                                                  # the phone calendar: the midnight check (scheduled) and the Refresh now button (staff only, made public)
 PDFSHARE_FUNCS="quotePdfUrl"                                                                                           # Share PDF: the existing PDF link function can also return the file itself (the screen's Share button asks for it)
 NIGHTHOLD_FUNCS="leadIntake welcomeSweep"                                                                             # no welcome at night: the live lead intake (exists) holds it, the new five-minute sweep sends it from 07:00
 SEARCH_FUNCS="customerDirectory"                                                                                # the Inbox "All" tab and search: one new read-only staff function (made public: it checks the signed-in staff account itself)
@@ -117,7 +119,7 @@ default_of() { case "$1" in WHATSAPP_API_VERSION) echo v21.0 ;; GCAL_SYNC) echo 
 cd "$(dirname "$0")/.."
 . ./scripts/lib-routing.sh
 
-usage() { sed -n '2,62p' "$0" | sed 's/^# *//'; exit 1; }
+usage() { sed -n '2,63p' "$0" | sed 's/^# *//'; exit 1; }
 svc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 has() { grep -qE "^$2=" "$1"; }
 value() { { grep -E "^$2=" "$1" || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'; }
@@ -580,6 +582,48 @@ case "${1:-}" in
     install; save_revisions $AIREAD_FUNCS; deploy_functions $AIREAD_FUNCS
     check_reachable "$AIREAD_FUNCS"
     echo "Done. To go back: git checkout <the earlier commit> -- functions, then firebase deploy --only functions:aiChat --project $PROJECT (the Assistant then has its earlier twelve tools)."
+    ;;
+  phonecal)
+    [ -f functions/lib/calendarImport.js ] || { echo "This checkout has no phone calendar code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }
+    [ -f "$ENVF" ] || { echo "Missing $ENVF. Stop here."; exit 1; }
+    case "${2:-}" in
+      on|off)
+        check_routing $PHONECAL_FUNCS
+        [ -n "$(serving_revision calendarimport)" ] || { echo "Deploy the phone calendar functions first: $0 phonecal"; exit 1; }
+        if [ "$2" = on ]; then
+          sa=$(value "$ENVF" GCAL_SERVICE_ACCOUNT); [ -n "$sa" ] || { echo "GCAL_SERVICE_ACCOUNT is not in $ENVF: the appointments calendar has to be set up first (scripts/deploy-appointments.sh)."; exit 1; }
+          cur=$(value "$ENVF" GCAL_IMPORT_CALENDAR_ID); read -r -p "The address of the Google Calendar your phone shows (your business account's email${cur:+, Enter keeps $cur}): " cal; cal="${cal:-$cur}"
+          printf '%s' "$cal" | grep -qE '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' || { echo "That does not look like an email address. Stop here."; exit 1; }
+          echo "Elite OS will READ that calendar once a day at midnight (Irish time): the title, place and time of each event, 2 weeks back to 6 months ahead. It never changes, adds or deletes anything in it."
+          echo "This needs ONE step from you first, in Google Calendar (on a computer: calendar.google.com, signed in as $cal):"
+          echo "  1. In the left list, hover over your calendar > the three dots > Settings and sharing"
+          echo "  2. Under \"Share with specific people or groups\" choose Add people and groups"
+          echo "  3. Paste this address:  $sa"
+          echo "  4. Set the permission to  See all event details  (NOT \"make changes\") and press Send"
+          confirm "Is it shared like that, and do you want Elite OS to read it every midnight?"
+          setting "$ENVF" GCAL_IMPORT_CALENDAR_ID "$cal"; setting "$ENVF" GCAL_IMPORT on
+        else confirm "Switch reading your phone calendar off? (what is already copied stays on the screen until the next midnight check is switched back on)"; setting "$ENVF" GCAL_IMPORT off; fi
+        install; save_revisions $PHONECAL_FUNCS; deploy_functions $PHONECAL_FUNCS
+        echo "The phone calendar is $2. Kill switch: $0 phonecal off"
+        if [ "$2" = on ]; then
+          gcloud scheduler jobs run "firebase-schedule-calendarImport-$REGION" --location "$REGION" --project "$PROJECT" >/dev/null 2>&1 && echo "   The first check has been started. Open Appointments in a minute." || echo "   Open Appointments and press Refresh now to run the first check (or wait for midnight)."
+          echo "If it says the calendar is not shared yet, the sharing step above is not finished."
+        fi
+        ;;
+      "")
+        check_settings; check_access; check_routing $PHONECAL_FUNCS
+        has "$ENVF" GCAL_IMPORT || setting "$ENVF" GCAL_IMPORT off; has "$ENVF" GCAL_IMPORT_CALENDAR_ID || setting "$ENVF" GCAL_IMPORT_CALENDAR_ID ""
+        echo "Functions: $PHONECAL_FUNCS"
+        echo "New: calendarImport (once a day at midnight Irish time) and refreshPhoneCalendar (the Refresh now button; staff only). Both stay OFF until you run: $0 phonecal on. They only READ Google Calendar, with the same Google access as the appointments calendar. NOT deployed: the WhatsApp webhook. Nothing is sent to any customer."
+        confirm "Deploy the phone calendar functions (switched off) to the LIVE project?"
+        install; deploy_functions $PHONECAL_FUNCS
+        echo "==> making the new staff function reachable (it checks the signed-in staff account itself)"
+        gcloud run services add-iam-policy-binding "$(svc refreshPhoneCalendar)" --region "$REGION" --project "$PROJECT" --member=allUsers --role=roles/run.invoker --quiet >/dev/null && echo "   public: refreshPhoneCalendar"
+        check_reachable "refreshPhoneCalendar"
+        echo "Done. Next: $0 live (the screen), then $0 phonecal on. To go back: firebase functions:delete $PHONECAL_FUNCS --region $REGION --project $PROJECT"
+        ;;
+      *) usage ;;
+    esac
     ;;
   pdfshare)
     grep -q "SHARE_MAX" functions/lib/quotes.js || { echo "This checkout has no Share PDF code. Update it first: git fetch origin && git checkout <the branch Claude named> && git pull"; exit 1; }

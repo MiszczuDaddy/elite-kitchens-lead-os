@@ -138,7 +138,7 @@ const ph = { lead: '353860000001', quoted: '353860000002', closed: '353860000003
   await bookFor(ph.quoted, 'quoted');
   await custMsg(/stays in Quoted/);
   assert.equal((await db.doc('conversations/' + ph.quoted).get()).data().inboxStatus, 'quoted');
-  await bookFor(ph.closed, 'closed', { date: D2, time: '09:00' });
+  await bookFor(ph.closed, 'all', { date: D2, time: '09:00' });          // the Closed tab was removed (Pipeline: no Closed column or tab): a closed customer is found under All
   await custMsg(/stays in Closed/);
   assert.equal((await db.doc('conversations/' + ph.closed).get()).data().inboxStatus, 'closed');
   await page.click('#d-appt-new'); await page.waitForSelector('#appt-dlg[open]');

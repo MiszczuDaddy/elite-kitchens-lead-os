@@ -1441,3 +1441,22 @@ div.td-open { cursor: default; }
 .as-when { margin: 10px 0 0; } .as-when-row { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 13.5px; cursor: pointer; } .as-when-row input { width: 18px; height: 18px; accent-color: var(--accent); }
 .as-when-time { margin: 2px 0 4px 26px; min-height: 38px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 @media (max-width: 899px) { .as-pick-row { min-height: 44px; align-items: center; } .as-when-row { min-height: 44px; } .as-pick-list { max-height: clamp(110px, 20vh, 260px); } .as-when-time { font-size: 16px; min-height: 44px; } }
+
+/* The phone calendar on the Calendar screen (23 Nov 2026): its own colour, purple, so it can never be taken for an Elite OS appointment. Read-only. */
+.appts-pane { --phone: #6d4aa3; --phone-bg: #efe9f8; }
+.ext-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; color: var(--muted); }
+.appts-head .ext-bar { margin-left: auto; } .appts-head .ext-bar:not([hidden]) + .appts-toggle { margin-left: 0; }          /* in the page header, so the calendar below does not move down */
+.ext-bar[hidden] { display: none; }
+.ext-bar .appts-toggle { margin-left: 0; display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+.ext-swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--phone-bg); border: 1px dashed var(--phone); }
+.ext-status.bad { color: var(--err); }
+.cal-ev.ext { border-left-color: var(--phone); background: var(--phone-bg); color: #3f2a6b; }
+.cal-dot.ext { background: var(--phone); }
+.time-event.ext { background: var(--phone-bg); border: 1px dashed var(--phone); color: #3f2a6b; }
+.time-event.ext:hover { background: #e4daf4; }
+.time-allday { color: var(--phone); font-weight: 600; white-space: normal; }
+.agenda-ext { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--phone); }
+.agenda-ext-head { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--phone); }
+.agenda-ext-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; width: 100%; min-height: 40px; padding: 8px 10px; margin: 0 0 6px; border: 0; border-left: 4px solid var(--phone); border-radius: 4px; background: var(--phone-bg); color: #3f2a6b; font: inherit; text-align: left; cursor: pointer; }
+.agenda-ext-row .agenda-place { color: #6b5a8e; }
+@media (max-width: 899px) { .agenda-ext-row { min-height: 44px; } .ext-bar { font-size: 14px; flex: 1 1 100%; justify-content: space-between; margin-left: 0; } .ext-bar .ext-status { order: 3; flex: 1 1 100%; } .ext-bar .linkbtn, .ext-bar .appts-toggle { min-height: 44px; display: inline-flex; align-items: center; } .ext-bar .linkbtn { padding: 0 8px; } .ext-bar input[type=checkbox] { width: 20px; height: 20px; } }

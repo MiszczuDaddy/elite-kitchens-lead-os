@@ -446,6 +446,15 @@ const checkEmail = async (auth, data, deps) => {
 // "View" on an email's attachment (Emails page): the one file, fetched from Gmail when asked, never stored (docs/EMAIL_ATTACHMENTS.md). Staff only.
 const emailAttachmentLib = require('./emailAttachment');
 const getEmailAttachment = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return emailAttachmentLib.fetchOne({ db: deps.db, inbox: deps.inbox }, actorOf(auth), data); };
+// "Refresh now" for the phone calendar on the Calendar screen (docs/PHONE_CALENDAR.md): the midnight check, started by a person, at most once every five minutes. Staff only; it only READS the calendar.
+const calendarImportLib = require('./calendarImport');
+const refreshPhoneCalendar = async (auth, data, deps) => {
+  assertStaff(auth, deps.cfg);
+  if (data != null && (typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length)) throw new HttpsError('invalid-argument', 'Nothing to send here.');
+  if (!deps.phoneCal || !deps.phoneCal.enabled || !deps.gcal) throw new HttpsError('failed-precondition', 'The phone calendar is not switched on yet.');
+  const r = await calendarImportLib.refresh({ db: deps.db, gcal: deps.gcal, calendarId: deps.phoneCal.calendarId, nowMs: deps.nowMs });
+  return r.ok ? { ok: true, count: r.count, ...(r.tooSoon ? { tooSoon: true } : {}), ...(r.truncated ? { truncated: true } : {}) } : { ok: false, error: r.error };
+};
 const sendQuoteFollowUp = async (auth, data, deps) => { assertStaff(auth, deps.cfg); return quoteFollowUpLib.send({ db: deps.db, mailer: deps.mailer }, actorOf(auth), data); };
 const todayLib = require('./today');
 const saveReminder = staffAction(todayLib.saveReminder);
@@ -476,7 +485,7 @@ async function quoteChannels(auth, data, deps) {
   return { whatsapp: { enabled: true, template: !!deps.quoteTemplate }, email: { enabled: !!deps.mailEnabled, sender: deps.mailEnabled ? deps.mailSender || null : null } };
 }
 
-module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, sendQuoteFollowUp, sendEmailReply, checkEmail, getEmailAttachment, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
+module.exports = { customerDirectory, resolveBookingNotice, saveReminder, snoozeQuote, dismissReply, sendFollowUpEmail, sendQuoteFollowUp, sendEmailReply, checkEmail, getEmailAttachment, refreshPhoneCalendar, setDoNotContact, attentionAction, reopenConversation, deliverQuote, retryQuoteDelivery, resolveQuoteDelivery, cancelQuoteSend, markQuoteSent, quoteChannels, createCustomer, saveQuoteSettings, setQuoteNumbering, createQuote, saveQuoteDraft, sendQuote, acceptQuote, declineQuote, reopenQuote,
   reviseQuote, discardQuoteDraft, deleteQuoteDraft, setQuoteNotes, quotePdfUrl,
   registerPushDevice, unregisterPushDevice, sendTestPush, pushReceipt, aiChat, aiStatus, setAiSettings, aiCheckModels, aiDecide, aiSuggestReply, aiDraftOutcome, aiDismissConsult, setReceptionist, aiKnowledge, aiKnowledgeTest,
   createProject, saveProject, setProjectStep, completeProject, removeProject, attachProjectRender, projectRenderUrl,

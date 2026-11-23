@@ -124,6 +124,23 @@ exports.calendarSweep = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Eur
   console.log(JSON.stringify({ level: 'info', msg: 'calendar sweep', ...r }));
 });
 
+// ---- The phone calendar in Elite OS (23 Nov 2026, docs/PHONE_CALENDAR.md): once a day at midnight (Irish time) the business Google Calendar your phone shows is READ (never changed) and shown on the Calendar screen in its own colour.
+// Off unless GCAL_IMPORT=on and GCAL_IMPORT_CALENDAR_ID is set (the calendar's own address, shared with the same service account as the appointments calendar, "see all event details" only).
+const calendarImportLib = require('./lib/calendarImport');
+const GCAL_IMPORT = defineString('GCAL_IMPORT', { default: 'off' });
+const GCAL_IMPORT_CALENDAR_ID = defineString('GCAL_IMPORT_CALENDAR_ID', { default: '' });
+function phoneCalDeps() {
+  const base = calendarDeps(), calendarId = GCAL_IMPORT_CALENDAR_ID.value().trim(), testBase = process.env.FUNCTIONS_EMULATOR === 'true' ? process.env.GCAL_API_BASE : undefined;
+  const enabled = GCAL_IMPORT.value().trim().toLowerCase() === 'on' && !!calendarId && (!!GCAL_SERVICE_ACCOUNT.value().trim() || !!testBase);
+  return { db: getFirestore(), cfg: { allowedEmails: ALLOWED_EMAILS.value() }, gcal: base.gcal, phoneCal: { enabled, calendarId } };
+}
+exports.calendarImport = onSchedule({ schedule: '0 0 * * *', timeZone: 'Europe/Dublin', timeoutSeconds: 180, retryCount: 0 }, async () => {
+  const d = phoneCalDeps(); if (!d.phoneCal.enabled) return;
+  try { const r = await calendarImportLib.run({ db: d.db, gcal: d.gcal, calendarId: d.phoneCal.calendarId, by: 'midnight' }); console.log(JSON.stringify({ level: r.ok ? 'info' : 'error', msg: 'phone calendar check', ok: r.ok, count: r.count, written: r.written, removed: r.removed, error: r.error })); }
+  catch (e) { console.log(JSON.stringify({ level: 'error', msg: 'phone calendar check failed', code: String((e && e.code) || 'unknown').slice(0, 60) })); }
+});
+exports.refreshPhoneCalendar = onCall({ timeoutSeconds: 120 }, (req) => h.refreshPhoneCalendar(req.auth, req.data, phoneCalDeps()));
+
 // ---- Phase 6: quotes, and customers added without a message (docs/QUOTES.md). Staff-only callables holding no WhatsApp or
 // Google secrets (least privilege). Apart from deleteCustomer (which now also erases the customer's quotes and stored quote
 // PDFs) and updateContact (which now also accepts an optional address), no existing function above is touched.
